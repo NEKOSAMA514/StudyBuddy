@@ -192,7 +192,7 @@ def collect_conda_licenses(work, package):
 
 
 def third_party_notices():
-    return ("StudyBuddy — 第三方声明\n\n项目自有代码：MIT，Copyright (c) 2026 NEKOSAMA。\n"
+    return ("StudyBuddy — 第三方声明\n\n项目自有代码：GPLv3（GPL-3.0-only），Copyright (c) 2026 NEKOSAMA。\n"
             "第三方软件和模型保留各自许可，本页列出随包材料位置。\n"
             "Python、Conda 和前端依赖的许可证、版权与来源分别位于 licenses/python、conda、frontend；准确版本和哈希见 release-manifest.json。\n"
             "模型的权利归属、固定来源和哈希对应的授权说明见 licenses/models。StudyBuddy 原样复制权重，没有训练或修改。\n"

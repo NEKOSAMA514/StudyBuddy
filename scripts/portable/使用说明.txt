@@ -32,6 +32,6 @@ Windows 若在服务完成退出后询问“终止批处理操作吗 / Terminate
 范围与许可
 本包不含个人数据、凭据、测试结果、开发工具或开发目录的配置。
 生成笔记会访问用户选择的模型 API；MinerU 解析会上传 PDF。使用前确认相应服务的条款和额度。
-项目源码采用 MIT；第三方组件按各自许可提供，见 LICENSE、THIRD_PARTY_NOTICES.txt 和 licenses。
+项目自有源码采用 GPLv3（GPL-3.0-only）；第三方组件按各自许可提供，见 LICENSE、THIRD_PARTY_NOTICES.txt 和 licenses。
 release-manifest.json 记录版本、来源、文件 SHA-256 与公开发布前待办。
 本机验证不能代替未安装开发工具的 Windows 10 和 Windows 11 x64 验收。

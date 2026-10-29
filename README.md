@@ -5,15 +5,15 @@
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB?style=flat-square&logo=react)
 ![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)
-[![License](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 
 StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、PDF 或课件后，使用本地识别提取内容，再通过你配置的模型 API 生成笔记。
 
 阅读时，可以跳回视频中的对应时间点，查看文档的提取内容与来源位置；复习时，可以搜索笔记、标记重点，或导出 Markdown 和纯文本。
 
-**Windows x64 · 本地运行 · 视频与文档 · MIT**
+**Windows x64 · 本地运行 · 视频与文档 · GPLv3**
 
-[功能特性](#功能特性) · [快速开始](#快速开始) · [开发与构建](#开发与构建) · [使用文档](#使用文档)
+[功能特性](#功能特性) · [开发与构建](#开发与构建) · [使用文档](#使用文档)
 
 ## 功能特性
 
@@ -52,47 +52,6 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 提取完成后即可查看材料。生成失败或预检未通过时，已保存的提取内容仍可阅读。
 
 复杂排版、公式、扫描页及特殊图表可能无法完整还原，请结合来源核对。
-
-## 快速开始
-
-### Windows 便携版
-
-便携包已包含独立 Python、FFmpeg、默认 Paraformer 语音模型和 RapidOCR 模型，无需另外安装 Python、Node.js 或 Conda，默认使用 CPU。
-
-使用流程：
-
-1. 获取 `StudyBuddy-v0.1.0-windows-x64-preview.zip`，完整解压到固定、可写的目录。
-2. 双击 `启动.cmd`，等待首次环境准备，浏览器会自动打开。
-3. 在“设置 → API设置”中填写 API 地址、密钥和模型 ID。
-4. 导入视频或文档，点击“开始处理”，确认本次配置后生成笔记。
-
-退出时，在启动窗口按一次 **Ctrl+C**，等待程序完成清理。关闭浏览器不会停止后台服务。
-
-> 当前处于 v0.1.0 预览阶段，新名称的便携包需重新构建，尚未提供公开下载入口。Windows 10/11 干净系统及真实云端服务验收仍待完成。
->
-> 首次环境准备后，请保持程序目录及其父目录的位置和名称不变。需要移动或升级时，重新解压原始 ZIP，再迁移资料。
-
-详细说明见 [Windows 便携包](docs/portable.md)。
-
-### 从源码运行
-
-准备 Windows 和 Conda。环境配置会一并安装 Python、FFmpeg/FFprobe、Node.js/npm 及后端依赖。下载源码并进入项目根目录后执行：
-
-```powershell
-conda env create -f environment.yml
-conda activate studybuddy
-
-cd frontend
-npm ci
-npm run build
-cd ..
-
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1
-```
-
-启动后访问：<http://localhost:18000>
-
-首次使用时，在设置中配置模型 API，并准备需要的语音识别模型。完整步骤见 [安装与使用](docs/usage.md)。
 
 ## 本地处理与数据说明
 
@@ -175,6 +134,6 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 ## License
 
-项目源码采用 [MIT License](LICENSE)，Copyright (c) 2026 NEKOSAMA。
+项目自有源码采用 [GNU General Public License v3.0](LICENSE)（`GPL-3.0-only`），Copyright (c) 2026 NEKOSAMA。
 
 第三方库、工具和模型分别遵循各自许可。便携包附带相应声明与许可材料；当前公开分发前的第三方许可核对仍待完成。
