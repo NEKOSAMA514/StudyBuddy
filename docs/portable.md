@@ -49,7 +49,7 @@ dist/StudyBuddy-v0.1.0-windows-x64-preview.zip
 dist/StudyBuddy-v0.1.0-windows-x64-preview.zip.sha256
 ```
 
-公开发布前需逐项审查第三方许可。脚本收集 Python 许可／METADATA、PDFium 随包材料、Conda 库许可和来源、前端依赖许可、FFmpeg 原始材料与所指向的上游源码、模型卡。FFmpeg 所链接库等的完整对应源码义务不能仅靠一份上游源码解决；未确认项写入第三方声明与清单，不标为正式分发成品。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)要求每个附件小于 2 GiB。
+第三方说明集中在包内 `THIRD_PARTY_NOTICES.txt`，原始许可和模型授权保存在 `licenses/`。构建脚本补收已确认缺失的四份许可证和 ONNX Runtime 第三方声明，保留模型来源及 RapidOCR 的权重授权说明。依赖版本和源码出处见包内清单；FFmpeg 所有外部依赖及实际构建材料尚未全部取得，不能把现有的本体源码或来源链接表述为完整对应源码。该项保留说明，不为所有依赖新增源码下载或版本阻断流程。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)要求每个附件小于 2 GiB。
 
 ## 验证与记录
 

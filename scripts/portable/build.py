@@ -15,12 +15,11 @@ import zipfile
 
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip"
 FFMPEG_HASH = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+LICENSE_ASSETS = Path(__file__).with_name("licenses")
 PUBLICATION_TODOS = [
     "Windows 10 和 Windows 11 x64 干净系统验收尚未完成。",
     "真实云端模型和 MinerU API 验收尚未完成。",
-    "FFmpeg GPLv3 构建的完整对应源码、所链接库源码、构建脚本及分发义务须逐项复核；仅上游源码不等于完整对应源码。",
-    "Python 原生二进制（含 PyAV、PDFium、Deno、CTranslate2 等）和 Conda 基础库的嵌入依赖、版权及对应源码义务须人工审查。",
-    "模型权重的上游授权链及 RapidOCR 所附 PaddleOCR 模型的许可范围须人工确认。",
+    "独立 FFmpeg 及 PyAV 所带 FFmpeg 的完整构建材料尚未全部取得，现有源码出处见 THIRD_PARTY_NOTICES.txt。",
     "正式包必须从已提交源码重建，并确认 GitHub 单附件小于 2 GiB。",
 ]
 
@@ -128,10 +127,15 @@ def collect_models(root, package):
             results[identifier] = {"distribution": "rapidocr", "version": metadata.version("rapidocr"),
                                    "source": "https://github.com/RapidAI/RapidOCR"}
         results[identifier]["files"] = {name: sha256(target / name) for name in spec["files"]}
+    copy_file(LICENSE_ASSETS / "flatbuffers.LICENSE", package / "licenses/models/LICENSE-APACHE-2.0.txt")
+    distribution = metadata.distribution("rapidocr")
+    notice = next(entry for entry in distribution.files or [] if PurePosixPath(str(entry)).name == "MODEL_LICENSES.md")
+    copy_file(Path(distribution.locate_file(notice)), package / "licenses/models/rapidocr/MODEL_LICENSES.md")
     return results
 
 
 def collect_python_licenses(package):
+    supplements = json.loads((LICENSE_ASSETS / "sources.json").read_text(encoding="utf-8"))
     distributions = []
     for distribution in sorted(metadata.distributions(), key=lambda value: value.metadata["Name"].lower()):
         name = distribution.metadata["Name"]
@@ -145,15 +149,27 @@ def collect_python_licenses(package):
             path = PurePosixPath(str(entry).replace("\\", "/"))
             if ".." in path.parts or path.is_absolute() or "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
                 continue
-            if any(re.match(r"^(licen[sc]e|copying|notice|authors|copyright)", part, re.I) for part in path.parts):
+            if any(re.match(r"^(licen[sc]e|copying|notice|authors|copyright|third[-_ ]?party)", part, re.I) for part in path.parts):
                 source = Path(distribution.locate_file(entry))
                 if source.is_file():
                     copy_file(source, directory / path)
                     found.append(str(path))
+        # 补齐已确认没有自带许可文件的发行包，限定版本并核对上游原文哈希。
+        supplement = None
+        key = re.sub(r"[-_.]+", "-", name).lower()
+        candidate = supplements.get(key)
+        if not found and candidate and candidate["version"] == distribution.version:
+            supplement = candidate
+            payload = (LICENSE_ASSETS / supplement["file"]).read_text(encoding="utf-8").encode("utf-8")
+            if hashlib.sha256(payload).hexdigest() != supplement["sha256"]:
+                raise RuntimeError(f"Supplemental license SHA-256 mismatch: {name}")
+            (directory / "LICENSE").write_bytes(payload)
+            found.append("LICENSE")
         distributions.append({"name": name, "version": distribution.version,
                               "license": distribution.metadata.get("License-Expression") or distribution.metadata.get("License"),
                               "project_urls": distribution.metadata.get_all("Project-URL", []),
-                              "license_files": found, "review": "pending" if not found else "collected; binary audit pending"})
+                              "license_files": found, "supplemental_license": supplement,
+                              "review": "license files collected" if found else "license file missing"})
     return distributions
 
 
@@ -173,6 +189,19 @@ def collect_conda_licenses(work, package):
         records.append({key: record.get(key) for key in ("name", "version", "build", "build_number", "channel", "url", "sha256", "md5", "license")})
     copy_file(work / "conda-explicit.txt", package / "licenses/conda-explicit.txt")
     return records
+
+
+def third_party_notices():
+    return ("StudyBuddy — 第三方声明\n\n项目自有代码：MIT，Copyright (c) 2026 NEKOSAMA。\n"
+            "第三方软件和模型保留各自许可，本页列出随包材料位置。\n"
+            "Python、Conda 和前端依赖的许可证、版权与来源分别位于 licenses/python、conda、frontend；准确版本和哈希见 release-manifest.json。\n"
+            "模型的权利归属、固定来源和哈希对应的授权说明见 licenses/models。StudyBuddy 原样复制权重，没有训练或修改。\n"
+            "独立 FFmpeg 来自 Gyan 9.0.2 GPLv3 构建；PyAV 所带的 FFmpeg、Shapely 所带 GEOS 及其他组件按其各自许可处理。\n"
+            "独立 FFmpeg 的原始许可证、构建 README 和本体源码见 licenses/ffmpeg。\n"
+            "PyAV 对应源码与构建出处：https://github.com/PyAV-Org/PyAV/tree/v15.1.0 及 https://github.com/PyAV-Org/pyav-ffmpeg/tree/7.1.1-6 。\n"
+            "GEOS 3.14.1 对应源码：https://download.osgeo.org/geos/geos-3.14.1.tar.bz2 。\n"
+            "上述源码位置不表示两套 FFmpeg 所有外部依赖的完整构建材料已经取得；独立工具的上游请求渠道见 https://github.com/GyanD/codexffmpeg/issues/249 。\n\n"
+            "尚未完成事项：\n" + "\n".join("- " + item for item in PUBLICATION_TODOS) + "\n")
 
 
 def collect_frontend_licenses(frontend, package):
@@ -227,6 +256,7 @@ def main(args):
     backend, frontend_files = tracked_inputs(root)
     source_files = backend + frontend_files + ["backend/requirements.lock", "LICENSE", "scripts/build-portable.ps1",
         "scripts/portable/build.py", "scripts/portable/launcher.py", "scripts/portable/启动.cmd", "scripts/portable/使用说明.txt"]
+    source_files += [str(path.relative_to(root)).replace("\\", "/") for path in sorted(LICENSE_ASSETS.iterdir()) if path.is_file()]
     input_hashes = {name: sha256(root / name) for name in source_files}
     for name in backend:
         copy_file(root / name, package / name)
@@ -247,16 +277,7 @@ def main(args):
     models = collect_models(root, package)
     dependencies = collect_python_licenses(package)
     conda = collect_conda_licenses(work, package)
-    notices = ("StudyBuddy 本机验证预览包 — 第三方声明\n\n项目代码：MIT，Copyright (c) 2026 NEKOSAMA。\n"
-               "第三方软件及模型按各自许可提供，项目 MIT 不覆盖它们。\n"
-               "Python 包的 METADATA、许可和版权位于 licenses/python；PDFium 相关材料也在 pypdfium2 目录及 runtime 包内。\n"
-               "Conda 基础库的准确版本、构建、来源及许可见 licenses/conda 和 conda-explicit.txt。\n"
-               "前端依赖许可见 licenses/frontend，完整依赖版本见 release-manifest.json。\n"
-               "FFmpeg 9.0.2 Gyan essentials 构建为 GPLv3，附 LICENSE、原始 README 和其引用的上游源码。\n"
-               "Paraformer 来源为锁定 Hugging Face revision，附模型卡；RapidOCR 权重直接来自锁定 wheel。\n"
-               "yt-dlp、yt-dlp-ejs 和 Deno 来自后端锁文件，不下载远端脚本作为运行前提。\n\n"
-               "公开发布前待办（本包不是完成审查的分发成品）：\n" + "\n".join("- " + item for item in PUBLICATION_TODOS) + "\n")
-    (package / "THIRD_PARTY_NOTICES.txt").write_text(notices, encoding="utf-8")
+    (package / "THIRD_PARTY_NOTICES.txt").write_text(third_party_notices(), encoding="utf-8")
     environment_archive = work / "runtime.zip"
     run([args.build_python, "-I", "-m", "conda_pack.cli", "--prefix", work / "env", "--output", environment_archive,
          "--format", "zip", "--compress-level", "4", "--exclude", "*.pyc", "--exclude", "*.pyo",
