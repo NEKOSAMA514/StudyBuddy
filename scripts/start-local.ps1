@@ -11,7 +11,7 @@ $pythonPath = (Get-Command python -ErrorAction Stop).Source
 & $pythonPath -c "import sys; assert sys.version_info[:2] == (3, 12), 'StudyBuddy requires Python 3.12'"
 if ($LASTEXITCODE -ne 0) { throw '请使用 studybuddy 的 Python 3.12 环境。' }
 foreach ($tool in @('ffmpeg', 'ffprobe')) {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "缺少 $tool，请在 Conda 环境安装 ffmpeg。" }
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "缺少 $tool，请按 environment.yml 补齐当前 Conda 环境，或运行 scripts/install-ffmpeg.ps1。" }
 }
 Push-Location $studyRoot
 try {

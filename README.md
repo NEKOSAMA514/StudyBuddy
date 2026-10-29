@@ -76,12 +76,11 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 
 ### 从源码运行
 
-准备 Windows、Conda 和满足前端依赖要求的 Node.js/npm。下载源码并进入项目根目录后执行：
+准备 Windows 和 Conda。环境配置会一并安装 Python、FFmpeg/FFprobe、Node.js/npm 及后端依赖。下载源码并进入项目根目录后执行：
 
 ```powershell
 conda env create -f environment.yml
 conda activate studybuddy
-conda install -c conda-forge ffmpeg
 
 cd frontend
 npm ci

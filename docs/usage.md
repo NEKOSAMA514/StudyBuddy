@@ -6,14 +6,13 @@
 
 使用 Windows x64 便携预览包时，无需执行下面的源码安装步骤。完整解压后双击 `启动.cmd`，等待首次环境准备；默认打开 `127.0.0.1:18000`，占用时自动选择 18000—18019 中的空闲端口。新用户凭据为空，在页面配置。保留控制台，按一次 Ctrl+C 正常退出；关闭浏览器不会停机。目录固定、错误处理及升级见 [便携包说明](portable.md)。预览包不代表已通过干净系统验收。
 
-当前使用 Windows、Miniconda 和 Python 3.12。另行准备 Node.js/npm、FFmpeg 和 FFprobe；Node 版本需满足所装 Vite 的运行要求，可查 [前端锁定依赖](../frontend/package-lock.json)。
+当前使用 Windows 和 Miniconda。[环境配置](../environment.yml)统一安装 Python 3.12、Node.js 24（含 npm）和 FFmpeg/FFprobe。FFmpeg 选择包含现有视频预览所需 `libx264` 编码器的构建；前端依赖由 `npm ci` 按[锁文件](../frontend/package-lock.json)安装。
 
 在 Miniconda Prompt 中先进入仓库根目录，再依次执行：
 
 ```bat
 conda env create -f environment.yml
 conda activate studybuddy
-conda install -c conda-forge ffmpeg
 cd frontend
 npm ci
 npm run build
@@ -21,7 +20,7 @@ cd ..
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1
 ```
 
-环境定义见 [environment.yml](../environment.yml)。已经创建的环境不必重复安装；本机原有 `studyflow` 环境可继续使用，将激活命令改为实际环境名。已有可用 FFmpeg 时也无需重复安装；项目另有 [FFmpeg 安装工具](../scripts/install-ffmpeg.ps1)。
+Python 依赖由 [requirements.txt](../backend/requirements.txt)安装，Deno 与 EJS 由已有的 yt-dlp extras 一并安装；语音模型权重仍在设置页按需准备。已经创建且依赖齐全的环境不必重复安装；本机原有 `studyflow` 环境可继续使用，将激活命令改为实际环境名。旧环境需要同步依赖时，在仓库根目录执行 `conda env update -n 实际环境名 -f environment.yml`。项目另有 [FFmpeg 安装工具](../scripts/install-ffmpeg.ps1)，可使用本机缓存的压缩包安装到 `tools/ffmpeg/bin`。
 
 启动后打开 [工作台](http://localhost:18000)。终端应保持运行；退出时按 Ctrl+C，等待后台操作完成清理后再关闭窗口。脚本按仓库所在位置确定资料目录，不要求项目位于某个固定盘符。
 
