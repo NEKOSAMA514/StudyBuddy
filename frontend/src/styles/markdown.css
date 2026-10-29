@@ -1,0 +1,269 @@
+/* Markdown 正文：字号、行距、段落、标题、列表、引用、代码和表格 */
+.note-markdown {
+  font-size: 16px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.note-markdown[data-density="body"] {
+  line-height: 1.9;
+}
+
+.note-markdown[data-density="body"] :is(ul, ol) {
+  line-height: inherit;
+}
+
+
+
+.note-markdown > .markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.note-markdown > .markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.note-markdown p {
+  margin: 10px 0;
+}
+
+.note-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 8px;
+  line-height: 1.6;
+  font-weight: 600;
+}
+
+.note-markdown :is(h1, h2) {
+  margin: 24px 0 12px;
+  line-height: 1.4;
+}
+
+.note-markdown h1 { font-size: 26px; }
+.note-markdown h2 { font-size: 22px; }
+.note-markdown h3 { font-size: 20px; }
+
+.note-markdown h4 {
+  font-size: 18px;
+}
+
+.note-markdown h5 {
+  font-size: 17px;
+}
+
+.note-markdown h6 {
+  font-size: 16px;
+}
+
+.note-markdown :is(ul, ol) {
+  padding-left: 24px;
+  margin: 10px 0;
+}
+
+.note-markdown li {
+  padding: 3px 0;
+  white-space: normal;
+}
+
+.note-markdown li > p {
+  margin: 4px 0;
+}
+
+.note-markdown .task-list-item { list-style: none; }
+.note-markdown .task-list-item input[type="checkbox"] { margin: 0 6px 0 -20px; vertical-align: middle; }
+.markdown-content [id] { scroll-margin-top: 80px; }
+
+.note-markdown blockquote {
+  margin: 12px 0;
+  padding: 1px 14px;
+  border-left: 3px solid var(--border, #ddd);
+  color: var(--text-secondary, #666);
+  background: var(--surface-muted, #f7f7f8);
+}
+
+.note-markdown code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 0.92em;
+  background: var(--surface-muted, #f7f7f8);
+  font-family: "Cascadia Code", Consolas, "Liberation Mono", "Microsoft YaHei", monospace;
+}
+
+.note-markdown pre {
+  max-width: 100%;
+  margin: 12px 0;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  background: var(--surface-muted, #f7f7f8);
+  line-height: 1.65;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.note-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+/* §2.1, §3.6, §4.2/4.5: 代码为主要内容，语言标签与操作按钮保持次要层级。 */
+.note-code-block {
+  min-width: 0;
+  max-width: 100%;
+  margin: 16px 0;
+  overflow: hidden;
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--code-text);
+}
+
+.note-code-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--code-border);
+  background: var(--code-toolbar-bg);
+  color: var(--code-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.note-code-language {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-code-toolbar button {
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.note-code-toolbar button:hover {
+  background: var(--code-hover);
+  color: var(--code-text);
+}
+
+.note-code-block pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: 16px/1.65 "Cascadia Code", Consolas, "Liberation Mono", "Microsoft YaHei", monospace;
+  font-variant-ligatures: none;
+  tab-size: 4;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.note-code-block pre code { padding: 0; background: transparent; color: inherit; font: inherit; }
+.note-code-block pre:focus-visible { outline: 2px solid var(--code-focus); outline-offset: -2px; }
+
+/* 亮暗主题共用深色代码面板和 GitHub 语法配色。 */
+.note-code-block {
+  color-scheme: dark;
+  --focus: var(--code-focus);
+  --code-bg: #202024;
+  --code-toolbar-bg: #242428;
+  --code-border: #3b3b43;
+  --code-text: #ededf0;
+  --code-muted: #b5b5bd;
+  --code-hover: #303036;
+  --code-focus: #b7c8ff;
+  --code-keyword: #ff7b72;
+  --code-title: #d2a8ff;
+  --code-number: #79c0ff;
+  --code-string: #a5d6ff;
+}
+.note-code-block :is(.hljs-keyword, .hljs-doctag, .hljs-type, .hljs-name, .hljs-selector-tag, .hljs-deletion) { color: var(--code-keyword); }
+.note-code-block :is(.hljs-title, .hljs-built_in, .hljs-section) { color: var(--code-title); }
+.note-code-block :is(.hljs-number, .hljs-literal, .hljs-attr, .hljs-attribute, .hljs-meta, .hljs-variable, .hljs-symbol, .hljs-bullet) { color: var(--code-number); }
+.note-code-block :is(.hljs-string, .hljs-regexp, .hljs-addition) { color: var(--code-string); }
+.note-code-block :is(.hljs-comment, .hljs-quote) { color: var(--code-muted); font-style: italic; }
+
+.note-markdown a {
+  color: var(--text, #333);
+  text-decoration: underline;
+}
+
+.markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.markdown-table table {
+  border-collapse: collapse;
+  min-width: 100%;
+}
+
+.markdown-table :is(th, td) {
+  min-width: 110px;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #ddd);
+  vertical-align: top;
+  text-align: left;
+}
+
+.markdown-table th {
+  background: var(--surface-muted, #f7f7f8);
+  font-weight: 600;
+}
+
+.note-markdown hr {
+  margin: 16px 0;
+  border: 0;
+  border-top: 1px solid var(--border, #ddd);
+}
+
+/* 公式：沿用正文颜色；独立公式过长时在自身区域横向滚动。 */
+.note-markdown .katex-display {
+  max-width: 100%;
+  margin: 12px 0;
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.note-markdown .katex-display > .katex {
+  width: max-content;
+  min-width: 100%;
+  text-align: center;
+}
+
+.note-markdown .katex-error {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-markdown strong {
+  font-weight: 650;
+}
+
+
+.note-markdown[data-density="source"] { font-size: 14px; }
+.note-markdown[data-density="source"] h1 { font-size: 24px; }
+.note-markdown[data-density="source"] h2 { font-size: 20px; }
+.note-markdown[data-density="source"] h3 { font-size: 18px; }
+.note-markdown[data-density="source"] h4 { font-size: 16px; }
+.note-markdown[data-density="source"] h5 { font-size: 15px; }
+.note-markdown[data-density="source"] h6 { font-size: 14px; }
+.note-markdown[data-density="source"] .note-code-block pre { font-size: 14px; }
+.note-markdown[data-density="source"] .note-code-toolbar { font-size: 12px; }
+.note-markdown .note-source-link {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}

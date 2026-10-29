@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#183b35" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // 更名时迁移本机偏好与下载编号；新键优先，迁移后移除旧键以免恢复已清除的任务。
+      for (const kind of ["localStorage", "sessionStorage"]) {
+        try {
+          const storage = window[kind];
+          for (const key of Object.keys(storage)) {
+            if (!/^studynote[.-]/.test(key)) continue;
+            const currentKey = key.replace(/^studynote/, "studybuddy");
+            const value = storage.getItem(key);
+            if (storage.getItem(currentKey) === null && value !== null) {
+              storage.setItem(currentKey, value);
+            }
+            storage.removeItem(key);
+          }
+        } catch {
+          // 存储受限时仍允许页面加载，当前页继续使用内存状态。
+        }
+      }
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("studybuddy-theme") === "dark" ? "dark" : "light";
+      } catch {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <title>StudyBuddy · 把视频变成可回看的知识</title>
+  </head>
+  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+</html>

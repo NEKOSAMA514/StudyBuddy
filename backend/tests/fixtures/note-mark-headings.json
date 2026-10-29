@@ -1,0 +1,17 @@
+[
+  {
+    "name": "重复标题与时间链接",
+    "markdown": "# 总标题\n\n## 相同标题 [00:05](#video-time-5)\n\n内容一。\n\n## 相同标题 [00:10](#video-time-10)\n\n内容二。",
+    "count": 2
+  },
+  {
+    "name": "Setext与引用中的二级标题",
+    "markdown": "Setext小标题\n---\n\n解释。\n\n> ## 引用小标题\n>\n> 解释引用。\n\n### 三级标题\n\n不增加标记。",
+    "count": 2
+  },
+  {
+    "name": "代码公式HTML不增加标题",
+    "markdown": "```markdown\n## 代码里的伪标题\n```\n\n$$\n## 公式里的伪标题\n$$\n\n<h2>HTML里的伪标题</h2>\n\n## 动力学 $K_m$\n\n正文与[说明](https://example.invalid)。",
+    "count": 1
+  }
+]

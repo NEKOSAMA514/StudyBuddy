@@ -1,0 +1,43 @@
+# 本机凭据：只追踪不含真实 Token 的示例。
+.env
+.env.*
+!.env.example
+
+# 用户资料、模型权重和运行日志。
+data/
+models/
+log/
+test video/
+
+# 依赖、构建产物和缓存。
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.tsbuildinfo
+
+# 自动生成的测试报告。
+test-results/
+playwright-report/
+
+# 本机编辑器设置。
+.idea/
+
+/AGENTS.md
+/PROJECT_CONTEXT.md
+/archive/
+/REPAIR-PLAN.md
+
+# 本机媒体工具的下载与解压产物。
+/tools/
+/ocr-test/
+/documents-test/
+/frontend/debug.log
+/debug.log
+
+# 本机审查临时文件、实验资料与验收记录。
+/.review-tmp/
+/analysis test/
+/docs/portable-validation.md

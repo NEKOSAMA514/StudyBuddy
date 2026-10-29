@@ -1,0 +1,287 @@
+/* 共用组件：面板、按钮、提示、状态标签，以及笔记/转录共用的时间按钮与来源标签。 */
+
+.back-to-top {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 50%;
+  background: var(--surface, rgb(255, 255, 255));
+  color: var(--text-secondary, #000000);
+  box-shadow: 0 3px 12px var(--shadow, #0001);
+}
+
+.back-to-top svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 18px;
+  border: 1px solid var(--border, #e7e7e7);
+  border-radius: 12px;
+  font-size: 12px;
+  background: var(--surface-muted, #f9f9f9);
+  margin-bottom: 20px;
+}
+
+.notice a {
+  text-decoration: underline;
+  margin-left: 8px;
+}
+
+.mineru-hint,
+.error-notification.info {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  color: var(--danger, #a83e37);
+  background: var(--danger-bg, #fff3f1);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  font-size: 12px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.error button {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+}
+
+/* 主要与次要操作共用既有按钮层级，具体业务区域只负责外部间距。 */
+.primary {
+  border: 0;
+  border-radius: 25px;
+  color: var(--primary-text, #fff);
+  background: var(--primary, #292929);
+  padding: 11px 22px;
+  font-weight: 500;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--primary-hover, #444);
+}
+
+.secondary {
+  background: var(--surface, white);
+  border: 1px solid var(--control-border);
+  color: var(--text-secondary, #555);
+  border-radius: 9px;
+  padding: 9px 13px;
+  font-size: 11px;
+}
+
+.panel {
+  border: 1px solid var(--border, #e7e7e7);
+  border-radius: 16px;
+  background: var(--surface, white);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--border, #efefef);
+}
+
+.panel-header h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-header>span {
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+  white-space: nowrap;
+}
+
+.status-pill {
+  background: var(--surface-muted, #f2f2f2);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.status-pill.paused,
+.status-pill.stopping {
+  background: var(--warning-bg, #ba9e00);
+  color: var(--warning, #FFFFFF);
+}
+
+.status-pill.running {
+  background: var(--info-bg, #0093bc);
+  color: var(--info, #FFFFFF);
+}
+
+.status-pill.succeeded {
+  background: var(--success-bg, #50ac00);
+  color: var(--success, #FFFFFF);
+}
+
+.status-pill.failed,
+.status-pill.interrupted {
+  background: var(--danger-bg, #f13333);
+  color: var(--danger, #FFFFFF);
+}
+
+.muted {
+  font-size: 10px;
+  color: var(--text-secondary, #999);
+}
+
+.warning {
+  color: var(--warning, #936c32);
+  background: var(--warning-bg, #fffaee);
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.time-button {
+  border: 1px solid var(--control-border);
+  border-radius: 20px;
+  background: var(--surface, #fff);
+  color: var(--text-secondary, #696969);
+  padding: 4px 11px;
+  font: 11px monospace;
+}
+
+.time-button:hover {
+  background: var(--surface-hover, #f5f5f5);
+}
+
+.cite-button,
+.text-button {
+  border: 0;
+  background: none;
+  color: var(--text-secondary, #777);
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.evidence-empty {
+  color: var(--text-secondary, #999);
+  padding: 20px;
+  margin: 0;
+}
+
+.evidence-type {
+  font-size: 9px;
+  padding: 2px 5px;
+  background: var(--surface-muted, #f3f3f3);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* 通用表单外观，间距由各表单维护。 */
+.settings-card input:not([type="checkbox"]),
+.settings-card select,
+.settings-card textarea,
+.api-profile-selection select,
+.note-style-selection select,
+.note-search-form input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #333);
+}
+.api-profile-selection, .note-style-selection { display: grid; gap: 8px; margin: 20px 0; font-size: 12px; font-weight: 550; }
+.api-profile-selection small, .note-style-selection small { color: var(--text-secondary); font-size: 11px; font-weight: 400; line-height: 1.9; }
+
+/* 共用页头、页面标题和页脚。 */
+
+.heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 28px;
+  margin-bottom: 26px;
+}
+
+.eyebrow {
+  font-size: 13px;
+  color: var(--text-secondary, #999);
+  letter-spacing: 1px;
+}
+
+h1 {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.6px;
+  margin: 8px 0;
+}
+
+.heading p {
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+.detail-back {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.heading-badge {
+  font-size: 10px;
+  color: var(--text-secondary, #777);
+  white-space: nowrap;
+  padding: 7px 11px;
+  background: var(--surface-muted, #f5f5f5);
+  border-radius: 20px;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 9px;
+  color: var(--text-secondary, #aaa);
+  padding: 25px 0;
+}
+
+.settings-actions button:not(.primary) {
+  padding: 10px 14px;
+  border: 1px solid var(--control-border);
+  border-radius: 24px;
+  background: var(--surface, white);
+  font-size: 12px;
+}

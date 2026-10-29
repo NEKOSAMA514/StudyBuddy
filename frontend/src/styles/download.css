@@ -1,0 +1,167 @@
+/* 链接解析、画质和下载状态沿用面板间距，扫码弹窗的操作单独布局。 */
+.video-download {
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.bilibili-login-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.bilibili-session {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--warning-bg, #fff3cd);
+  color: var(--warning, #765714);
+  font-size: 13px;
+}
+
+.video-download .bilibili-session button {
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+}
+
+.bilibili-login-dialog {
+  max-width: min(520px, calc(100vw - 32px));
+}
+
+.bilibili-login-qr {
+  display: block;
+  width: 240px;
+  max-width: 100%;
+  margin: 20px auto;
+}
+
+.video-download .panel-header {
+  padding: 0;
+  margin-bottom: 18px;
+}
+
+.video-link-form label,
+.video-quality-controls label {
+  font-size: 13px;
+  color: var(--text-secondary, #888);
+}
+
+.video-link-controls,
+.video-quality-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.video-link-controls {
+  margin-top: 8px;
+}
+
+.video-link-controls input {
+  flex: 1;
+  min-width: 0;
+}
+
+.video-link-controls input,
+.video-quality-controls select {
+  padding: 10px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  background: var(--surface, #fff);
+  color: var(--text, #333);
+  font: inherit;
+  font-size: 13px;
+}
+
+.video-download button {
+  margin: 0;
+  font-size: 13px;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+
+.video-link-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.video-link-preview:not(:has(img:not([hidden]))) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.video-link-preview img {
+  display: block;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.video-link-preview h3 {
+  margin: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.video-link-preview p,
+.video-download-status small {
+  font-size: 15px;
+  color: var(--text, #000000);
+}
+
+.video-download-retry {
+  padding-top: 16px;
+}
+
+.video-quality-controls {
+  flex-wrap: wrap;
+}
+
+.video-quality-controls select {
+  max-width: 100%;
+}
+
+.video-download-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.video-download-status {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.video-download-status progress {
+  width: 100%;
+}
+
+.video-download-status button {
+  justify-self: start;
+}
+
+@media (max-width: 1000px) {
+  .video-link-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .video-link-preview img {
+    max-width: 260px;
+  }
+}

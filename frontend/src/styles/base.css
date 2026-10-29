@@ -1,0 +1,201 @@
+/* 亮色主题提供全局语义颜色，区域样式只引用变量而不另建配色。 */
+:root {
+  --page: #fff;
+  --surface: #fff;
+  --surface-muted: #f5f5f5;
+  --surface-hover: #eaeaec;
+  --text: #242424;
+  --text-secondary: #626262;
+  --border: #dedede;
+  --control-border: #858585;
+  --border-strong: #555;
+  --primary: #292929;
+  --primary-hover: #444;
+  --primary-text: #fff;
+  --danger: #973333;
+  --danger-bg: #fff1f1;
+  --danger-border: #b24949;
+  --danger-hover: #97333312;
+  --danger-solid: #b33636;
+  --success: #24623d;
+  --success-bg: #eaf6ed;
+  --success-border: #3c8053;
+  --success-hover: #24623d12;
+  --warning: #735016;
+  --warning-bg: #fff5d6;
+  /* 侧栏状态图标使用亮色填充；文字仍使用原有高对比度语义色。 */
+  --file-icon-running: #f2c40d;
+  --file-icon-completed: #28bd64;
+  --file-icon-stopped: #e23636;
+  --info: #145978;
+  --info-bg: #e8f4fa;
+  --focus: #3658b8;
+  --overlay: #0005;
+  --shadow: #0002;
+  color-scheme: light;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: var(--text, #242424);
+  background: var(--page, #fff);
+  font-synthesis: none;
+  font-size: 14px;
+  line-height: 1.65;
+}
+/* 亮色定义完整语义变量，暗色只覆盖取值。 */
+/* 暗色主题只替换同名变量，复用相同的组件结构与状态规则。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #18181b;
+  --surface: #242428;
+  --surface-muted: #202024;
+  --surface-hover: #303036;
+  --text: #ededf0;
+  --text-secondary: #b5b5bd;
+  --border: #3b3b43;
+  --control-border: #9999a0;
+  --border-strong: #9b9ba7;
+  --primary: #ededf0;
+  --primary-hover: #d7d7df;
+  --primary-text: #18181b;
+  --danger: #ffb4b4;
+  --danger-bg: #3b2327;
+  --danger-border: #74464c;
+  --danger-hover: #ffb4b412;
+  --danger-solid: #b43b47;
+  --success: #a9d8bf;
+  --success-bg: #20362b;
+  --success-border: #3e6650;
+  --success-hover: #a9d8bf12;
+  --warning: #e8c98a;
+  --warning-bg: #372f20;
+  --file-icon-running: var(--warning);
+  --file-icon-completed: var(--success);
+  --file-icon-stopped: var(--danger);
+  --info: #a8ddef;
+  --info-bg: #20343e;
+  --focus: #b7c8ff;
+  --overlay: #0009;
+  --shadow: #0006;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  color: inherit;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button,
+a,
+input,
+select,
+textarea,
+summary,
+video {
+  outline-offset: 4px;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+.crash-page {
+  max-width: 700px;
+  margin: 80px auto;
+}
+/* 通知进入浏览器顶层后保持固定位置，颜色区分错误、成功和信息类别。 */
+.error-notification {
+  position: fixed;
+  inset: 16px auto auto 50%;
+  transform: translateX(-50%);
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--danger-border, #edc9c4);
+  border-radius: 14px;
+  background: var(--danger-bg, #fff6f4);
+  color: var(--danger, #92372f);
+  box-shadow: 0 8px 30px var(--shadow, #0002);
+  font-size: 13px;
+}
+.error-notification:popover-open {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.error-notification.success {
+  border-color: var(--success-border, #bddacb);
+  background: var(--success-bg, #f0faf4);
+  color: var(--success, #276b49);
+}
+.error-notification > div {
+  flex: 1;
+  min-width: 0;
+}
+.error-notification p {
+  margin: 6px 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.error-notification button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.error-notification button:hover {
+  background: var(--danger-hover, #92372f12);
+}
+.error-notification.success button:hover {
+  background: var(--success-hover, #276b4912);
+}
+.error-notification svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.fading-error {
+  animation: error-fade 5s linear forwards;
+}
+.fading-error.alternate {
+  animation-name: error-fade-alternate;
+}
+.fading-error.hovered,
+.fading-error:hover {
+  animation: none;
+  opacity: 1;
+}
+@keyframes error-fade {
+  from, 60% { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes error-fade-alternate {
+  from, 60% { opacity: 1; }
+  to { opacity: 0; }
+}

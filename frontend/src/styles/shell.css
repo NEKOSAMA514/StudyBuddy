@@ -1,0 +1,356 @@
+/* 桌面采用侧栏与内容双列，收起侧栏和移动布局由后续覆盖规则处理。 */
+.shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.sidebar {
+  background: var(--surface-muted, #f7f7f8);
+  padding: 27px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  border-right: 1px solid var(--border, #ececec);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 18px;
+}
+
+.brand {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+}
+
+.sidebar-header .desktop-sidebar-toggle {
+  background: transparent;
+  border-color: transparent;
+}
+
+.mode-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.mode-link:hover,
+.mode-link.active {
+  background: var(--surface-hover, #eaeaec);
+}
+
+.mode-link span {
+  font-size: 19px;
+  width: 20px;
+}
+
+.nav-label {
+  margin: 24px 12px 8px;
+  color: var(--text-secondary, #8a8a8d);
+  font-size: 11px;
+}
+
+.history-label {
+  display: flex;
+  justify-content: space-between;
+  margin: 30px 12px 10px;
+  color: var(--text-secondary, #909094);
+  font-size: 11px;
+}
+
+.sidebar nav {
+  overflow: auto;
+  min-height: 50px;
+}
+
+.library-item {
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--text-secondary, #555);
+  display: flex;
+  align-items: center;
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 8px;
+  gap: 9px;
+  margin: 2px 0;
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  margin: 2px 0;
+}
+
+.library-row:hover,
+.library-row.selected {
+  background: var(--surface-hover, #eaeaec);
+}
+
+.library-row .library-item {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  padding-right: 4px;
+  margin: 0;
+}
+
+.file-actions {
+  flex: none;
+  padding-right: 5px;
+}
+
+.file-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #777);
+  font-size: 20px;
+}
+
+.file-menu-trigger:hover {
+  background: var(--surface-hover, #dddde0);
+}
+
+.file-action-menu {
+  position: fixed;
+  z-index: 20;
+  width: 132px;
+  padding: 5px;
+  background: var(--surface, white);
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px var(--shadow, #0002);
+}
+
+.file-action-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+
+.file-action-menu button:hover {
+  background: var(--surface-hover, #f3f3f3);
+}
+
+.danger-text {
+  color: var(--danger, #b33636);
+}
+
+.library-item:hover,
+.library-item.selected {
+  background: var(--surface-hover, #eaeaec);
+  color: var(--text, #242424);
+}
+
+.file-glyph {
+  font-size: 18px;
+  color: var(--text-secondary, #777);
+}
+
+.file-glyph.queued,
+.file-glyph.running {
+  color: var(--file-icon-running);
+  -webkit-text-stroke: 0.6px var(--warning);
+  paint-order: stroke fill;
+}
+
+.file-glyph.succeeded {
+  color: var(--file-icon-completed);
+  -webkit-text-stroke: 0.5px var(--success);
+  paint-order: stroke fill;
+}
+
+.file-glyph.stopping,
+.file-glyph.paused,
+.file-glyph.interrupted,
+.file-glyph.failed {
+  color: var(--file-icon-stopped);
+}
+
+.library-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.library-name small {
+  display: block;
+  color: var(--text-secondary, #929295);
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.library-empty {
+  color: var(--text-secondary, #999);
+  font-size: 12px;
+  padding: 0 12px;
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+  padding: 20px 12px 0;
+  border-top: 1px solid var(--border, #e4e4e7);
+  color: var(--text-secondary, #777);
+  font-size: 11px;
+}
+
+.sidebar-bottom p {
+  display: block;
+  color: var(--text-secondary, #999);
+  font-size: 12px;
+  line-height: 1.9;
+  margin: 8px 0;
+}
+
+.settings-link {
+  display: block;
+  padding-bottom: 16px;
+  color: var(--text, #444);
+  font-size: 16px;
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success, #65a68f);
+  margin-right: 6px;
+}
+
+main {
+  --main-gutter: 42px;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0 var(--main-gutter);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: 74px;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  background: var(--page, #fff);
+
+  margin-left: calc(-1 * var(--main-gutter));
+  margin-right: calc(-1 * var(--main-gutter));
+  padding-left: var(--main-gutter);
+  padding-right: var(--main-gutter);
+}
+
+.topbar-theme {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  /* 整个主题区域推到最右边 */
+  margin-left: auto;
+
+  /* 禁止文字和按钮分离、压缩 */
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.theme-label {
+  margin: 0;
+  white-space: nowrap;
+}
+
+
+/* 更窄时隐藏文字，保留主题按钮 */
+@media (max-width: 600px) {
+  .theme-label {
+    display: none;
+  }
+}
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border, #ededed);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 32px;
+  background: transparent;
+  border-radius: 50%;
+  color: var(--text-secondary, #777);
+}
+
+.theme-toggle:hover {
+  background: var(--surface-hover, #f3f3f3);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--focus, #555);
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sidebar-toggle,
+.sidebar-backdrop {
+  display: none;
+}
+
+.desktop-sidebar-toggle {
+  border: 1px solid var(--border, #ededed);
+  border-radius: 8px;
+  background: var(--page, #fff);
+  padding: 4px 9px;
+  font-size: 18px;
+}
+
+@media (min-width: 701px) {
+  .shell.sidebar-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .sidebar-collapsed .sidebar {
+    visibility: hidden;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+  }
+}
+.mode-link.active, .library-item.selected { box-shadow: inset 3px 0 0 var(--border-strong); }

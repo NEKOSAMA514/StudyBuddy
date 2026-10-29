@@ -1,0 +1,461 @@
+/* 共用笔记布局：外框、版本、导览、章节导航、存疑与窄屏适配。
+   Markdown 正文及来源密度由按需加载的 markdown.css 管理。 */
+
+/* 笔记外框与顶部下载按钮 */
+.summary-panel {
+  font-size: 16px;
+  padding: 50px;
+}
+
+.summary-panel>.panel-header {
+  padding: 10px 0 20px;
+}
+
+.summary-panel>.panel-header h2 {
+  font-size: 20px;
+}
+
+.summary-panel .notes-download {
+  font-size: 13px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.note-version-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 15px;
+}
+
+.note-version {
+  white-space: nowrap;
+}
+
+.note-version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.note-version-actions button {
+  padding: 6px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface, white);
+  color: var(--text-secondary, #555);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.note-version-actions button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  background: var(--surface-hover, #eaeaec);
+  color: var(--text, #242424);
+}
+
+:root:not([data-theme="dark"]) .note-version-actions button[aria-pressed="true"] {
+  background: var(--surface-muted);
+}
+
+/* 笔记内使用共用组件的文字也增加2px，不影响页面其他区域。 */
+.summary-panel .eyebrow { font-size: 15px; }
+.summary-panel :is(.time-button, .cite-button, .text-button) { font-size: 13px; }
+.summary-panel .evidence-type { font-size: 11px; }
+
+/* 章节锚点导航；横条位于正文右侧留白，预览不占用文档布局。 */
+.chapter-navigator {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 12px;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  z-index: 14;
+}
+
+.chapter-navigator-scroll {
+  position: relative;
+  width: 100%;
+  max-height: min(420px, 50dvh, calc(100dvh - 160px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+
+.chapter-navigator-scroll::-webkit-scrollbar { display: none; }
+
+.chapter-mark {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.chapter-mark::before {
+  content: "";
+  position: absolute;
+  right: 3px;
+  top: 8px;
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border-strong, #a7a7ae);
+  transition: width 140ms, background-color 140ms;
+}
+
+.chapter-mark:hover::before,
+.chapter-mark[aria-current]::before,
+.chapter-mark:focus-visible::before {
+  width: 22px;
+  background: var(--text, #242424);
+}
+
+.chapter-mark:focus-visible { outline: 2px solid var(--focus, #516ac8); outline-offset: -2px; border-radius: 3px; }
+
+.chapter-preview {
+  position: fixed;
+  right: 48px;
+  width: min(300px, calc(100vw - 64px));
+  max-height: 92px;
+  padding: 10px 12px;
+  overflow: hidden;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--text, #242424);
+  box-shadow: 0 4px 18px var(--shadow, #0002);
+  font-size: 14px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.chapter-preview strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.chapter-preview span { display: block; margin-top: 4px; color: var(--text-secondary, #666); }
+
+@media (max-width: 700px) {
+  .chapter-navigator { right: 6px; width: 24px; }
+  .chapter-mark::before { width: 10px; }
+  .chapter-mark:hover::before,
+  .chapter-mark[aria-current]::before,
+  .chapter-mark:focus-visible::before { width: 18px; }
+  .chapter-preview { right: 36px; width: min(240px, calc(100vw - 56px)); }
+  /* 借用两侧各8px外留白，为导航留位后正文仍至少290px（375px屏宽）。 */
+  .summary-panel.has-chapter-navigation { padding-right: 36px; margin-inline: -8px; }
+}
+
+/* 材料导览与标签 */
+.overview {
+  background: var(--surface-muted, #f8f8f8);
+  border-radius: 14px;
+  max-width: 1280px;
+  margin: 24px auto;
+  padding: 25px 28px;
+}
+
+.notes-partial {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: var(--surface-muted, #f8f8f8);
+  color: var(--text-secondary, #666);
+  line-height: 1.7;
+}
+
+.overview h3,
+.note-title {
+  font-size: 26px;
+  margin: 6px 0 12px;
+  font-weight: 600;
+}
+
+.summary-panel > .note-title {
+  max-width: 1280px;
+  margin: 24px auto 12px;
+}
+
+.overview p {
+  font-size: 16px;
+  line-height: 2.05;
+  white-space: pre-wrap;
+  margin-bottom: 0;
+}
+
+.summary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary, #777);
+  font-size: 14px;
+}
+
+/* 章节栏宽度、章节间距及章节标题 */
+.section-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 22px;
+  max-width: 1280px;
+  margin: 24px auto;
+  color: var(--text, #000000);
+}
+
+.section-label span {
+  color: var(--text, #000000);
+  font-size: 22px;
+}
+
+.timeline {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.summary-section {
+  padding: 0 0 20px;
+  margin: 0 0 20px;
+  border-bottom: 3px solid var(--border, #ededed);
+}
+
+.summary-section,
+.summary-section li,
+.note-subsection,
+.summary-panel {
+  scroll-margin-top: 80px;
+}
+
+.timestamp-basis {
+  color: var(--text-secondary, #999);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+/* 展开的原始依据与引用按钮 */
+.citation-table {
+  max-height: 340px;
+  overflow: auto;
+  margin: 10px 0 16px;
+  border: 1px solid var(--border, #e7e7e7);
+  border-radius: 10px;
+  background: var(--surface-muted, #fafafa);
+}
+
+.citation-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: normal;
+}
+
+.citation-table th,
+.citation-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border, #e7e7e7);
+}
+
+.citation-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-muted, #f3f3f3);
+  color: var(--text-secondary, #777);
+  font-weight: 500;
+}
+
+.citation-table td:first-child {
+  width: 105px;
+}
+
+.citation-table .evidence-type {
+  display: table;
+  margin-top: 5px;
+}
+
+.citation-content {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary, #555);
+  font: inherit;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.citation-content:hover {
+  color: var(--text, #222);
+}
+
+.citation-content img {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 6px;
+}
+
+/* 外层章节标题；正文小标题由下方 .note-markdown h2 单独控制。 */
+.summary-section > .note-heading > h3 {
+  font-size: 26px;
+  margin: 16px 0 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.summary-panel[data-note-style="concise"] .note-markdown > .markdown-content > :is(h2, .note-heading):not(:first-child) {
+  border-top: 3px solid var(--border, #ededed);
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
+.summary-section>p {
+  color: var(--text-secondary, #555);
+  font-size: 20px;
+  white-space: pre-wrap;
+  line-height: 1.95;
+}
+
+.summary-section ul {
+  padding-left: 20px;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.summary-section li {
+  padding: 4px 0;
+  white-space: pre-wrap;
+}
+
+.cite-button {
+  display: block;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin-top: 3px;
+  color: var(--text-secondary, #858585);
+}
+
+.note-subsection + .note-subsection {
+  margin-top: 18px;
+}
+
+/* 尚未生成笔记时的占位 */
+.empty-summary {
+  padding: 35px 20px 50px;
+  text-align: center;
+  color: var(--text-secondary, #999);
+}
+
+.note-illustration {
+  display: block;
+  color: var(--control-border);
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 20px;
+}
+
+:root[data-theme="dark"] .note-illustration {
+  color: var(--text-secondary);
+  stroke-width: 2;
+}
+
+.empty-summary h3 {
+  color: var(--text-secondary, #555);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.empty-summary p {
+  font-size: 14px;
+}
+
+.feature-list {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  font-size: 12px;
+  margin-top: 25px;
+}
+
+.feature-list strong {
+  margin: 0 4px;
+  font-weight: 500;
+}
+
+.notes-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 文末折叠的存疑部分 */
+.note-source-issues {
+  margin: 20px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.note-source-issues summary {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.note-source-issues li,
+.note-source-issues p {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.note-source-issues p {
+  margin: 4px 0;
+}
+
+/* 窄屏笔记覆盖：与上面的桌面规则一起维护。 */
+@media (max-width: 700px) {
+  .summary-panel { padding: 20px; }
+  .summary-panel.has-chapter-navigation { padding-right: 36px; }
+  .summary-panel > .panel-header { flex-wrap: wrap; }
+  .summary-panel > .panel-header h2 { flex-shrink: 0; white-space: normal; }
+  .summary-panel .notes-downloads { margin-left: auto; }
+  .overview {
+    padding: 20px;
+  }
+  .feature-list {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+}
+
+.reader-state { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 14px; }
+.reader-state .secondary { margin: 0; }
+.note-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.note-heading > :is(h2, h3) { min-width: 0; max-width: 100%; }
+.note-markdown .note-heading { margin: 24px 0 0; }
+.note-markdown .note-heading > h2 { margin: 0 0 12px; }
+.note-markdown > .markdown-content > .note-heading:last-child > h2 { margin-bottom: 0; }
+.note-mark-control { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; vertical-align: middle; }
+.note-mark-button { padding: 4px 8px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 400; line-height: 1.6; white-space: nowrap; cursor: pointer; }
+.note-mark-button[aria-pressed="true"] { color: var(--warning); background: var(--warning-bg); border-color: var(--warning); }
+.note-mark-button[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.note-mark-error { color: var(--danger); font-size: 12px; font-weight: 400; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }

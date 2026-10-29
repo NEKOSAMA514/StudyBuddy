@@ -1,0 +1,16 @@
+/* 按职责维护样式；导入顺序保持基础样式在前、覆盖规则在后。 */
+@import "./styles/base.css";
+@import "./styles/shell.css";
+@import "./styles/home.css";
+@import "./styles/common.css";
+@import "./styles/files.css";
+@import "./styles/documents.css";
+@import "./styles/analysis.css";
+@import "./styles/player.css";
+@import "./styles/tasks.css";
+@import "./styles/notes.css";
+@import "./styles/note-search.css";
+@import "./styles/transcript.css";
+@import "./styles/settings.css";
+@import "./styles/download.css";
+@import "./styles/responsive.css";

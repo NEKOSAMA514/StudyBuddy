@@ -1,0 +1,19 @@
+.git
+**/.idea
+**/.env
+**/.env.*
+!**/.env.example
+**/data
+**/models
+**/log
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.py[cod]
+**/*.tsbuildinfo
+test video
+**/test-results
+**/playwright-report
+tools

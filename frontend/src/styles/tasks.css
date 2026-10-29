@@ -1,0 +1,190 @@
+/* 任务进度：处理面板、步骤、进度条、耗时及等待动画。状态标签的共用样式在 common.css。 */
+
+.task-panel {
+  padding-bottom: 20px;
+  font-size: 16px;
+}
+
+.task-panel .panel-header {
+  border: 0;
+}
+
+.task-panel .panel-header h2 {
+  font-size: 15px;
+}
+
+.task-panel .panel-header > span,
+.task-panel .muted {
+  font-size: 12px;
+}
+
+.task-panel .secondary,
+.task-panel .warning {
+  font-size: 13px;
+}
+
+.task-panel .notice {
+  font-size: 14px;
+}
+
+.task-panel .notice p {
+  text-align: center;
+}
+
+.task-resume-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 20px 0;
+}
+
+.task-resume-actions .secondary {
+  margin: 0;
+}
+
+.task-panel>.muted,
+.task-error,
+.task-panel>.warning,
+.timings {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+.task-error {
+  color: var(--danger, #ab4738);
+  font-size: 14px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.timings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  margin-top: 12px;
+}
+
+.workflow-progress {
+  padding: 0 20px;
+}
+
+.progress-caption {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.progress-caption strong {
+  color: var(--text, #444);
+  font-weight: 550;
+}
+
+.progress-track {
+  height: 5px;
+  background: var(--surface-muted, #ededed);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-track>div {
+  height: 100%;
+  background: var(--primary, #454545);
+  border-radius: inherit;
+  transition: width 0.3s;
+}
+
+.has-failed .progress-track>div {
+  background: var(--warning, #ac7448);
+}
+
+.workflow-steps {
+  padding: 0;
+  list-style: none;
+  margin: 18px 0 10px;
+}
+
+.workflow-steps li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 0;
+  color: var(--text-secondary, #aaa);
+}
+
+.step-number {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 50%;
+  flex: 0 0 23px;
+  height: 23px;
+  font-size: 12px;
+}
+
+.workflow-steps strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.workflow-steps small {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+  color: var(--text-secondary, #aaa);
+}
+
+.step-state {
+  font-size: 11px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.workflow-steps .done {
+  color: var(--text-secondary, #666);
+}
+
+.workflow-steps .done .step-number {
+  background: var(--success-bg, #f0f5f2);
+  color: var(--success, #50846c);
+  border-color: var(--success-border, #dfebe3);
+}
+
+.workflow-steps .current {
+  color: var(--text, #292929);
+}
+
+.workflow-steps .current .step-number {
+  color: var(--primary-text, white);
+  background: var(--primary, #333);
+  border-color: var(--border-strong, #333);
+}
+
+.task-activity { margin: 16px 0; padding: 16px; border-radius: 12px; background: var(--surface-muted); font-size: 13px; line-height: 1.7; min-width: 0; }
+.task-panel .task-activity { margin: 16px 20px; }
+.activity-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.activity-heading > span { color: var(--text-secondary); }
+.activity-history { max-height: 136px; line-height: 22px; overflow: auto; overflow-wrap: anywhere; overscroll-behavior: contain; margin-top: 12px; }
+.activity-history ol, .activity-requests { padding: 0; margin: 0; list-style: none; }
+.activity-event { display: flex; gap: 12px; padding: 6px 0; }
+.activity-event time { flex: 0 0 auto; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.activity-event > div { min-width: 0; }
+.activity-muted { color: var(--text-secondary); margin: 0; }
+.activity-error-reference { display: block; font-size: 12px; }
+.activity-error-reference > span { display: block; }
+.activity-error-reference details p { margin: 4px 0; }
+.activity-error-reference summary { cursor: pointer; text-decoration: underline; }
+.activity-error-reference code { overflow-wrap: anywhere; }
+.activity-event.warning, .activity-warning { color: var(--warning); }
+.activity-warning summary { cursor: pointer; }
+.activity-event.error { color: var(--danger); }
+.activity-connection { color: var(--warning); margin: 8px 0; }
+.activity-requests { margin-top: 8px; color: var(--text-secondary); font-size: 12px; }
+.activity-requests li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+.activity-latest { margin-top: 8px; font-size: 13px; }
+
+.task-panel > .secondary, .task-panel .notice .secondary { margin: 16px 20px 0; }

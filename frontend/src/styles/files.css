@@ -1,0 +1,157 @@
+/* 文件列表与上传区：上传框、表格、文件名、空列表及格式提示。 */
+
+.file-library {
+  padding-bottom: 40px;
+}
+
+.file-upload {
+  border: 1px dashed var(--border-strong, #cfcfcf);
+  border-radius: 18px;
+  background: var(--surface-muted, #fafafa);
+  overflow: hidden;
+  margin-bottom: 28px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.file-upload.dragging {
+  border-color: var(--border-strong, #555);
+  background: var(--surface-hover, #eeeeef);
+}
+
+.file-upload-button {
+  width: 100%;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 30px 20px;
+  border: 0;
+  background: transparent;
+  color: var(--text, #333);
+}
+
+.file-upload-button:hover:not(:disabled) {
+  background: var(--surface-hover, #f3f3f3);
+}
+
+.file-upload-button:focus-visible {
+  outline: 2px solid var(--focus, #555);
+  outline-offset: -5px;
+}
+
+.file-upload-plus {
+  font-size: 54px;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--text-secondary, #777);
+}
+
+.file-upload-button strong {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.file-upload-button>span:last-child {
+  font-size: 13px;
+  color: var(--text, #3f3f3f);
+  line-height: 1.8;
+}
+
+.file-upload progress {
+  display: block;
+  width: 100%;
+  height: 5px;
+  accent-color: var(--primary, #555);
+}
+
+.file-table-scroll {
+  overflow-x: auto;
+}
+
+.file-list table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.file-list th,
+.file-list td {
+  padding: 15px 12px;
+  border-bottom: 1px solid var(--border, #efefef);
+  text-align: left;
+}
+
+.file-list th {
+  color: var(--text-secondary, #888);
+  background: var(--surface-muted, #fafafa);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.file-list td {
+  font-size: 11px;
+  color: var(--text-secondary, #777);
+}
+
+.file-list th:first-child {
+  width: 30%;
+  padding-left: 20px;
+}
+
+.file-list td:first-child {
+  padding-left: 20px;
+}
+
+.file-list th:nth-child(4) {
+  width: 22%;
+}
+
+.file-list th:last-child {
+  width: 52px;
+}
+
+.file-list tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.file-list tbody tr:hover {
+  background: var(--surface-hover, #fcfcfc);
+}
+
+.file-name {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--text, #333);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.file-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.file-pin {
+  color: var(--text-secondary, #999);
+  font-size: 10px;
+  margin-right: 7px;
+}
+
+.file-list-empty {
+  text-align: center;
+  padding: 35px 20px;
+  font-size: 12px;
+  color: var(--text-secondary, #999);
+}
+
+.file-formats {
+  font-size: 12px;
+  max-width: 800px;
+  line-height: 1.6;
+}

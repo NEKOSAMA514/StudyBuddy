@@ -1,0 +1,13 @@
+/* 视频详情布局。共用页头和标题在 common.css。 */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.video-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}

@@ -1,0 +1,94 @@
+/* 首页集中展示主要入口，内容高度不足时仍保留稳定的居中留白。 */
+.home-screen {
+  min-height: calc(100dvh - 120px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 100px;
+  text-align: center;
+}
+.home-mark {
+  font-size: 32px;
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  border-radius: 19px;
+  background: var(--surface-muted, #f5f5f5);
+  position: relative;
+  font-weight: 500;
+  margin-bottom: 23px;
+}
+.home-mark span {
+  position: absolute;
+  font-size: 17px;
+  top: 2px;
+  right: 7px;
+}
+.home-screen h1 {
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 600;
+  letter-spacing: -1px;
+  margin: 0 0 12px;
+}
+.home-screen > p {
+  color: var(--text-secondary, #8a8a8a);
+  margin: 0 0 35px;
+  font-size: 13px;
+}
+.home-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: min(600px, 100%);
+}
+.home-options button {
+  position: relative;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: 18px;
+  padding: 24px;
+  background: var(--surface, #fff);
+  text-align: left;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.home-options button:hover {
+  background: var(--surface-hover, #f7f7f7);
+  border-color: var(--border-strong, #b9b9b9);
+}
+.option-icon {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border: 1px solid var(--border, #ededed);
+  border-radius: 10px;
+  font-size: 21px;
+  margin-bottom: 20px;
+}
+.home-options strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 550;
+}
+.home-options small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary, #8e8e8e);
+  margin-top: 7px;
+}
+.option-arrow {
+  position: absolute;
+  right: 24px;
+  top: 27px;
+  color: var(--text-secondary, #999);
+}
+.home-footnote {
+  display: flex;
+  gap: 24px;
+  font-size: 10px;
+  color: var(--text-secondary, #a2a2a2);
+  margin-top: 32px;
+}

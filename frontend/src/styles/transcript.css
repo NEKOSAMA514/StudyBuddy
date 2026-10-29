@@ -1,0 +1,115 @@
+/* 原始转录：下载、语音/画面页签、记录列表、展开内容及分页。 */
+
+.transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  font-size: 12px;
+  color: var(--text-secondary, #777);
+  border-bottom: 1px solid var(--border, #eee);
+}
+
+.transcript-actions span {
+  margin-right: auto;
+}
+
+.transcript-actions a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.evidence-panel {
+  grid-column: 1 / -1;
+  overflow: hidden;
+}
+
+.transcript-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 12px 20px 0;
+}
+
+.transcript-tabs button {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary, #777);
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.transcript-tabs button[aria-selected="true"] {
+  color: var(--text, #242424);
+  background: var(--surface-hover, #f4f4f5);
+  border-color: var(--border-strong);
+}
+
+.transcript-tabs span {
+  color: var(--text-secondary, #999);
+  font-size: 10px;
+  margin-left: 5px;
+}
+
+.evidence-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.evidence-more {
+  display: block;
+  margin: 12px auto;
+  padding: 6px 16px;
+}
+
+.evidence-panel>.muted {
+  margin: 10px 20px;
+}
+
+.count {
+  font-size: 10px;
+  color: var(--text-secondary, #999);
+  margin-left: 6px;
+}
+
+.evidence-item {
+  border-top: 1px solid var(--border, #eee);
+  font-size: 11px;
+}
+
+.evidence-item summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 20px;
+  cursor: pointer;
+}
+
+.evidence-preview {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary, #888);
+}
+
+.evidence-body {
+  padding: 0 20px 18px;
+}
+
+.evidence-body p {
+  white-space: pre-wrap;
+  line-height: 1.9;
+}
+
+.evidence-body img {
+  display: block;
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 10px 0;
+}
+
+.evidence-body small {
+  font-size: 9px;
+  color: var(--text-secondary, #aaa);
+}
