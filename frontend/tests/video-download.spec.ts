@@ -731,6 +731,81 @@ for (const status of ["logged_out", "expired", "logged_in", "unknown"]) {
   });
 }
 
+for (const initial of ["logged_out", "expired"]) {
+  test(`凭证管理 ${initial} 从右侧复用扫码登录并同步下载状态`, async ({ page }) => {
+    const state = await mockDownloads(page);
+    state.login.state = initial;
+    state.login.poll = "success";
+    await page.clock.install();
+    await page.goto("/#summary");
+    await page.getByLabel("视频链接", { exact: true }).fill("https://b23.tv/test");
+    await expect(page.locator(".bilibili-session")).toBeVisible();
+    const credentials = await openCredentials(page);
+    const login = credentials.getByRole("button", { name: "扫码登录", exact: true });
+    await expect(login).toBeVisible();
+    if (initial === "logged_out") {
+      for (const width of [1280, 686, 375]) {
+        await page.setViewportSize({ width, height: 871 });
+        for (const theme of ["light", "dark"]) {
+          await page.locator("html").evaluate((element, value) => { element.dataset.theme = value; }, theme);
+          const card = (await credentials.locator(".credential-site").boundingBox())!;
+          const button = (await login.boundingBox())!;
+          expect(button.x + button.width).toBeGreaterThan(card.x + card.width * 0.75);
+          const settings = page.getByRole("dialog", { name: "设置", exact: true });
+          expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+          await settings.screenshot({ path: test.info().outputPath(`credential-login-${theme}-${width}.png`), animations: "disabled" });
+        }
+      }
+    }
+    await login.click();
+    const dialog = page.getByRole("dialog", { name: "B 站登录", exact: true });
+    await expect(dialog.getByAltText("B 站登录二维码")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "暂不登录", exact: true })).toHaveCount(0);
+    await expect.poll(() => state.login.ids.filter(id => !state.login.cancelled.includes(id))).toHaveLength(1);
+    await page.clock.fastForward(1100);
+    await expect(dialog).toHaveCount(0);
+    await expect(credentials.getByText("已登录", { exact: true })).toBeVisible();
+    await expect(login).toHaveCount(0);
+    await expect(credentials.getByRole("button", { name: "退出登录", exact: true })).toBeVisible();
+    expect(state.posts).not.toContain("/api/v1/video-downloads/parse");
+    await page.getByRole("button", { name: "关闭设置", exact: true }).click();
+    await expect(page.locator(".bilibili-session")).toHaveCount(0);
+  });
+}
+
+test("凭证管理取消扫码保留设置，迟到的成功结果不改变登录状态", async ({ page }) => {
+  const state = await mockDownloads(page);
+  state.login.state = "logged_out";
+  await page.clock.install();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let polls = 0, released = false;
+  await page.route("**/api/v1/bilibili/login/*/poll", async route => {
+    polls++;
+    await held;
+    await route.fulfill({ json: { id: state.login.ids.at(-1), state: "success",
+      session: { state: "logged_in", persistent: true, can_persist: true, warning: "" } } });
+    released = true;
+  });
+  await page.goto("/#summary");
+  const credentials = await openCredentials(page);
+  await credentials.getByRole("button", { name: "扫码登录", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "B 站登录", exact: true });
+  await expect(dialog.getByAltText("B 站登录二维码")).toBeVisible();
+  const loginId = state.login.ids.at(-1)!;
+  await page.clock.fastForward(1100);
+  await expect.poll(() => polls).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(credentials).toBeVisible();
+  await expect.poll(() => state.login.cancelled).toContain(loginId);
+  release();
+  await expect.poll(() => released).toBe(true);
+  await page.clock.fastForward(10000);
+  await expect(credentials.getByText("未登录", { exact: true })).toBeVisible();
+  expect(polls).toBe(1);
+});
+
 test("凭证管理显示保存方式，退出失败保留状态，成功后刷新保持未登录", async ({ page }) => {
   await mockDownloads(page);
   let fail = true;

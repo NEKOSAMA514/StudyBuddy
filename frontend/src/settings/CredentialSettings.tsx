@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { readBilibiliSession, logoutBilibiliSession } from "../downloads/bilibiliSession";
+import { readBilibiliSession, logoutBilibiliSession, publishBilibiliSession } from "../downloads/bilibiliSession";
 import type { BilibiliSession } from "../types";
+import { BilibiliLogin } from "../BilibiliLogin";
 
+// 登录是未登录卡片的主操作，退出和重读为次操作；复用右侧操作区、主题颜色及原扫码弹窗。
 // 管理 B 站会话读取、扫码与退出，状态同步通过明确的会话模块发布。
 export function CredentialSettings() {
   const [session, setSession] = useState<BilibiliSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [message, setMessage] = useState("");
+  const [loginOpen, setLoginOpen] = useState(false);
   const lifetime = useRef<AbortController | null>(null);
 
   async function read(signal: AbortSignal) {
@@ -53,10 +56,18 @@ export function CredentialSettings() {
         {session?.warning && <p>{session.warning}</p>}
       </div>
       <div className="credential-actions">
+        {(session?.state === "logged_out" || session?.state === "expired") && <button type="button" className="primary" disabled={busy}
+          onClick={() => { setMessage(""); setLoginOpen(true); }}>扫码登录</button>}
         {session && session.state !== "logged_out" && <button type="button" className="secondary" disabled={busy} onClick={() => void logout()}>{busy ? "正在处理…" : "退出登录"}</button>}
         {(failed || session?.state === "unknown") && <button type="button" className="secondary" disabled={busy} onClick={() => void read(lifetime.current!.signal)}>重新读取</button>}
       </div>
     </div>
     {message && <p role="status">{message}</p>}
+    {loginOpen && <BilibiliLogin immediate canContinue={false} session={session}
+      onClose={() => setLoginOpen(false)} onContinue={() => setLoginOpen(false)}
+      onSuccess={result => {
+        setSession(result); setLoginOpen(false); setMessage("已登录 B 站。");
+        publishBilibiliSession(result);
+      }} />}
   </section>;
 }

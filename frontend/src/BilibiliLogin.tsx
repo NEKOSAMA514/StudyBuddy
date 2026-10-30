@@ -82,7 +82,7 @@ export function BilibiliLogin({ immediate, canContinue, session, onClose, onCont
   }, []);
 
   return <dialog ref={dialog} className="settings-dialog bilibili-login-dialog" aria-label="B 站登录"
-    onCancel={event => { event.preventDefault(); onClose(); }}>
+    onCancel={event => { event.preventDefault(); event.stopPropagation(); onClose(); }}>
     <button type="button" className="dialog-close" aria-label="关闭 B 站登录" onClick={onClose}>×</button>
     <h2>扫码登录B站，使用AI字幕无需本地语音转写</h2>
     <p>Cookie 仅用于登录验证和获取平台字幕。字幕不可用时使用本地语音转写。</p>
