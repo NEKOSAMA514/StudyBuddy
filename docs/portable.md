@@ -1,6 +1,6 @@
 # Windows x64 CPU 便携包
 
-首版交付本机验证预览。目标为 Windows 10/11 x64，尚不宣称干净系统、真实云端 API 或公开分发许可审查完成。项目自有源码采用 GPLv3（GPL-3.0-only）；第三方二进制、库和模型权重保留各自许可。
+首版交付本机验证预览。目标为 Windows 10/11 x64，尚不宣称干净系统和真实云端 API 验收完成。项目自有源码采用 GPLv3（GPL-3.0-only）；第三方二进制、库和模型权重保留各自许可。
 
 新构建使用 StudyBuddy 名称；更名前生成的历史 ZIP 和验收记录保留原样，不代表新名称的运行包已经重建。发布时需按当前源码重新构建并验收。
 
@@ -38,6 +38,7 @@ StudyBuddy-Windows-x64/
   启动.cmd、launcher.py、使用说明.txt
   LICENSE、THIRD_PARTY_NOTICES.txt、release-manifest.json
   runtime/、backend/app/、web/、tools/、models/、licenses/
+  docs/SOURCE.md
 ```
 
 ZIP 不含 `.env`、用户 `data/`、`log/`、测试、报告、实验、档案、编辑器设置、Git 目录或下载缓存。根 `debug.log` 只停止跟踪并忽略，保留本地内容和既有历史。运行库自身的必要测试模块和库内资源可能随第三方包存在，不等于项目测试被收集。
@@ -49,7 +50,7 @@ dist/StudyBuddy-v0.1.0-windows-x64-preview.zip
 dist/StudyBuddy-v0.1.0-windows-x64-preview.zip.sha256
 ```
 
-第三方说明集中在包内 `THIRD_PARTY_NOTICES.txt`，原始许可和模型授权保存在 `licenses/`。构建脚本补收已确认缺失的四份许可证和 ONNX Runtime 第三方声明，保留模型来源及 RapidOCR 的权重授权说明。依赖版本和源码出处见包内清单；FFmpeg 所有外部依赖及实际构建材料尚未全部取得，不能把现有的本体源码或来源链接表述为完整对应源码。该项保留说明，不为所有依赖新增源码下载或版本阻断流程。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)要求每个附件小于 2 GiB。
+第三方说明位于包内 `THIRD_PARTY_NOTICES.txt`，原始许可证、版权和模型声明位于 `licenses/`；依赖版本、来源和文件信息见 `release-manifest.json`。对应源码获取方式见随包的 [源码说明](SOURCE.md)。FFmpeg 目录保留其许可证、构建 README 和已收集的 FFmpeg 本体源码。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)要求每个附件小于 2 GiB。
 
 ## 验证与记录
 

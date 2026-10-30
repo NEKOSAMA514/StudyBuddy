@@ -19,8 +19,6 @@ LICENSE_ASSETS = Path(__file__).with_name("licenses")
 PUBLICATION_TODOS = [
     "Windows 10 和 Windows 11 x64 干净系统验收尚未完成。",
     "真实云端模型和 MinerU API 验收尚未完成。",
-    "独立 FFmpeg 及 PyAV 所带 FFmpeg 的完整构建材料尚未全部取得，现有源码出处见 THIRD_PARTY_NOTICES.txt。",
-    "正式包必须从已提交源码重建，并确认 GitHub 单附件小于 2 GiB。",
 ]
 
 
@@ -94,8 +92,7 @@ def collect_ffmpeg(root, work, package):
     source_archive = package / "licenses/ffmpeg/upstream-source.tar.gz"
     download(source_url, source_archive)
     return {"version": "9.0.2-essentials", "url": FFMPEG_URL, "sha256": FFMPEG_HASH,
-            "upstream_source": source_url, "source_sha256": sha256(source_archive),
-            "complete_corresponding_source_review": "pending"}
+            "upstream_source": source_url, "source_sha256": sha256(source_archive)}
 
 
 def collect_models(root, package):
@@ -191,19 +188,6 @@ def collect_conda_licenses(work, package):
     return records
 
 
-def third_party_notices():
-    return ("StudyBuddy — 第三方声明\n\n项目自有代码：GPLv3（GPL-3.0-only），Copyright (c) 2026 NEKOSAMA。\n"
-            "第三方软件和模型保留各自许可，本页列出随包材料位置。\n"
-            "Python、Conda 和前端依赖的许可证、版权与来源分别位于 licenses/python、conda、frontend；准确版本和哈希见 release-manifest.json。\n"
-            "模型的权利归属、固定来源和哈希对应的授权说明见 licenses/models。StudyBuddy 原样复制权重，没有训练或修改。\n"
-            "独立 FFmpeg 来自 Gyan 9.0.2 GPLv3 构建；PyAV 所带的 FFmpeg、Shapely 所带 GEOS 及其他组件按其各自许可处理。\n"
-            "独立 FFmpeg 的原始许可证、构建 README 和本体源码见 licenses/ffmpeg。\n"
-            "PyAV 对应源码与构建出处：https://github.com/PyAV-Org/PyAV/tree/v15.1.0 及 https://github.com/PyAV-Org/pyav-ffmpeg/tree/7.1.1-6 。\n"
-            "GEOS 3.14.1 对应源码：https://download.osgeo.org/geos/geos-3.14.1.tar.bz2 。\n"
-            "上述源码位置不表示两套 FFmpeg 所有外部依赖的完整构建材料已经取得；独立工具的上游请求渠道见 https://github.com/GyanD/codexffmpeg/issues/249 。\n\n"
-            "尚未完成事项：\n" + "\n".join("- " + item for item in PUBLICATION_TODOS) + "\n")
-
-
 def collect_frontend_licenses(frontend, package):
     lock = json.loads((frontend / "package-lock.json").read_text(encoding="utf-8"))
     records = []
@@ -228,12 +212,12 @@ def collect_frontend_licenses(frontend, package):
 def audit_package(package):
     required = ("启动.cmd", "launcher.py", "使用说明.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt",
                 "runtime/python.exe", "runtime/Scripts/conda-unpack-script.py", "backend/app/main.py",
-                "web/index.html", "tools/ffmpeg.exe", "tools/ffprobe.exe", "licenses/conda-explicit.txt")
+                "web/index.html", "tools/ffmpeg.exe", "tools/ffprobe.exe", "licenses/conda-explicit.txt", "docs/SOURCE.md")
     for name in required:
         if not (package / name).is_file():
             raise RuntimeError(f"Missing portable file: {name}")
     top = {"启动.cmd", "launcher.py", "使用说明.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt", "release-manifest.json",
-           "runtime", "backend", "web", "tools", "models", "licenses"}
+           "runtime", "backend", "web", "tools", "models", "licenses", "docs"}
     prohibited = {".git", ".env", "__pycache__", ".pytest_cache", ".idea", "test-results", "playwright-report"}
     for path in package.rglob("*"):
         relative = path.relative_to(package)
@@ -255,7 +239,8 @@ def main(args):
     package.mkdir()
     backend, frontend_files = tracked_inputs(root)
     source_files = backend + frontend_files + ["backend/requirements.lock", "LICENSE", "scripts/build-portable.ps1",
-        "scripts/portable/build.py", "scripts/portable/launcher.py", "scripts/portable/启动.cmd", "scripts/portable/使用说明.txt"]
+        "scripts/portable/build.py", "scripts/portable/launcher.py", "scripts/portable/启动.cmd", "scripts/portable/使用说明.txt",
+        "docs/SOURCE.md"]
     source_files += [str(path.relative_to(root)).replace("\\", "/") for path in sorted(LICENSE_ASSETS.iterdir()) if path.is_file()]
     input_hashes = {name: sha256(root / name) for name in source_files}
     for name in backend:
@@ -269,6 +254,7 @@ def main(args):
     cmd = package / "启动.cmd"
     cmd.write_bytes(cmd.read_text(encoding="utf-8-sig").replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
     copy_file(root / "LICENSE", package / "LICENSE")
+    copy_file(root / "docs/SOURCE.md", package / "docs/SOURCE.md")
     run([args.npm, "ci", "--no-audit", "--no-fund"], cwd=frontend)
     run([args.npm, "run", "build"], cwd=frontend)
     shutil.copytree(frontend / "dist", package / "web")
@@ -277,7 +263,13 @@ def main(args):
     models = collect_models(root, package)
     dependencies = collect_python_licenses(package)
     conda = collect_conda_licenses(work, package)
-    (package / "THIRD_PARTY_NOTICES.txt").write_text(third_party_notices(), encoding="utf-8")
+    notices = ("StudyBuddy — 第三方说明\n\n项目自有代码使用 GPLv3（GPL-3.0-only）；第三方软件和模型保留各自许可。\n"
+               "Python、Conda、前端和模型的原始许可材料分别见 licenses/python、licenses/conda、licenses/frontend、licenses/models。\n"
+               "依赖版本、来源和文件信息见 release-manifest.json。\n"
+               "对应源码获取方式见 docs/SOURCE.md。\n"
+               "FFmpeg 的原始许可证、构建 README 和已收集的 FFmpeg 本体源码见 licenses/ffmpeg。\n\n"
+               "尚未验证事项：\n" + "\n".join("- " + item for item in PUBLICATION_TODOS) + "\n")
+    (package / "THIRD_PARTY_NOTICES.txt").write_text(notices, encoding="utf-8")
     environment_archive = work / "runtime.zip"
     run([args.build_python, "-I", "-m", "conda_pack.cli", "--prefix", work / "env", "--output", environment_archive,
          "--format", "zip", "--compress-level", "4", "--exclude", "*.pyc", "--exclude", "*.pyo",

@@ -1,0 +1,13 @@
+diff --git a/compat/windows/mswindres b/compat/windows/mswindres
+index 8c14c96..1494df1 100755
+--- a/compat/windows/mswindres
++++ b/compat/windows/mswindres
+@@ -10,7 +10,7 @@ if [ $# -lt 2 ]; then
+     exit 0
+ fi
+ 
+-EXTRA_OPTS="-nologo"
++EXTRA_OPTS="-nologo -c65001"
+ 
+ while [ $# -gt 2 ]; do
+     case $1 in

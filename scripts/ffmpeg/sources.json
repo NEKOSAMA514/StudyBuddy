@@ -1,0 +1,17 @@
+{
+  "ffmpeg": {
+    "repo": "https://github.com/FFmpeg/FFmpeg.git",
+    "commit": "1fdbca85aaea513c9cc6c14d347f76543346d3da",
+    "tree": "5a82c44e9b51f5e97ad6b62fc93214113a4b3103"
+  },
+  "x264": {
+    "repo": "https://code.videolan.org/videolan/x264.git",
+    "commit": "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
+    "tree": "0b8e15dd14ad8d2fb8905df7785003b475236315"
+  },
+  "dav1d": {
+    "repo": "https://code.videolan.org/videolan/dav1d.git",
+    "commit": "c150ba6c9b9be0956330a9ddfee33ad88f2b1bc5",
+    "tree": "ad36d4bfe9a5f0ed1dab83f90d813285e2b4e462"
+  }
+}

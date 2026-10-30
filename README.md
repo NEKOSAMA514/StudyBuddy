@@ -112,7 +112,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 详细开发、测试及收录规则见 [开发与测试](docs/development.md)。
 
-## 使用文档
+<details>
+<summary>使用文档</summary>
 
 | 文档 | 内容 |
 |---|---|
@@ -124,7 +125,10 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 | [存储与恢复](docs/storage.md) | 数据目录、缓存、凭据、备份和恢复 |
 | [干净系统验收](docs/portable-clean-machine.md) | Windows 干净环境验证清单 |
 
-## 问题反馈与贡献
+</details>
+
+<details>
+<summary>问题反馈与贡献</summary>
 
 欢迎反馈使用问题、提出功能建议或提交改进。
 
@@ -132,8 +136,15 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 提交代码前，请运行与修改范围相关的测试。不要提交真实密钥、私人资料、模型权重、运行日志或构建产物。
 
-## License
+</details>
+
+<details>
+<summary>License</summary>
 
 项目自有源码采用 [GNU General Public License v3.0](LICENSE)（`GPL-3.0-only`），Copyright (c) 2026 NEKOSAMA。
 
-第三方库、工具和模型分别遵循各自许可。便携包附带相应声明与许可材料；当前公开分发前的第三方许可核对仍待完成。
+第三方库、工具和模型分别遵循各自许可。便携包附带相应声明与许可材料。
+
+本项目及第三方组件的对应源码获取方式见 [源码说明](docs/SOURCE.md)。
+
+</details>
