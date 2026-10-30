@@ -11,8 +11,8 @@ from .settings.model_defaults import MODELSCOPE_PROVIDER, MODELSCOPE_BASE_URL, D
 class Settings:
     data_dir: Path = Path(os.getenv("DATA_DIR", "./data"))
     log_dir: Path = Path(os.getenv("LOG_DIR", "./log"))
-    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_MB", "2048")) * 1024 * 1024
-    max_duration: float = float(os.getenv("MAX_DURATION_SECONDS", "7200"))
+    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_MB", "5120")) * 1024 * 1024
+    max_duration: float = float(os.getenv("MAX_DURATION_SECONDS", "18000"))
     frame_interval: float = float(os.getenv("FRAME_INTERVAL_SECONDS", "15"))
     asr_model: str = os.getenv("ASR_MODEL", "small")
     asr_engine: str = os.getenv("ASR_ENGINE", "paraformer")

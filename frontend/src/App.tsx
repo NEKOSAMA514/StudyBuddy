@@ -210,7 +210,8 @@ export function App() {
             loadError={files.loadError}
             retryRead={() => void files.refresh().catch(onError)}
             uploadPercent={files.uploadPercent}
-            maxUploadBytes={health?.max_upload_bytes || 2 * 1024 ** 3}
+            maxUploadBytes={health?.max_upload_bytes || 5 * 1024 ** 3}
+            maxDurationSeconds={health?.max_duration_seconds || 5 * 60 * 60}
             maxDocumentBytes={health?.max_document_bytes || 100 * 1024 ** 2}
             extensions={[...(health?.supported_video_extensions || []), ...(health?.supported_document_extensions || [])]}
             onUpload={(items) => void files.upload(items)}

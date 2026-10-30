@@ -33,6 +33,16 @@ def test_success_security_headers(client):
     assert response.headers["x-request-id"]
 
 
+@pytest.mark.parametrize("extra,status", [(0, 422), (1, 413)])
+def test_five_gib_upload_request_limit(client, extra, status):
+    # 请求体另留 1 MiB 给 multipart 元数据；只声明大长度，无需分配 5 GiB 测试文件。
+    response = client.post("/api/v1/videos", content=b"x", headers={
+        "Content-Type": "application/octet-stream", "Content-Length": str(5 * 1024 ** 3 + 1024 ** 2 + extra)})
+    assert response.status_code == status
+    if status == 413:
+        assert response.json()["error"]["code"] == "upload_limit"
+
+
 @pytest.mark.parametrize("declared", [None, b"1"])
 def test_chunked_upload_limit_before_registration(app, monkeypatch, declared):
     settings = app.state.pipeline.get_settings()

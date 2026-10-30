@@ -1,4 +1,5 @@
 import io
+import json
 import math
 import subprocess
 import sys
@@ -6,6 +7,7 @@ import threading
 import time
 import wave
 import pytest
+from app.config import Settings
 from app.errors import AppError
 from app.util.file_ingest import save_stream
 from app.videos.video_reader import probe, extract_audio, extract_frame, prepare_playback, source_path
@@ -108,6 +110,20 @@ def test_real_containers_read_and_ingest(client, app, samples, tmp_path, extensi
     renamed = client.patch(f'/api/v1/videos/{video["id"]}', json={"filename": "没有扩展名", "pinned": True}).json()
     assert renamed["media_info"] == media
     assert client.get(f'/api/v1/videos/{video["id"]}/content').content == source.read_bytes()
+
+
+@pytest.mark.parametrize("duration", [17999.999, 18000, 18000.001])
+def test_five_hour_duration_boundary(tmp_path, monkeypatch, duration):
+    metadata = {"format": {"format_name": "mp4", "duration": str(duration)},
+                "streams": [{"index": 0, "codec_type": "video", "codec_name": "h264", "width": 640, "height": 360}]}
+    monkeypatch.setattr("app.videos.video_reader.command", lambda *args, **kwargs: json.dumps(metadata))
+    path = tmp_path / "five-hours.mp4"
+    if duration <= 18000:
+        assert probe(path, Settings().max_duration, validate=False)["duration"] == duration
+    else:
+        with pytest.raises(AppError) as error:
+            probe(path, Settings().max_duration, validate=False)
+        assert error.value.code == "duration_limit"
 
 
 def test_stream_limits_and_failure_cleanup(tmp_path):

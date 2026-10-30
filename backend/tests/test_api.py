@@ -8,6 +8,12 @@ from app.analysis.worker import Worker
 from .conftest import upload
 
 
+def test_default_video_limits(client):
+    health = client.get("/api/v1/health").json()
+    assert health["max_upload_bytes"] == 5 * 1024 ** 3
+    assert health["max_duration_seconds"] == 5 * 60 * 60
+
+
 def test_upload_dedup_playback_and_restart(client, app, video_file):
     first = upload(client, video_file)
     second = upload(client, video_file)

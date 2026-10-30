@@ -66,8 +66,10 @@ test("键盘选择上传只保存文件，手动确认模型才创建任务", as
   const analyses: string[] = [];
   page.on("request", req => { if (req.method() === "POST" && /\/analyses$/.test(req.url())) analyses.push(req.url()); });
   await page.goto("/#summary");
-  expect((await (await request.get("/api/v1/health")).json()).max_upload_bytes).toBe(2 * 1024 ** 3);
-  await expect(page.getByRole("region", { name: "文件上传", exact: true })).toContainText("最大 2 GB");
+  const health = await (await request.get("/api/v1/health")).json();
+  expect(health.max_upload_bytes).toBe(5 * 1024 ** 3);
+  expect(health.max_duration_seconds).toBe(5 * 60 * 60);
+  await expect(page.getByRole("region", { name: "文件上传", exact: true })).toContainText("视频最大 5 GB · 最长 5 小时");
   const chooserPromise = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: /点击或拖拽文件到这里/ }).focus();
   await page.keyboard.press("Enter");

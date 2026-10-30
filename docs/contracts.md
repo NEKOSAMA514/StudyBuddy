@@ -70,7 +70,7 @@
 
 | 项目 | 当前规则 | 依据 |
 |---|---|---|
-| 视频上传与时长 | 默认 2 GiB、7,200 秒，可由启动配置设置 | [config.py](../backend/app/config.py) |
+| 视频上传与时长 | 默认 5 GiB、18,000 秒（5 小时），可由启动配置设置 | [config.py](../backend/app/config.py) |
 | 文档原件 | 不超过 100 MiB，且不超过应用上传限制 | [extraction.py](../backend/app/documents/extraction.py) |
 | 提取材料 | 最多 500 万字符、10,000 个来源块；PDF 页数也受限制 | [extraction.py](../backend/app/documents/extraction.py)、[imports.py](../backend/app/documents/imports.py) |
 | 文档生成 | 最多 10 万字符、8 个片段、80 次实际模型请求 | [material.py](../backend/app/documents/material.py) |
