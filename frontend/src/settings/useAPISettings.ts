@@ -2,6 +2,7 @@ import { notifySuccess } from "../notifications";
 import type { APIProfileSummary } from "./generationSettings";
 import { useEffect, useRef, useState } from "react";
 import { api, isAbortError, ReportedError } from "../api";
+import { apiProviders, providerForURL } from "./apiProviders";
 
 export const outputStages = [
   ["outline", "章节规划"], ["extract", "信息提取"], ["chapters", "正文生成（详尽／简洁）"],
@@ -31,6 +32,7 @@ const root = "/settings/model/profiles";
 export function useAPISettings(onSaved: (close: boolean) => void) {
   const [saved, setSaved] = useState<Profiles | null>(null);
   const [editing, setEditing] = useState<Draft | null>(null);
+  const [providerId, setProviderId] = useState<string>("custom");
   const [token, setToken] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [manualModel, setManualModel] = useState(false);
@@ -45,7 +47,8 @@ export function useAPISettings(onSaved: (close: boolean) => void) {
     void api<Profiles>(root, { signal: controller.signal }).then(result => {
       if (controller.signal.aborted) return;
       setSaved(result);
-      setEditing(result.profiles.find(p => p.id === result.active_id)!);
+      const active = result.profiles.find(p => p.id === result.active_id)!;
+      setEditing(active); setProviderId(providerForURL(active.base_url, active.name));
     }).catch(error => {
       if (controller.signal.aborted || isAbortError(error)) return;
       setFailed(true);
@@ -56,12 +59,21 @@ export function useAPISettings(onSaved: (close: boolean) => void) {
 
   function select(profile: Draft) {
     setEditing({ ...profile }); setToken(""); setModels([]); setManualModel(false); setMessage("");
+    setProviderId(providerForURL(profile.base_url, profile.name));
   }
   function update(value: Partial<Draft>) {
     setEditing(previous => previous && { ...previous, ...value });
     if (value.base_url !== undefined) setModels([]);
   }
   function changeToken(value: string) { setToken(value); setModels([]); }
+  function changeProvider(id: string) {
+    const provider = apiProviders.find(p => p.id === id);
+    const previous = apiProviders.find(p => p.id === providerId);
+    const useProviderName = !editing!.name || editing!.name === previous?.name || editing!.name === "自定义 API";
+    update({ ...(provider ? { base_url: provider.baseURL, model: "" } : {}),
+      ...(useProviderName ? { name: provider?.name ?? "自定义 API" } : {}) });
+    setProviderId(id); setToken(""); setModels([]); setManualModel(false); setMessage("");
+  }
   function request<T>(signal: AbortSignal, path = "", method = "GET", body?: object) {
     return api<T>(root + path, { method, signal, headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined });
@@ -127,6 +139,7 @@ export function useAPISettings(onSaved: (close: boolean) => void) {
   }
   const original = saved?.profiles.find(p => p.id === editing?.id);
   const hasCredential = !!token || !!(original?.has_token && original.base_url === editing?.base_url.replace(/\/+$/, ""));
-  return { saved, editing, update, token, changeToken, models, manualModel, setManualModel, busy, message, failed,
-    select, create: () => select({ ...empty }), save, readModels, test, activate, remove, original, hasCredential };
+  return { saved, editing, update, providerId, changeProvider, token, changeToken, models, manualModel, setManualModel, busy, message, failed,
+    select, create: () => select({ ...empty, name: apiProviders[0].name, base_url: apiProviders[0].baseURL }),
+    save, readModels, test, activate, remove, original, hasCredential };
 }

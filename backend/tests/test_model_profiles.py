@@ -9,6 +9,7 @@ from app.errors import AppError
 from app.analysis.llm import ModelClient
 from app.settings.model_profiles import execution_profile, execution_settings, task_model_config, EXECUTION_FIELDS
 from app.analysis.budgets import OUTPUT_TOKENS
+from .fakes import run_model
 
 ROOT = "/api/v1/settings/model/profiles"
 
@@ -80,6 +81,28 @@ def add(client, name="网关", key="fake-gateway-key", url="https://gateway.inva
                                       "token": key, "free_tier_confirmed": True})
     assert response.status_code == 201, response.text
     return response.json()["profiles"][-1]["id"]
+
+
+def test_bailian_profile_preserves_non_thinking_request_rules(client, app, monkeypatch):
+    endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    identifier = add(client, name="百炼", url=endpoint)
+    response = client.post(f"{ROOT}/{identifier}/activate")
+    assert response.status_code == 200
+    settings = app.state.pipeline.get_settings()
+    assert settings.llm_provider == "bailian"
+    assert "fake-gateway-key" not in response.text
+    calls = []
+
+    async def post(self, url, **kwargs):
+        calls.append((url, kwargs))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    model = ModelClient(replace(settings, llm_stream=False))
+    assert run_model(model, "request", [], max_tokens=32) == "OK"
+    assert calls[0][0] == endpoint + "/chat/completions"
+    assert calls[0][1]["json"]["enable_thinking"] is False
+    assert calls[0][1]["headers"]["Authorization"] == "Bearer fake-gateway-key"
 
 
 def test_migrate_legacy_without_writing_until_edit_and_preserve_all_configs(client, app, tmp_path):

@@ -8,10 +8,50 @@ test.beforeEach(async ({ request }) => {
   for (const profile of saved.profiles) if (profile.id !== "default") await request.delete(root + "/" + profile.id);
 });
 
+test("服务商目录覆盖参考项目的全部对话入口，名称不附加括号说明", async ({ page }) => {
+  // deepseek-harness ce7073d：catalogProviders 过滤掉仅提供分类器的 TypeSafe。
+  const referenceIds = `amazon-bedrock ant-ling anthropic azure baseten cerebras cloudflare-ai-gateway
+    cloudflare-workers-ai deepseek fireworks github-copilot google google-vertex groq huggingface kimi-coding
+    meta minimax minimax-cn mistral moonshotai moonshotai-cn nvidia openai openai-codex opencode opencode-go
+    openrouter qwen-token-plan qwen-token-plan-cn qwen-token-plan-individual radius together vercel-ai-gateway
+    xai xiaomi xiaomi-token-plan-ams xiaomi-token-plan-cn xiaomi-token-plan-sgp zai zai-coding-cn`.split(/\s+/);
+  await page.goto("/#settings");
+  const options = page.getByLabel("服务商", { exact: true }).locator("option");
+  const values = await options.evaluateAll(elements => elements.map(element => (element as HTMLOptionElement).value));
+  expect(values.sort()).toEqual([...referenceIds, "modelscope", "siliconflow", "bailian", "zhipu", "custom"].sort());
+  for (const name of await options.allTextContents()) expect(name).not.toMatch(/[（()）]/);
+});
+
+test("专属地址保存后仍识别服务商，共用地址的预设可按默认名称恢复", async ({ page }) => {
+  await page.goto("/#settings");
+  await page.getByRole("button", { name: "添加配置", exact: true }).click();
+  const provider = page.getByLabel("服务商", { exact: true });
+  await provider.selectOption("azure");
+  await page.getByLabel("API 密钥", { exact: true }).fill("fake-resource-key");
+  await expect(page.getByRole("button", { name: "读取可用模型", exact: true })).toBeDisabled();
+  await page.getByLabel("API 地址", { exact: true }).fill("https://study-resource.openai.azure.com/openai/v1");
+  await page.getByLabel("模型 ID", { exact: true }).fill("my-deployment");
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await expect(page.locator(".notice[role='status']")).toContainText("配置已保存");
+  await page.reload();
+  await page.getByRole("button", { name: /Azure OpenAI/ }).click();
+  await expect(provider).toHaveValue("azure");
+  await expect(page.getByLabel("API 地址", { exact: true })).toHaveValue("https://study-resource.openai.azure.com/openai/v1");
+  await provider.selectOption("qwen-token-plan-individual");
+  await page.getByLabel("模型 ID", { exact: true }).fill("qwen-model");
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await expect(page.locator(".notice[role='status']")).toContainText("配置已保存");
+  await expect(provider).toHaveValue("qwen-token-plan-individual");
+  await page.reload();
+  await page.getByRole("button", { name: /Qwen Token Plan Individual/ }).click();
+  await expect(provider).toHaveValue("qwen-token-plan-individual");
+});
+
 test("每组配置保存输入与各阶段输出上限，刷新保留且新配置恢复默认", async ({ page, request }) => {
   await page.goto("/#settings");
   await page.getByRole("button", { name: "添加配置", exact: true }).click();
   await page.getByLabel("配置名称", { exact: true }).fill("自定义预算");
+  await page.getByLabel("服务商", { exact: true }).selectOption("custom");
   await page.getByLabel("API 地址", { exact: true }).fill("https://budget.invalid/v1");
   await page.getByLabel("模型 ID", { exact: true }).fill("budget-model");
   await page.getByText("高级设置", { exact: true }).click();
@@ -56,6 +96,7 @@ test("多组连接保存、启用、刷新、编辑、清空密钥和删除相�
   const previous = await (await request.get("/api/v1/settings/model")).json();
   await page.getByRole("button", { name: "添加配置", exact: true }).click();
   await page.getByLabel("配置名称").fill("测试网关");
+  await page.getByLabel("服务商", { exact: true }).selectOption("custom");
   await page.getByLabel("API 地址", { exact: true }).fill("https://gateway.invalid/v1");
   await page.getByLabel("API 密钥", { exact: true }).fill("fake-browser-gateway");
   await page.getByLabel("模型 ID", { exact: true }).fill("gateway-model");
@@ -103,6 +144,7 @@ test("未保存的表单可读取模型和测试连接，切换配置后不残�
   });
   await page.goto("/#settings");
   await page.getByRole("button", { name: "添加配置", exact: true }).click();
+  await page.getByLabel("服务商", { exact: true }).selectOption("custom");
   await page.getByLabel("API 地址", { exact: true }).fill("https://unsaved.invalid/v1");
   await page.getByLabel("API 密钥", { exact: true }).fill("fake-unsaved-browser");
   await page.getByRole("button", { name: "读取可用模型", exact: true }).click();
@@ -125,6 +167,69 @@ test("未保存的表单可读取模型和测试连接，切换配置后不残�
   await expect(page.getByLabel("API 密钥", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("配置名称")).toHaveValue("魔搭");
   await expect(page.getByRole("button", { name: "手动输入", exact: true })).toHaveCount(0);
+});
+
+test("厂商预设无需填写地址，可读取模型、保存恢复且切换时隔离密钥", async ({ page, request }) => {
+  const calls: { path: string; body: any }[] = [];
+  for (const path of ["options", "test"]) {
+    await page.route(`**/settings/model/profiles/${path}*`, route => {
+      calls.push({ path, body: route.request().postDataJSON() });
+      return route.fulfill({ json: path === "options" ? { models: ["provider-model"] } : { elapsed_seconds: 0.1 } });
+    });
+  }
+  await page.goto("/#settings");
+  const provider = page.getByLabel("服务商", { exact: true });
+  await expect(provider).toHaveValue("modelscope");
+  await expect(page.getByLabel("API 地址", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "添加配置", exact: true }).click();
+  await provider.selectOption("deepseek");
+  await expect(page.getByLabel("配置名称")).toHaveValue("DeepSeek");
+  await page.getByLabel("API 密钥", { exact: true }).fill("fake-deepseek-browser");
+  await page.getByRole("button", { name: "读取可用模型", exact: true }).click();
+  await page.getByLabel("模型 ID", { exact: true }).selectOption("provider-model");
+  await page.getByRole("button", { name: "测试连接", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "连接成功" })).toBeVisible();
+  expect(calls.map(call => call.path)).toEqual(["options", "test"]);
+  for (const call of calls) {
+    expect(call.body.base_url).toBe("https://api.deepseek.com");
+    expect(call.body.token).toBe("fake-deepseek-browser");
+  }
+  for (const width of [1280, 686, 375]) {
+    await page.setViewportSize({ width, height: 871 });
+    for (const theme of ["light", "dark"]) {
+      await page.locator("html").evaluate((el, value) => el.setAttribute("data-theme", value), theme);
+      const dialog = page.getByRole("dialog", { name: "设置", exact: true });
+      expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await dialog.evaluate(el => { el.scrollTop = 0; });
+      await page.screenshot({ path: test.info().outputPath(`provider-${theme}-${width}.png`), animations: "disabled" });
+      await page.locator(".api-model-actions").scrollIntoViewIfNeeded();
+      const manual = (await page.getByRole("button", { name: "手动输入", exact: true }).boundingBox())!;
+      const read = (await page.getByRole("button", { name: "读取可用模型", exact: true }).boundingBox())!;
+      expect(read.x - manual.x - manual.width >= 9 || read.y - manual.y - manual.height >= 9).toBe(true);
+      await page.screenshot({ path: test.info().outputPath(`model-actions-${theme}-${width}.png`), animations: "disabled" });
+    }
+  }
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await expect(page.locator(".notice[role='status']")).toContainText("配置已保存");
+  const stored = (await (await request.get(root)).json()).profiles.at(-1);
+  expect(stored.base_url).toBe("https://api.deepseek.com");
+  expect(stored.model).toBe("provider-model");
+  await page.getByRole("button", { name: "启用此配置", exact: true }).click();
+  await expect(page.locator(".notice[role='status']")).toContainText("已启用");
+  await page.reload();
+  await expect(provider).toHaveValue("deepseek");
+  await expect(page.getByLabel("API 地址", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "测试连接", exact: true })).toBeEnabled();
+  await page.getByLabel("配置名称").fill("我的学习模型");
+  await page.getByLabel("API 密钥", { exact: true }).fill("fake-unsaved-replacement");
+  await provider.selectOption("siliconflow");
+  await expect(page.getByLabel("配置名称")).toHaveValue("我的学习模型");
+  await expect(page.getByLabel("API 密钥", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("模型 ID", { exact: true })).toHaveValue("");
+  await expect(page.getByRole("button", { name: "读取可用模型", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "测试连接", exact: true })).toBeDisabled();
+  await provider.selectOption("custom");
+  await expect(page.getByLabel("API 地址", { exact: true })).toHaveValue("https://api.siliconflow.cn/v1");
 });
 
 test("已有模型 ID 不过滤读取的 36 个模型，选择与手填均可保存", async ({ page, request }) => {

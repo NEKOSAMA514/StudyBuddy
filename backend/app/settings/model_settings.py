@@ -56,7 +56,9 @@ class NoteStyleInput(BaseModel):
 
 # 按留空保留、显式清除和地址变更规则计算候选设置，不直接写盘。
 def candidate(settings, value):
-    return replace(settings, llm_provider=MODELSCOPE_PROVIDER if value.base_url == MODELSCOPE_BASE_URL else "openai-compatible", llm_base_url=value.base_url,
+    providers = {MODELSCOPE_BASE_URL: MODELSCOPE_PROVIDER,
+                 "https://dashscope.aliyuncs.com/compatible-mode/v1": "bailian"}
+    return replace(settings, llm_provider=providers.get(value.base_url, "openai-compatible"), llm_base_url=value.base_url,
                    llm_model=value.model, llm_key="" if value.clear_token else value.token or (settings.llm_key if value.base_url == settings.llm_base_url else ""),
                    llm_stream=value.stream, llm_json_mode=value.json_mode,
                    free_tier_confirmed=value.free_tier_confirmed,
