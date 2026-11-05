@@ -99,12 +99,13 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 
 构建 Windows 便携包，需要 Windows x64、64 位 PowerShell、Conda、Node.js/npm、Git 和网络。
 
-在 Git 仓库根目录执行，例如构建下一版：
+准备一份已通过验证的[自建 FFmpeg](docs/ffmpeg-build.md)，在 Git 仓库根目录执行。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts/build-portable.ps1 `
-  -Version 0.1.1
+  -Version 1.0.0 `
+  -FFmpegBuild 'dist/ffmpeg-minimal/<构建编号>'
 ```
 
 脚本会创建独立运行环境、构建前端、收集工具和默认模型，并在 `dist` 下生成 ZIP 与 SHA-256 校验文件。

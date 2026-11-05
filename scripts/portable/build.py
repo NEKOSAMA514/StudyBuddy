@@ -13,8 +13,16 @@ import urllib.request
 import zipfile
 
 
-FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip"
-FFMPEG_HASH = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+FFMPEG_SOURCES = "scripts/ffmpeg/sources.json"
+FFMPEG_PATCH = "scripts/ffmpeg/patches/ffmpeg-mswindres-utf8.patch"
+FFMPEG_RUNTIME = (
+    "ffmpeg.exe", "ffprobe.exe", "avcodec-61.dll", "avdevice-61.dll", "avfilter-10.dll",
+    "avformat-61.dll", "avutil-59.dll", "postproc-58.dll", "swresample-5.dll", "swscale-8.dll",
+)
+FFMPEG_LICENSES = (
+    "ffmpeg/COPYING.GPLv2", "ffmpeg/COPYING.GPLv3", "ffmpeg/COPYING.LGPLv2.1",
+    "ffmpeg/COPYING.LGPLv3", "ffmpeg/LICENSE.md", "x264/COPYING", "dav1d/COPYING",
+)
 LICENSE_ASSETS = Path(__file__).with_name("licenses")
 PUBLICATION_TODOS = [
     "Windows 10 和 Windows 11 x64 干净系统验收尚未完成。",
@@ -71,28 +79,51 @@ def download(url, destination):
         temporary.unlink(missing_ok=True)
 
 
-def collect_ffmpeg(root, work, package):
-    local = root / "tools/ffmpeg/ffmpeg-9.0.2-essentials_build.zip"
-    archive = local if local.is_file() and sha256(local) == FFMPEG_HASH else work / "downloads/ffmpeg.zip"
-    if archive != local:
-        download(FFMPEG_URL, archive)
-    if sha256(archive) != FFMPEG_HASH:
-        raise RuntimeError("FFmpeg archive SHA-256 mismatch")
-    with zipfile.ZipFile(archive) as source:
-        for name in ("bin/ffmpeg.exe", "bin/ffprobe.exe", "LICENSE", "README.txt"):
-            entry = "ffmpeg-9.0.2-essentials_build/" + name
-            destination = package / ("tools/" + Path(name).name if name.startswith("bin/") else "licenses/ffmpeg/" + name)
+def collect_ffmpeg(root, build, package):
+    sums = {}
+    for line in (build / "SHA256SUMS.txt").read_text(encoding="ascii").splitlines():
+        digest, name = line.split(maxsplit=1)
+        sums[name] = digest
+    for name in ("ffmpeg-win64.zip", "ffmpeg-sources.zip", "build-manifest.json"):
+        if sha256(build / name) != sums.get(name):
+            raise RuntimeError(f"FFmpeg SHA-256 mismatch: {name}")
+
+    manifest_bytes = (build / "build-manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if manifest["status"] != "verified" or manifest["target"] != "Windows x64":
+        raise RuntimeError("A verified Windows x64 FFmpeg build is required")
+    sources = json.loads((root / FFMPEG_SOURCES).read_text(encoding="utf-8"))
+    built_sources = {name: {key: record[key] for key in ("repo", "commit", "tree")}
+                     for name, record in manifest["sources"].items()}
+    if built_sources != sources or set(manifest["external_media_libraries"]) != set(sources) - {"ffmpeg"}:
+        raise RuntimeError("FFmpeg build sources do not match scripts/ffmpeg/sources.json")
+    patch = {"file": "patches/ffmpeg-mswindres-utf8.patch", "sha256": sha256(root / FFMPEG_PATCH)}
+    if manifest["source_patches"] != {"ffmpeg": patch}:
+        raise RuntimeError("FFmpeg build patch does not match the repository")
+    with zipfile.ZipFile(build / "ffmpeg-sources.zip") as archive:
+        if archive.read("ffmpeg-sources/build-manifest.json") != manifest_bytes:
+            raise RuntimeError("FFmpeg source archive belongs to a different build")
+
+    files = {f"bin/{name}": f"tools/{name}" for name in FFMPEG_RUNTIME}
+    files.update({f"licenses/{name}": f"licenses/ffmpeg/{name}" for name in FFMPEG_LICENSES})
+    with zipfile.ZipFile(build / "ffmpeg-win64.zip") as archive:
+        if archive.read("ffmpeg-win64/build-manifest.json") != manifest_bytes:
+            raise RuntimeError("FFmpeg binary archive belongs to a different build")
+        report = json.loads(archive.read("ffmpeg-win64/validation-report.json"))
+        if report["status"] != "passed":
+            raise RuntimeError("FFmpeg media validation did not pass")
+        for name, output in files.items():
+            payload = archive.read(f"ffmpeg-win64/{name}")
+            record = manifest["files"][name]
+            if len(payload) != record["bytes"] or hashlib.sha256(payload).hexdigest() != record["sha256"]:
+                raise RuntimeError(f"FFmpeg build file does not match its manifest: {name}")
+            destination = package / output
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with source.open(entry) as stream, destination.open("wb") as output:
-                shutil.copyfileobj(stream, output)
-    # Preserve the pinned upstream source referenced by this binary's README.
-    readme = (package / "licenses/ffmpeg/README.txt").read_text(encoding="utf-8")
-    revision = re.search(r"https://github.com/FFmpeg/FFmpeg/commit/([a-f0-9]+)", readme)[1]
-    source_url = f"https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/{revision}"
-    source_archive = package / "licenses/ffmpeg/upstream-source.tar.gz"
-    download(source_url, source_archive)
-    return {"version": "9.0.2-essentials", "url": FFMPEG_URL, "sha256": FFMPEG_HASH,
-            "upstream_source": source_url, "source_sha256": sha256(source_archive)}
+            destination.write_bytes(payload)
+    return {"version": report["version"].split()[2], "sha256": sums["ffmpeg-win64.zip"],
+            "source_archive": "ffmpeg-sources.zip", "source_sha256": sums["ffmpeg-sources.zip"],
+            "build_manifest_sha256": sums["build-manifest.json"], "sources": manifest["sources"],
+            "source_patches": manifest["source_patches"], "external_media_libraries": manifest["external_media_libraries"]}
 
 
 def collect_models(root, package):
@@ -212,7 +243,8 @@ def collect_frontend_licenses(frontend, package):
 def audit_package(package):
     required = ("启动.cmd", "launcher.py", "使用说明.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt",
                 "runtime/python.exe", "runtime/Scripts/conda-unpack-script.py", "backend/app/main.py",
-                "web/index.html", "tools/ffmpeg.exe", "tools/ffprobe.exe", "licenses/conda-explicit.txt", "docs/SOURCE.md")
+                "web/index.html", *(f"tools/{name}" for name in FFMPEG_RUNTIME),
+                "licenses/conda-explicit.txt", "docs/SOURCE.md")
     for name in required:
         if not (package / name).is_file():
             raise RuntimeError(f"Missing portable file: {name}")
@@ -240,9 +272,10 @@ def main(args):
     backend, frontend_files = tracked_inputs(root)
     source_files = backend + frontend_files + ["backend/requirements.lock", "LICENSE", "scripts/build-portable.ps1",
         "scripts/portable/build.py", "scripts/portable/launcher.py", "scripts/portable/启动.cmd", "scripts/portable/使用说明.txt",
-        "docs/SOURCE.md"]
+        "docs/SOURCE.md", FFMPEG_SOURCES, FFMPEG_PATCH]
     source_files += [str(path.relative_to(root)).replace("\\", "/") for path in sorted(LICENSE_ASSETS.iterdir()) if path.is_file()]
     input_hashes = {name: sha256(root / name) for name in source_files}
+    ffmpeg = collect_ffmpeg(root, args.ffmpeg_build, package)
     for name in backend:
         copy_file(root / name, package / name)
     frontend = work / "frontend"
@@ -259,7 +292,6 @@ def main(args):
     run([args.npm, "run", "build"], cwd=frontend)
     shutil.copytree(frontend / "dist", package / "web")
     frontend_dependencies = collect_frontend_licenses(frontend, package)
-    ffmpeg = collect_ffmpeg(root, work, package)
     models = collect_models(root, package)
     dependencies = collect_python_licenses(package)
     conda = collect_conda_licenses(work, package)
@@ -267,7 +299,7 @@ def main(args):
                "Python、Conda、前端和模型的原始许可材料分别见 licenses/python、licenses/conda、licenses/frontend、licenses/models。\n"
                "依赖版本、来源和文件信息见 release-manifest.json。\n"
                "对应源码获取方式见 docs/SOURCE.md。\n"
-               "FFmpeg 的原始许可证、构建 README 和已收集的 FFmpeg 本体源码见 licenses/ffmpeg。\n\n"
+               "自建 FFmpeg、x264 和 dav1d 的许可证见 licenses/ffmpeg。独立 FFmpeg 的构建和源码归档校验值见 release-manifest.json。\n\n"
                "尚未验证事项：\n" + "\n".join("- " + item for item in PUBLICATION_TODOS) + "\n")
     (package / "THIRD_PARTY_NOTICES.txt").write_text(notices, encoding="utf-8")
     environment_archive = work / "runtime.zip"
@@ -313,7 +345,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    for name in ("root", "work", "build-python", "conda", "npm"):
+    for name in ("root", "work", "build-python", "conda", "npm", "ffmpeg-build"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--version", required=True)
     main(parser.parse_args())

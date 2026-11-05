@@ -76,7 +76,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, start_worker=True, docu
             video_downloads.close()
             diagnostics.close()
 
-    app = FastAPI(title="StudyBuddy · 本地视频分析", lifespan=lifespan)
+    app = FastAPI(title="StudyBuddy · 本地视频分析", version="1.0.0", lifespan=lifespan)
     app.state.current_settings = current
     app.state.settings_service = current_settings
     app.state.sessions = sessions

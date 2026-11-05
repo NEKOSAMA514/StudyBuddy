@@ -18,11 +18,12 @@
 
 ## 构建
 
-需要 Windows x64、64 位 PowerShell、Conda、Node/npm、Git 和网络。从仓库根目录执行：
+需要 Windows x64、64 位 PowerShell、Conda、Node/npm、Git、网络和已验证的[自建 FFmpeg 构建目录](ffmpeg-build.md)。从仓库根目录执行。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
-  -File scripts/build-portable.ps1 -Version 0.1.0
+  -File scripts/build-portable.ps1 -Version 1.0.0 `
+  -FFmpegBuild 'dist/ffmpeg-minimal/<构建编号>'
 ```
 
 不在 PATH 的 Conda 可用 `-CondaExe <完整路径>` 指定。Python 固定 3.12.15，构建工具使用独立 venv 中的 `conda-pack==0.9.2`（[版本来源](https://pypi.org/project/conda-pack/)）。基础运行库从 conda-forge 安装，确切版本、构建、来源记录在 `licenses/conda-explicit.txt` 和清单中。后续可传 `-CondaExplicit <此前的 conda-explicit.txt>` 重用该层精确版本；后端与前端继续按仓库锁文件安装。
@@ -31,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 收集规则是正向清单：后端仅 Git 跟踪的 `backend/app/**/*.py`；前端仅 Git 跟踪的构建配置、`src/` 和 `public/`，临时安装并生产构建。开发目录增加其他文件不会改变收集结果；不递归扫描其他本地目录。版本和未提交状态也随清单记录，未提交的新增构建输入记录摘要。
 
-现有 FFmpeg 锁定 ZIP 经 SHA-256 验证后只提取 FFmpeg、FFprobe、许可和 README；缺少时构建阶段下载固定来源。Paraformer 只收集目录定义的两个文件并沿用现有模型和 tokens 校验；RapidOCR 权重直接取自锁定 wheel。不会复制整个 `models/`。
+打包脚本核对指定 FFmpeg 构建的源码提交、补丁和归档 SHA-256，将 FFmpeg、FFprobe、配套 DLL 和三项组件的许可证收进便携包。对应的 `ffmpeg-sources.zip` 保存在自建构建目录，归档哈希见 `release-manifest.json`。Paraformer 收集目录定义的两个文件并沿用现有模型和 tokens 校验。RapidOCR 权重直接取自锁定 wheel。
 
 ```text
 StudyBuddy-Windows-x64/
@@ -46,11 +47,11 @@ ZIP 不含 `.env`、用户 `data/`、`log/`、测试、报告、实验、档案�
 运行环境通过 conda-pack 打包后只解压入暂存目录，不执行路径修复。所有验证在原始 ZIP 的独立副本中进行。清单记录包内文件 SHA-256、尺寸、依赖、模型、工具与来源；清单不递归包含自身摘要，ZIP 外部 SHA-256 覆盖整个包。输出为：
 
 ```text
-dist/StudyBuddy-v0.1.0-windows-x64-preview.zip
-dist/StudyBuddy-v0.1.0-windows-x64-preview.zip.sha256
+dist/StudyBuddy-v1.0.0-windows-x64-preview.zip
+dist/StudyBuddy-v1.0.0-windows-x64-preview.zip.sha256
 ```
 
-第三方说明位于包内 `THIRD_PARTY_NOTICES.txt`，原始许可证、版权和模型声明位于 `licenses/`；依赖版本、来源和文件信息见 `release-manifest.json`。对应源码获取方式见随包的 [源码说明](SOURCE.md)。FFmpeg 目录保留其许可证、构建 README 和已收集的 FFmpeg 本体源码。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)要求每个附件小于 2 GiB。
+第三方说明位于包内 `THIRD_PARTY_NOTICES.txt`，原始许可证、版权和模型声明位于 `licenses/`。依赖版本、来源和文件信息见 `release-manifest.json`。对应源码获取方式见随包的[源码说明](SOURCE.md)。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases) 要求每个附件小于 2 GiB。
 
 ## 验证与记录
 

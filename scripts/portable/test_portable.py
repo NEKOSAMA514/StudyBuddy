@@ -164,12 +164,20 @@ class PortableTests(unittest.TestCase):
         self.assertEqual(before, (["backend/app/main.py"], ["frontend/package-lock.json", "frontend/src/App.tsx"]))
 
     def test_audit_requires_tools_and_rejects_private_paths(self):
-        required = ("启动.cmd", "launcher.py", "使用说明.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt", "runtime/python.exe", "runtime/Scripts/conda-unpack-script.py", "backend/app/main.py", "web/index.html", "tools/ffmpeg.exe", "tools/ffprobe.exe", "licenses/conda-explicit.txt", "docs/SOURCE.md")
+        required = ("启动.cmd", "launcher.py", "使用说明.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt",
+                    "runtime/python.exe", "runtime/Scripts/conda-unpack-script.py", "backend/app/main.py",
+                    "web/index.html", *(f"tools/{name}" for name in builder.FFMPEG_RUNTIME),
+                    "licenses/conda-explicit.txt", "docs/SOURCE.md")
         for name in required:
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b"required")
         builder.audit_package(self.root)
+        dll = self.root / "tools/avcodec-61.dll"
+        dll.unlink()
+        with self.assertRaisesRegex(RuntimeError, "Missing portable file: tools/avcodec-61.dll"):
+            builder.audit_package(self.root)
+        dll.write_bytes(b"required")
         for name in (".env", "data/private.json", "log/secret.log", "backend/tests/test.py", "runtime/private.pyc"):
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)

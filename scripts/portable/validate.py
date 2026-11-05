@@ -97,7 +97,7 @@ def local_capabilities(package, output, repo, speech_source):
         draw = ImageDraw.Draw(image)
         draw.text((30, 50), "StudyBuddy 本地识别 12345", fill="black",
                   font=ImageFont.truetype(str(Path(os.environ["SystemRoot"]) / "Fonts/msyh.ttc"), 55))
-        image_path = output / "synthetic.png"
+        image_path = output / "synthetic.jpg"
         image.save(image_path)
         text_result, confidence = Recognizer(settings).ocr(image_path)
         assert "12345" in text_result and "StudyBuddy" in text_result, text_result
@@ -132,7 +132,7 @@ def main(args):
     speech_source = args.speech.resolve(strict=True)
     output.mkdir(parents=True, exist_ok=True)
     summary = {"status": "failed", "clean_machine": False, "real_cloud_api": False, "checks": []}
-    process = None
+    process = duplicate = None
     busy = None
     try:
         manifest = json.loads((package / "release-manifest.json").read_text(encoding="utf-8"))
@@ -161,8 +161,17 @@ def main(args):
         except OSError:
             busy.close()
             busy = None
+        journal = package / ".runtime-preparing.json"
+        failed_attempt = journal.stat().st_mtime_ns
         process = start(package, output, "first-start")
-        wait_until(lambda: (package / ".runtime-preparing.json").exists(), process)
+
+        def preparing_again():
+            try:
+                return journal.stat().st_mtime_ns != failed_attempt
+            except FileNotFoundError:
+                return False
+
+        wait_until(preparing_again, process)
         duplicate = start(package, output, "duplicate-preparing")
         assert duplicate.wait(timeout=30) == 0
         state_path = package / ".studybuddy-instance.json"
@@ -197,8 +206,9 @@ def main(args):
         summary["checks"].append("real-asr-ocr-ffmpeg-pdf-office-and-child-paths")
         summary["status"] = "passed"
     finally:
-        if process and process.poll() is None:
-            ctrl_c(process, package / "runtime/python.exe")
+        for child in (duplicate, process):
+            if child and child.poll() is None:
+                ctrl_c(child, package / "runtime/python.exe")
         if busy:
             busy.close()
         (output / "acceptance.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

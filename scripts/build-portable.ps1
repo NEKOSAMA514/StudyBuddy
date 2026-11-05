@@ -1,5 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$')][string]$Version,
+    [Parameter(Mandatory = $true)][string]$FFmpegBuild,
     [string]$CondaExe,
     [string]$CondaExplicit
 )
@@ -23,6 +24,10 @@ if (-not $CondaExe) {
 if (-not $CondaExe -or -not (Test-Path -LiteralPath $CondaExe -PathType Leaf)) { throw 'Conda not found; supply -CondaExe.' }
 $npm = (Get-Command npm.cmd -ErrorAction Stop).Source
 $null = Get-Command git, node -ErrorAction Stop
+$ffmpegRoot = (Resolve-Path -LiteralPath $FFmpegBuild).Path
+foreach ($file in @('ffmpeg-win64.zip', 'ffmpeg-sources.zip', 'build-manifest.json', 'SHA256SUMS.txt')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $ffmpegRoot $file) -PathType Leaf)) { throw "Missing verified FFmpeg build input: $file" }
+}
 foreach ($file in @('backend/requirements.lock', 'frontend/package-lock.json', 'frontend/package.json', 'LICENSE',
     'scripts/portable/build.py', 'scripts/portable/launcher.py', 'scripts/portable/启动.cmd', 'scripts/portable/使用说明.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $studyRoot $file) -PathType Leaf)) { throw "Missing build input: $file" }
@@ -84,7 +89,7 @@ try {
     & $CondaExe list --prefix $runtime --explicit | Set-Content -LiteralPath (Join-Path $work 'conda-explicit.txt') -Encoding ASCII
     if ($LASTEXITCODE -ne 0) { throw 'Cannot record explicit Conda packages.' }
     $arguments = @('-I', '-B', 'scripts/portable/build.py', '--root', $studyRoot, '--work', $work,
-        '--version', $Version, '--npm', $npm, '--build-python', $buildPython, '--conda', $CondaExe)
+        '--version', $Version, '--npm', $npm, '--build-python', $buildPython, '--conda', $CondaExe, '--ffmpeg-build', $ffmpegRoot)
     Invoke-Checked 'assemble' $python $arguments
     Write-Host "Built local preview: $zip"
 } finally {

@@ -4,7 +4,7 @@
 
 ## 本机开发方式
 
-Windows 便携包统一入口为 [build-portable.ps1](../scripts/build-portable.ps1)，例如 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -Version 0.1.0`。构建会在忽略的 `dist/` 中新建专用 Python 环境、工具环境和前端工作副本，不覆盖当前环境或 `frontend/dist/`。依赖、来源、文件清单和公开发布前待办随包记录；详细收集规则及验证入口见 [便携包说明](portable.md)。
+Windows 便携包统一入口为 [build-portable.ps1](../scripts/build-portable.ps1)。构建会在忽略的 `dist/` 中新建专用 Python 环境、工具环境和前端工作副本。依赖、来源、文件清单和公开发布前待办随包记录。构建命令、输入和验证入口见[便携包说明](portable.md)。
 
 先准备可启动的后端环境和一次前端构建。当前本机验证入口为 [start-local.ps1](../scripts/start-local.ps1) 和 [run-tests-local.ps1](../scripts/run-tests-local.ps1)；仓库中的旧容器测试入口不作为当前 Windows 流程的替代。
 
