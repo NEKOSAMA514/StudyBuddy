@@ -110,18 +110,29 @@ def test_file_actions_reject_unlisted_models(client):
 
 
 @pytest.mark.parametrize("identifier", ["rapidocr"])
-def test_ocr_folder_can_be_opened_without_enabling_delete_or_download_controls(client, app, monkeypatch, identifier):
+def test_ocr_folder_can_be_opened_without_enabling_delete_or_download_controls(client, app, monkeypatch, tmp_path, identifier):
     settings = app.state.pipeline.get_settings()
     route = f"/api/v1/settings/models/{identifier}"
+    bundled = tmp_path / "bundled-ocr"
+    monkeypatch.setattr("app.recognition.model_catalog.bundled_ocr_path", lambda: bundled)
     missing = client.post(route + "/reveal")
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "file_missing"
+    bundled.mkdir()
+    for name in MODELS[identifier]["files"]:
+        (bundled / name).write_bytes(b"bundled weight")
+    ocr = next(model for model in client.get("/api/v1/settings/recognition").json()["models"] if model["id"] == identifier)
+    assert ocr["ready"] and ocr["directory_exists"]
+    assert not model_path(settings, identifier).exists()
+    opened = []
+    monkeypatch.setattr("app.recognition.local_models.os.startfile", opened.append, raising=False)
+    assert client.post(route + "/reveal").json() == {"opened": True}
+    assert opened == [str(bundled.resolve())]
+
     fake_files(settings, identifier)
     directory = model_path(settings, identifier).resolve()
     before = {name: (directory / name).read_bytes() for name in MODELS[identifier]["files"]}
-    opened = []
-    monkeypatch.setattr("app.recognition.local_models.os.startfile", opened.append, raising=False)
     assert client.post(route + "/reveal", json={"path": "C:/Windows"}).json() == {"opened": True}
-    assert opened == [str(directory)]
+    assert opened == [str(bundled.resolve()), str(directory)]
     assert client.delete(route).json()["error"]["code"] == "unknown_model"
     for action in ("pause", "resume", "cancel"):
         response = client.post(route + "/download/" + action)

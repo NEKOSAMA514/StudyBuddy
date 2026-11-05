@@ -128,32 +128,34 @@ def collect_ffmpeg(root, build, package):
 
 def collect_models(root, package):
     sys.path.insert(0, str(package / "backend"))
-    from app.recognition.model_catalog import MODELS
+    from app.recognition.model_catalog import MODELS, bundled_ocr_path
     from app.recognition.model_files import verify_paraformer
-    import rapidocr
     results = {}
     for identifier in ("paraformer", "rapidocr"):
         spec = MODELS[identifier]
-        target = package / "models" / spec["directory"]
-        target.mkdir(parents=True)
-        for name in spec["files"]:
-            local = root / "models" / spec["directory"] / name
-            destination = target / name
-            if identifier == "rapidocr":
-                copy_file(Path(rapidocr.__file__).parent / "models" / name, destination)
-            elif local.is_file():
-                copy_file(local, destination)
-            else:
-                download(f"https://huggingface.co/{spec['repo']}/resolve/{spec['revision']}/{name}", destination)
         if identifier == "paraformer":
-            verify_paraformer(target)
+            directory = f"models/{spec['directory']}"
+            target = package / directory
+            target.mkdir(parents=True)
             base = f"https://huggingface.co/{spec['repo']}/resolve/{spec['revision']}"
+            for name in spec["files"]:
+                local = root / directory / name
+                if local.is_file():
+                    copy_file(local, target / name)
+                else:
+                    download(f"{base}/{name}", target / name)
+            verify_paraformer(target)
             for name in ("README.md",):
                 download(base + "/" + name, package / "licenses/models/paraformer" / name)
-            results[identifier] = {"repo": spec["repo"], "revision": spec["revision"], "source": base}
+            results[identifier] = {"repo": spec["repo"], "revision": spec["revision"], "source": base, "directory": directory}
         else:
+            # conda-pack 已包含 wheel 内置权重，记录其随包位置。
+            target = bundled_ocr_path()
+            if target is None:
+                raise RuntimeError("RapidOCR package is missing")
             results[identifier] = {"distribution": "rapidocr", "version": metadata.version("rapidocr"),
-                                   "source": "https://github.com/RapidAI/RapidOCR"}
+                                   "source": "https://github.com/RapidAI/RapidOCR",
+                                   "directory": "runtime/Lib/site-packages/rapidocr/models"}
         results[identifier]["files"] = {name: sha256(target / name) for name in spec["files"]}
     copy_file(LICENSE_ASSETS / "flatbuffers.LICENSE", package / "licenses/models/LICENSE-APACHE-2.0.txt")
     distribution = metadata.distribution("rapidocr")
@@ -259,8 +261,8 @@ def audit_package(package):
             raise RuntimeError(f"Prohibited package path: {relative}")
         if relative.parts[0] == "backend" and len(relative.parts) > 1 and relative.parts[1] != "app":
             raise RuntimeError(f"Non-business backend path: {relative}")
-        if path.is_file() and path.suffix.lower() in {".pyc", ".pyo", ".log"}:
-            raise RuntimeError(f"Cache/log in package: {relative}")
+        if path.is_file() and path.suffix.lower() in {".pyc", ".pyo", ".log", ".pdb"}:
+            raise RuntimeError(f"Cache/log/debug file in package: {relative}")
 
 
 def main(args):
@@ -305,7 +307,7 @@ def main(args):
     environment_archive = work / "runtime.zip"
     run([args.build_python, "-I", "-m", "conda_pack.cli", "--prefix", work / "env", "--output", environment_archive,
          "--format", "zip", "--compress-level", "4", "--exclude", "*.pyc", "--exclude", "*.pyo",
-         "--exclude", "*/__pycache__/*"])
+         "--exclude", "*.pdb", "--exclude", "*/__pycache__/*"])
     runtime = package / "runtime"
     runtime.mkdir()
     with zipfile.ZipFile(environment_archive) as source:

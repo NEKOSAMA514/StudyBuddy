@@ -13,7 +13,7 @@ from typing import Literal
 from ..errors import AppError
 from ..util.json_io import atomic_json
 # 保留既有调用者使用的目录及准备函数名字；共享原对象，不复制规则。
-from .model_catalog import MODELS, option_for, model_path, model_ready, runtime_ready
+from .model_catalog import MODELS, option_for, model_path, model_ready, ready_ocr_path, runtime_ready
 from .model_files import prepare_bundled, verify_paraformer
 
 
@@ -134,11 +134,15 @@ class ModelDownloads:
         with self.lock:
             states = dict(self.states)
             active = self.active
+        models = []
+        for identifier, spec in MODELS.items():
+            ready = model_ready(settings, identifier)
+            models.append({"id": identifier, **{k: spec[k] for k in ("kind", "name", "description", "size", "docs")},
+                           "directory": f"models/{spec['directory']}", "ready": ready,
+                           "directory_exists": ready or model_path(settings, identifier).is_dir(),
+                           "runtime_ready": runtime_ready(identifier), "download": states.get(identifier)})
         return {"settings": recognition_settings(settings), "model_directory": "models/", "active_download": active,
-                "models": [{"id": identifier, **{k: spec[k] for k in ("kind", "name", "description", "size", "docs")},
-                            "directory": f"models/{spec['directory']}", "ready": model_ready(settings, identifier),
-                            "directory_exists": model_path(settings, identifier).is_dir(),
-                            "runtime_ready": runtime_ready(identifier), "download": states.get(identifier)} for identifier, spec in MODELS.items()]}
+                "models": models}
 
     def model_directory(self, identifier, *, allow_ocr=False):
         spec = MODELS.get(identifier)
@@ -153,6 +157,8 @@ class ModelDownloads:
 
     def reveal(self, identifier):
         directory = self.model_directory(identifier, allow_ocr=True)
+        if identifier == "rapidocr":
+            directory = (ready_ocr_path(self.settings) or directory).resolve()
         if not directory.is_dir():
             raise AppError("file_missing", "模型文件夹不存在，请先下载或准备模型。", 404)
         opener = getattr(os, "startfile", None)

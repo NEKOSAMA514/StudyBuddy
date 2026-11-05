@@ -36,7 +36,7 @@ Python 依赖由 [requirements.txt](../backend/requirements.txt)安装，Deno �
 |---|---|
 | API设置 | 选择服务商、填写密钥并选择模型，保存并启用一组连接 |
 | 语音识别模型 | 根据材料语言选择 Paraformer 或 faster-whisper，准备模型文件后保存 |
-| OCR 模型 | 检查 RapidOCR 文件和运行组件状态，保存选择；内置权重由程序按需准备 |
+| OCR 模型 | 检查 RapidOCR 文件和运行组件状态，默认读取随 RapidOCR 安装的内置权重 |
 | 笔记风格 | 设置默认简洁／详尽风格，以及可选的笔记补充要求 |
 | 网络代理 | 按需要设置后续视频解析与下载使用的代理 |
 | 登录凭证管理 | 按需要扫码登录或退出 B 站 |

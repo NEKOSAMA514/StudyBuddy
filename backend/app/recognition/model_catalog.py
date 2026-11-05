@@ -1,5 +1,6 @@
 """共用的识别模型目录、路径及就绪查询；不加载识别运行库。"""
 import importlib.util
+from pathlib import Path
 
 
 MODELS = {
@@ -19,10 +20,30 @@ def model_path(settings, identifier):
     return settings.model_dir / MODELS[identifier]["directory"]
 
 
-# 检查所选型号的本地文件是否完整，和运行库是否可用分别判断。
-def model_ready(settings, identifier):
-    path = model_path(settings, identifier)
+def _has_weights(path, identifier):
     return all((path / file).is_file() and (path / file).stat().st_size > 0 for file in MODELS[identifier]["files"])
+
+
+def bundled_ocr_path():
+    spec = importlib.util.find_spec("rapidocr")
+    return Path(spec.origin).parent / "models" if spec and spec.origin else None
+
+
+def ready_ocr_path(settings):
+    local = model_path(settings, "rapidocr")
+    if _has_weights(local, "rapidocr"):
+        return local
+    bundled = bundled_ocr_path()
+    if bundled and _has_weights(bundled, "rapidocr"):
+        return bundled
+    return None
+
+
+# 检查权重是否完整，和运行库是否可用分别判断。
+def model_ready(settings, identifier):
+    if identifier == "rapidocr":
+        return ready_ocr_path(settings) is not None
+    return _has_weights(model_path(settings, identifier), identifier)
 
 
 # 检查识别后端所需组件能否加载，不把文件存在等同于可运行。

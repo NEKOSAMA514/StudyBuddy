@@ -178,7 +178,7 @@ class PortableTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Missing portable file: tools/avcodec-61.dll"):
             builder.audit_package(self.root)
         dll.write_bytes(b"required")
-        for name in (".env", "data/private.json", "log/secret.log", "backend/tests/test.py", "runtime/private.pyc"):
+        for name in (".env", "data/private.json", "log/secret.log", "backend/tests/test.py", "runtime/private.pyc", "runtime/python312.pdb"):
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b"forbidden")

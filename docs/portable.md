@@ -32,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 收集规则是正向清单：后端仅 Git 跟踪的 `backend/app/**/*.py`；前端仅 Git 跟踪的构建配置、`src/` 和 `public/`，临时安装并生产构建。开发目录增加其他文件不会改变收集结果；不递归扫描其他本地目录。版本和未提交状态也随清单记录，未提交的新增构建输入记录摘要。
 
-打包脚本核对指定 FFmpeg 构建的源码提交、补丁和归档 SHA-256，将 FFmpeg、FFprobe、配套 DLL 和三项组件的许可证收进便携包。对应的 `ffmpeg-sources.zip` 保存在自建构建目录，归档哈希见 `release-manifest.json`。Paraformer 收集目录定义的两个文件并沿用现有模型和 tokens 校验。RapidOCR 权重直接取自锁定 wheel。
+打包脚本核对指定 FFmpeg 构建的源码提交、补丁和归档 SHA-256，将 FFmpeg、FFprobe、配套 DLL 和三项组件的许可证收进便携包。对应的 `ffmpeg-sources.zip` 保存在自建构建目录，归档哈希见 `release-manifest.json`。Paraformer 收集目录定义的两个文件并沿用现有模型和 tokens 校验。默认 OCR 直接读取 RapidOCR wheel 内的权重。
 
 ```text
 StudyBuddy-Windows-x64/
@@ -42,7 +42,7 @@ StudyBuddy-Windows-x64/
   docs/SOURCE.md
 ```
 
-ZIP 不含 `.env`、用户 `data/`、`log/`、测试、报告、实验、档案、编辑器设置、Git 目录或下载缓存。根 `debug.log` 只停止跟踪并忽略，保留本地内容和既有历史。运行库自身的必要测试模块和库内资源可能随第三方包存在，不等于项目测试被收集。
+ZIP 不含 `.env`、用户 `data/`、`log/`、测试、报告、实验、档案、编辑器设置、Git 目录、下载缓存或 `.pdb` 调试符号。根 `debug.log` 只停止跟踪并忽略，保留本地内容和既有历史。运行库自身的必要测试模块和库内资源可能随第三方包存在，不等于项目测试被收集。
 
 运行环境通过 conda-pack 打包后只解压入暂存目录，不执行路径修复。所有验证在原始 ZIP 的独立副本中进行。清单记录包内文件 SHA-256、尺寸、依赖、模型、工具与来源；清单不递归包含自身摘要，ZIP 外部 SHA-256 覆盖整个包。输出为：
 

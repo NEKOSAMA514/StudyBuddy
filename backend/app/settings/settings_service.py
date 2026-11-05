@@ -19,7 +19,7 @@ from .private_migration import migrate_private_settings
 from .network_settings import (NetworkSettingsInput, load_network_settings, save_network_settings,
                                network_candidate, public_network_settings)
 from ..recognition.local_models import (RecognitionInput, load_recognition, save_recognition,
-                           recognition_candidate, recognition_settings, prepare_bundled)
+                           recognition_candidate, recognition_settings)
 
 
 # 在数据库和后台任务启动前迁移并加载配置，任何读取失败都停止启动。
@@ -68,10 +68,7 @@ class SettingsService:
             return public(updated)
 
     def get_recognition(self):
-        # 内置 OCR 权重复制后统一从 models 读取。
-        current = self.current
-        prepare_bundled(current, "rapidocr")
-        return self.downloads.catalog(current)
+        return self.downloads.catalog(self.current)
 
     def update_recognition(self, value: RecognitionInput):
         return self._update(lambda current: recognition_candidate(current, value), save_recognition, recognition_settings)

@@ -71,10 +71,10 @@ class Recognizer:
             raise AppError("unknown_model", "不支持该 OCR 模型，请选择 RapidOCR。")
         from rapidocr import RapidOCR, OCRVersion, ModelType
         if self.ocr_model is None:
-            from .model_catalog import model_path
-            from .model_files import prepare_bundled
-            prepare_bundled(self.settings, "rapidocr")
-            directory = model_path(self.settings, "rapidocr")
+            from .model_catalog import ready_ocr_path
+            directory = ready_ocr_path(self.settings)
+            if directory is None:
+                raise AppError("model_not_downloaded", "OCR 模型文件不完整，请检查运行环境。")
             self.ocr_model = RapidOCR(params={"Global.log_level": "warning",
                 "Det.model_path": str(directory / "PP-OCRv6_det_small.onnx"),
                 "Rec.model_path": str(directory / "PP-OCRv6_rec_small.onnx"),

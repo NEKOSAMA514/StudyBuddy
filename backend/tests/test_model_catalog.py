@@ -9,7 +9,8 @@ from app.config import Settings
 
 
 @pytest.mark.parametrize("identifier", ["paraformer", "whisper-small", "whisper-base", "rapidocr"])
-def test_readiness_requires_all_nonempty_files_in_shared_directory(tmp_path, identifier):
+def test_readiness_requires_all_nonempty_files_in_shared_directory(tmp_path, monkeypatch, identifier):
+    monkeypatch.setattr(model_catalog, "bundled_ocr_path", lambda: None)
     settings = Settings(model_dir=tmp_path)
     directory = model_catalog.model_path(settings, identifier)
     assert directory == tmp_path / model_catalog.MODELS[identifier]["directory"]
