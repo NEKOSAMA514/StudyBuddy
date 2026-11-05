@@ -13,7 +13,14 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 
 **Windows x64 · 本地运行 · 视频与文档 · GPLv3**
 
-[功能特性](#功能特性) · [开发与构建](#开发与构建) · [使用文档](#使用文档)
+[使用方式](#使用方式) · [功能特性](#功能特性) · [开发与构建](#开发与构建) · [使用文档](#使用文档)
+
+## 使用方式
+
+- **下载便携版。** 从 [Releases](https://github.com/NEKOSAMA514/StudyBuddy/releases) 下载 Windows x64 ZIP，完整解压到固定、可写的目录，再双击 `启动.cmd`。
+- **从源码运行。** 按[安装说明](docs/usage.md#安装并启动)配置环境。[environment.yml](environment.yml) 会安装 Python 3.12、FFmpeg/FFprobe 和前端构建用的 Node.js/npm，并读取 [backend/requirements.txt](backend/requirements.txt) 安装 Python 依赖。
+
+源码运行可以使用 Conda 安装的预编译 FFmpeg，也可以使用自己已安装的兼容版本。确保 `ffmpeg` 和 `ffprobe` 在 `PATH` 中可用，并且 FFmpeg 提供视频预览需要的 `libx264` 编码器。
 
 ## 功能特性
 
@@ -97,6 +104,9 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 | 媒体处理 | FFmpeg、FFprobe |
 | 本地 PDF 处理 | pypdfium2、pypdf |
 
+<details>
+<summary>自行构建 Windows 便携包</summary>
+
 构建 Windows 便携包，需要 Windows x64、64 位 PowerShell、Conda、Node.js/npm、Git 和网络。
 
 准备一份已通过验证的[自建 FFmpeg](docs/ffmpeg-build.md)，在 Git 仓库根目录执行。
@@ -111,6 +121,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 脚本会创建独立运行环境、构建前端、收集工具和默认模型，并在 `dist` 下生成 ZIP 与 SHA-256 校验文件。
 
 新增源码应先纳入 Git 跟踪；依赖变化时同步更新锁文件。构建成功后，仍需验证解压后的程序。
+
+</details>
 
 详细开发、测试及收录规则见 [开发与测试](docs/development.md)。
 

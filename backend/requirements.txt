@@ -1,3 +1,6 @@
+# Python 3.12 的 pip 依赖，项目根目录的 environment.yml 会读取本文件。
+# environment.yml 同时安装 FFmpeg/FFprobe 和前端构建用的 Node.js/npm。
+# 自备 FFmpeg 时，请让 ffmpeg 和 ffprobe 在 PATH 中可用，并确保 FFmpeg 支持 libx264。
 fastapi>=0.115.12,<1
 starlette==1.7.0
 uvicorn>=0.34,<1
