@@ -124,7 +124,6 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 | [开发与测试](docs/development.md) | 开发环境、测试入口和 Git 收录范围 |
 | [接口与运行契约](docs/contracts.md) | 任务状态、来源、配置快照和处理限制 |
 | [存储与恢复](docs/storage.md) | 数据目录、缓存、凭据、备份和恢复 |
-| [干净系统验收](docs/portable-clean-machine.md) | Windows 干净环境验证清单 |
 
 </details>
 

@@ -60,6 +60,6 @@ dist/StudyBuddy-v0.1.0-windows-x64-preview.zip.sha256
 python -B -m unittest discover -s scripts/portable -p test_portable.py -v
 ```
 
-本机验收记录和原始报告仅在本地保留，不随源码分发。干净系统按 [验收清单](portable-clean-machine.md)逐台执行，不能把开发机结果当作干净系统结果。既有回归应在专用环境使用隔离资料运行；浏览器只选择首启、上传、提取、设置保存和恢复等关键场景。
+本机验收记录和原始报告仅在本地保留，不随源码分发。干净的 Windows 系统需逐台验收并分别记录结果。既有回归应在专用环境使用隔离资料运行。浏览器只选择首启、上传、提取、设置保存和恢复等关键场景。
 
 另有 [本机验收工具](../scripts/portable/validate.py)：先校验并独立解压 ZIP，再使用该副本的 `runtime/python.exe -I -B -X utf8 scripts/portable/validate.py --package <独立解压目录> --output <包外报告目录> --repo . --speech <独立合成中文语音.wav>`。它要求未经初始化的副本，验证清单后实际执行首次准备失败与重试、重复启动、端口回退、Ctrl+C、设置重启恢复及本地能力。语音样本需含“学习”“三角”或“数学”之一，本轮用 Windows Microsoft Huihui Desktop 在包外合成；图片使用 Windows 微软雅黑。测试素材只写入报告目录。此工具不调用真实云端 API，不操作开发资料。首次修复只能对独立副本执行，不能对构建暂存目录执行。
