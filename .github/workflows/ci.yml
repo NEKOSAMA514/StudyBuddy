@@ -33,6 +33,10 @@ jobs:
       - name: Check documentation
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Docs
 
+      # The Windows Conda build omits the VP9 encoder used to create test media.
+      - name: Install FFmpeg for media tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-ffmpeg.ps1
+
       - name: Run backend tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Backend
 
