@@ -238,7 +238,7 @@ export type DocumentAnalysisPreview = {
   reason: string | null;
   character_count: number;
   estimated_segments: number;
-  limits: { characters: number; segments: number; requests: number };
+  limits: { characters: number; requests: number };
 };
 
 // 设置页和任务确认表单共用识别契约，业务请求不依赖界面模块导出的类型。

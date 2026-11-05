@@ -40,7 +40,7 @@ async function workspace(page: Page, kind: "video" | "document") {
     }
     if (path.endsWith("/extraction")) return route.fulfill({ json: state.extraction });
     if (path.endsWith("/analysis-preview")) return route.fulfill({ json: { eligible: true, character_count: 10, estimated_segments: 1,
-      reason: null, limits: { characters: 100000, segments: 10, requests: 80 } } });
+      reason: null, limits: { characters: 100000, requests: 80 } } });
     if (path.endsWith("/analyses") || path.endsWith("/evidence")) return route.fulfill({ json: [] });
     if (path.endsWith("/content")) return route.fulfill({ json: { units: [], total: 0, offset: 0 } });
     if (path.endsWith("/playback")) return route.fulfill({ json: { status: "unprepared", direct: true, original_url: "/empty.mp4", mime_type: "video/mp4", error: null } });

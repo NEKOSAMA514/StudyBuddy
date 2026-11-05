@@ -6,7 +6,7 @@ from ..db import DocumentTask, now, ACTIVE_TASK_STATUSES, TASK_CONTROL_STATUSES
 from ..errors import AppError
 from ..settings.model_profiles import for_profile, find, task_model_config, execution_settings, EXECUTION_FIELDS
 from .material import (load_material, verify_snapshot, snapshot, detailed_segments,
-                       MAX_DOCUMENT_CHARACTERS, MAX_DOCUMENT_SEGMENTS, MAX_DOCUMENT_REQUESTS)
+                       MAX_DOCUMENT_CHARACTERS, MAX_DOCUMENT_REQUESTS)
 from .schemas import public_task
 from .notes import DocumentNotes
 from .task_rules import get_task
@@ -18,10 +18,11 @@ from ..analysis.activity import in_session
 def preview(material, settings, title=""):
     from .model import DocumentModelClient
     source = snapshot(material)
+    limits = {"characters": MAX_DOCUMENT_CHARACTERS, "requests": MAX_DOCUMENT_REQUESTS}
     if source["character_count"] > MAX_DOCUMENT_CHARACTERS:
         return {"source": source, "character_count": source["character_count"], "estimated_segments": 0,
             "eligible": False, "reason": "文档超过10万字符，请拆分文件后生成；仍可查看提取内容。",
-            "limits": {"characters": MAX_DOCUMENT_CHARACTERS, "segments": MAX_DOCUMENT_SEGMENTS, "requests": MAX_DOCUMENT_REQUESTS}}
+            "limits": limits}
     model = DocumentModelClient(settings)
     try:
         if settings.note_style == "concise":
@@ -34,14 +35,10 @@ def preview(material, settings, title=""):
         if exc.code not in {"model_input_budget", "no_evidence"}:
             raise
         return {"source": source, "character_count": source["character_count"], "estimated_segments": 0,
-            "eligible": False, "reason": exc.message,
-            "limits": {"characters": MAX_DOCUMENT_CHARACTERS, "segments": MAX_DOCUMENT_SEGMENTS, "requests": MAX_DOCUMENT_REQUESTS}}
-    reason = ("没有可用于生成笔记的文字。" if not fragments else
-              "文档超过10万字符或8个片段，请拆分文件后生成；仍可查看提取内容。"
-              if source["character_count"] > MAX_DOCUMENT_CHARACTERS or len(segments) > MAX_DOCUMENT_SEGMENTS else None)
+            "eligible": False, "reason": exc.message, "limits": limits}
+    reason = None if fragments else "没有可用于生成笔记的文字。"
     return {"source": source, "character_count": source["character_count"], "estimated_segments": len(segments),
-            "eligible": reason is None, "reason": reason,
-            "limits": {"characters": MAX_DOCUMENT_CHARACTERS, "segments": MAX_DOCUMENT_SEGMENTS, "requests": MAX_DOCUMENT_REQUESTS}}
+            "eligible": reason is None, "reason": reason, "limits": limits}
 
 
 # 固定材料身份、执行参数与提示词版本，继续任务时不采用新的默认设置。

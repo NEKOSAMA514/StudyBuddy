@@ -1,12 +1,12 @@
 # 开发与测试
 
-本页用于接手代码、选择修改入口和验证范围。首次安装见 [安装与使用](usage.md)，模块关系见 [架构](architecture.md)，公开语义见 [契约](contracts.md)。本机协作约定保存在根目录 AGENTS.md，该文件不随源码分发。
+本页用于接手代码、选择修改入口和验证范围。首次安装见 [安装与使用](usage.md)，模块关系见 [架构](architecture.md)，公开语义见 [契约](contracts.md)。
 
 ## 本机开发方式
 
-Windows 便携包统一入口为 [build-portable.ps1](../scripts/build-portable.ps1)。构建会在忽略的 `dist/` 中新建专用 Python 环境、工具环境和前端工作副本。依赖、来源、文件清单和公开发布前待办随包记录。构建命令、输入和验证入口见[便携包说明](portable.md)。
+Windows 便携包的构建命令、输入和验收步骤见 [便携包说明](portable.md)。
 
-先准备可启动的后端环境和一次前端构建。当前本机验证入口为 [start-local.ps1](../scripts/start-local.ps1) 和 [run-tests-local.ps1](../scripts/run-tests-local.ps1)；仓库中的旧容器测试入口不作为当前 Windows 流程的替代。
+先准备后端环境并构建一次前端。本机启动和测试分别使用 [start-local.ps1](../scripts/start-local.ps1) 和 [run-tests-local.ps1](../scripts/run-tests-local.ps1)。
 
 在两个已激活 Conda 环境的终端中分别运行，起始位置均为仓库根目录。
 
@@ -74,11 +74,9 @@ npm run dev
 
 普通回归不调用真实模型、MinerU、ASR/OCR 服务或平台下载；替身返回和网络限制由对应测试控制。真实识别效果、真实云端模型质量、平台访问与浏览器全流程是否验证，应分别说明，不能从替身通过推导实际效果。
 
-PDF 依赖固定为 `pypdfium2==5.14.0`、`pypdf[crypto]==6.21.3`，不安装 PyMuPDF、pymupdf-layout 或 pymupdf4llm。共享样本使用独立的 [PDF 内容流构造工具](../backend/tests/pdf_samples.py)，浏览器 MinerU 替身用 pypdf 读取。主要回归为 `test_pdf_text.py`、`test_pdf_images.py`、`test_pdf_lifecycle.py`、文档图片、MinerU 与导入恢复测试；文字允许无语义空白差异，图片尺寸、像素、透明度、来源页码与识别调用次数仍精确断言。锁文件和共享夹具变化后需运行完整后端；浏览器覆盖文档上传、提取、阅读和恢复，再检查文档。
+主要 PDF 回归包括 `test_pdf_text.py`、`test_pdf_images.py`、`test_pdf_lifecycle.py`、文档图片、MinerU 与导入恢复测试。文字允许无语义空白差异，图片尺寸、像素、透明度、来源页码与识别调用次数精确断言。共享样本由测试工具生成，浏览器 MinerU 替身用 pypdf 读取。[PDF 内容流构造工具](../backend/tests/pdf_samples.py)
 
-2026-10-29 的替换验收在 Windows／Python 3.12、不含旧 PDF 库的独立环境完成：完整后端 1775 项通过；文档相关浏览器 146 项通过，2 项按原有视口去重规则跳过，对应阅读矩阵已在另一视口执行。25 份旧 PDF 样本的正文、顺序、来源及图片像素对照无差异，另有 11 组不同尺寸、渐变、单行／单列蒙版的固定像素回归。依赖检查通过；锁文件补齐了原清单已有的同版本 `qrcode` 及其 Windows 依赖，未升级其他现有包。
-
-该验收不包含真实 LLM、MinerU 或 OCR 服务的效果、正式资料迁移、其他系统平台、任意复杂字体及版面的穷尽兼容，也未验证便携包或修改许可证文件。已有材料和恢复兼容策略见 [存储说明](storage.md#缓存检查点与版本)。
+锁文件和共享夹具变化后需运行完整后端测试。浏览器覆盖文档上传、提取、阅读和恢复，再检查文档。已有材料的兼容与恢复规则见 [存储说明](storage.md#缓存检查点与版本)。
 
 DPAPI 相关测试需要能够访问当前账户密钥的 Windows 进程，使用隔离测试凭据。不能通过明文回退、跳过失败场景或修改正式凭据来取得通过结果。
 
@@ -90,30 +88,32 @@ DPAPI 相关测试需要能够访问当前账户密钥的 Windows 进程，使�
 | 构建模式浏览器 | `browser/results.json`，以及截图、trace、HTML 报告 |
 | 源码模式浏览器 | `browser-source/results.json` 及对应产物 |
 
-生产只读 Smoke 入口针对已运行的本机服务，属于单独检查，不能代替隔离回归或默认参与文档维护。历史结果可用于定位回归证据，但结果只覆盖报告注明的代码与范围；当前文档不滚动累积历史通过总数。
+对已运行的本机服务，可用 `-Suite Smoke` 执行只读检查。隔离回归使用上文的后端和浏览器套件。
 
 ## Git 收录范围
 
-仓库保留应用源码、正式测试与夹具、开发和构建脚本、依赖清单与锁文件、公开文档和 LICENSE。Docker、Compose 和 Conda 定义同样属于开发材料，不按运行产物忽略。
+仓库收录应用源码、正式测试与夹具、开发和构建脚本、依赖清单与锁文件、公开文档和许可证。Docker、Compose 和 Conda 定义也属于开发材料。忽略规则覆盖私人配置、用户资料、下载的模型和工具、依赖安装目录、构建产物、报告、缓存与日志。[Git 忽略规则](../.gitignore)
 
-| 文件类别 | Git 处理 |
-|---|---|
-| 后端 `app/`、`tests/`、`scripts/`，前端 `src/`、`public/`、`tests/`、`scripts/` 及构建配置 | 收录 |
-| 根目录 `scripts/`、依赖文件、README、公开 `docs/`、LICENSE 及 Git／构建配置 | 收录 |
-| 私人配置、用户资料、模型、媒体工具、依赖安装目录、构建产物、报告、缓存与日志 | 按 `.gitignore` 排除，本地保留 |
-| `ocr-test/`、`documents-test/`、`analysis test/`、`test video/`、历史归档和本机协作记录 | 仅本地保留 |
-| `docs/portable-validation.md` 和 `dist/portable-validation/` | 本机验收证据，仅本地保留 |
-
-便携 ZIP 和 SHA-256 作为发布附件提供，仓库只保留构建及验证方法。提交前查看 `git status` 和 `git diff --cached --name-only`，确认新增源码已纳入跟踪，且暂存清单不含本地产物。修改忽略规则不会清除既有提交历史。
+便携 ZIP 和 SHA-256 文件作为发布附件提供。提交前用 `git status` 和 `git diff --cached --name-only` 核对准备提交的文件。
 
 ## 维护这套文档
 
-当前入口为 README 和五篇专题：操作写入 usage，设计与数据流写入 architecture，开发和测试写入本页，公开语义及默认限制写入 contracts，文件及恢复写入 storage。修改同一规则时更新唯一归属页，其余位置使用链接。
+同一条规则在归属页维护，其他页面通过链接引用。比如修改视频时长上限时，在接口契约更新具体数值，使用指南需要提及时链接过去。
 
-根目录 PROJECT_CONTEXT 是本机交接状态，历史归档位于本地 archive；它们不随仓库分发，不应成为入库文档的必需链接。实验目录和测试报告继续原位保存，不能把某次实验结论直接写成产品能力。
+| 更新内容 | 归属文档 |
+|---|---|
+| 项目用途、启动入口和文档导航 | [README](../README.md) |
+| 安装、设置和使用步骤 | [安装与使用](usage.md) |
+| 模块职责、处理流程和数据流 | [架构与处理流程](architecture.md) |
+| 接口语义、默认值和限制 | [接口与运行契约](contracts.md) |
+| 数据文件、兼容、备份和恢复 | [存储与恢复](storage.md) |
+| 开发流程和验证方法 | 本页 |
+| 便携包使用、升级与构建 | [Windows 便携包](portable.md) |
+| 独立 FFmpeg 的构建和使用 | [FFmpeg 构建](ffmpeg-build.md) |
+| 对应源码和第三方组件来源 | [源码说明](SOURCE.md) |
 
-文档检查工具 [check_docs.py](../scripts/check_docs.py) 核对 README 和公开专题的本地链接、围栏、JSON 示例及编码；本地存在 AGENTS.md 时一并检查，不检查本机验收记录。它不请求外部网站，也不保证链接锚点、命令效果或业务描述与代码一致，这些仍需对照源文件检查。
+操作说明写清前提、步骤和预期结果。命令与配置示例使用通用路径和占位值。公开文档引用读者可访问的仓库文件或公开资料。版本变更写入发布说明，单次验收结果留在对应报告里。
 
-每段操作先说明前提，再给步骤与预期结果；不复制多份字段表，不追加“本轮修改／未提交”的历史流水账。安装说明不绑定开发者的私人盘符，配置示例不包含真实凭据。
+改完运行本页的 `-Suite Docs` 检查。检查工具核对本地文件链接、代码围栏、JSON 示例及编码。标题跳转另行检查，命令效果和业务描述需对照脚本与实现。[check_docs.py](../scripts/check_docs.py)
 
-组织方式参考 [GitHub README 指南](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes)和 [Diátaxis](https://diataxis.fr/)：让入口、操作、技术参考与解释各自回答一个明确问题。
+README 的入口设计和专题分工可参考这两份资料。[GitHub README 指南](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes) · [Diátaxis](https://diataxis.fr/)

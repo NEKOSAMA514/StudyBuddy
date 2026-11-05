@@ -24,8 +24,8 @@ test.beforeEach(async ({ request }) => {
 });
 test.afterEach(async ({ request }) => { await clearDocuments(request); });
 
-test("文档切换API预算重新预检，迟到片段数不覆盖当前选择", async ({ page, request }) => {
-  const doc = await upload(request, "预算预检.txt", "原文".repeat(3000));
+test("文档切换 API 预算重新预检，超过八段仍可生成", async ({ page, request }) => {
+  const doc = await upload(request, "预算预检.txt", "原文".repeat(6500));
   const created = await request.post("/api/v1/settings/model/profiles", { data: {
     name: "小输入预算", token: "fake-preview", input_text_limit: 6000,
   } });
@@ -57,7 +57,8 @@ test("文档切换API预算重新预检，迟到片段数不覆盖当前选择",
   await expect(dialog.getByText(/预计 1 段/)).toBeVisible();
   await page.unroute(pattern);
   await picker.selectOption(profile);
-  await expect(dialog.getByText(/预计 [2-8] 段/)).toBeVisible();
+  await expect(dialog.getByText(/预计 (?:9|[1-9]\d+) 段/)).toBeVisible();
+  await expect(dialog.getByText(/最多 .* 字符、80 次请求/)).toBeVisible();
   await expect(start).toBeEnabled();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
 });

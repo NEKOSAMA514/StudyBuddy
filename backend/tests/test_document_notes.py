@@ -105,13 +105,16 @@ def test_profile_budget_preview_and_queued_document_requests_use_snapshot(client
         "input_text_limit": 6000, "output_tokens": tokens, "stream": False})
     assert response.status_code == 201
     profile = response.json()["profiles"][-1]["id"]
-    doc = upload(client, raw=("材料原文。" * 1000).encode())
+    doc = upload(client, raw=("材料原文。" * 2600).encode())
     uri = f'/api/v1/documents/{doc["id"]}'
     normal = client.get(uri + "/analysis-preview").json()
     selected = client.get(uri + "/analysis-preview", params={"llm_profile_id": profile}).json()
-    assert selected["estimated_segments"] > normal["estimated_segments"] == 1
+    assert normal["estimated_segments"] == 1
+    assert selected["eligible"] and selected["estimated_segments"] > 8
     assert client.get(uri + "/analysis-preview?llm_profile_id=missing").status_code == 404
-    task_id = client.post(uri + "/analyses", json={"llm_profile_id": profile}).json()["task_id"]
+    response = client.post(uri + "/analyses", json={"llm_profile_id": profile})
+    assert response.status_code == 202, response.text
+    task_id = response.json()["task_id"]
     assert client.put(f"/api/v1/settings/model/profiles/{profile}", json={"name": "改大范围", "input_text_limit": 25000, "output_tokens": OUTPUT_TOKENS}).status_code == 200
     app.state.document_pipeline.run(task_id)
     assert client.get(f"/api/v1/document-tasks/{task_id}").json()["status"] == "succeeded"
@@ -373,11 +376,12 @@ def test_queued_unknown_flow_fails_before_model_and_successful_history_remains_r
     assert not document_models
 
 
-def test_segment_limit_and_blank_material_preflight():
+def test_preflight_accepts_many_segments_and_rejects_blank_material():
     material = {"version": 1, "units": [{"id": f"D{i + 1}", "text": "字" * 2000, "label": str(i), "locator": {"page": i + 1}, "format": "text"}
                                       for i in range(12)]}
     info = preview(material, Settings(note_style="concise", llm_input_text_limit=4500))
-    assert info["estimated_segments"] > 8 and not info["eligible"]
+    assert info["estimated_segments"] > 8 and info["eligible"]
+    assert info["limits"] == {"characters": 100_000, "requests": 80}
     assert not preview({"version": 1, "units": [{**material["units"][0], "text": " \n"}]}, Settings())["eligible"]
 
 

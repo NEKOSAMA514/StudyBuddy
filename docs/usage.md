@@ -20,7 +20,9 @@ cd ..
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1
 ```
 
-Python 依赖由 [requirements.txt](../backend/requirements.txt)安装，Deno 与 EJS 由已有的 yt-dlp extras 一并安装；语音模型权重仍在设置页按需准备。已经创建且依赖齐全的环境不必重复安装；本机原有 `studyflow` 环境可继续使用，将激活命令改为实际环境名。旧环境需要同步依赖时，在仓库根目录执行 `conda env update -n 实际环境名 -f environment.yml`。项目另有 [FFmpeg 安装工具](../scripts/install-ffmpeg.ps1)，可使用本机缓存的压缩包安装到 `tools/ffmpeg/bin`。
+创建环境时会按依赖清单安装 Python 包。Deno 和 EJS 随 yt-dlp 的附加依赖安装，语音模型权重在设置页按需准备。[Python 依赖清单](../backend/requirements.txt)
+
+已有 Conda 环境需要同步依赖时，在仓库根目录执行 `conda env update -n 实际环境名 -f environment.yml`，再激活该环境。也可用项目的安装脚本把 FFmpeg 安装到 `tools/ffmpeg/bin`，本机启动脚本会优先从这里查找 FFmpeg 和 FFprobe。[FFmpeg 安装脚本](../scripts/install-ffmpeg.ps1)
 
 启动后打开 [工作台](http://localhost:18000)。终端应保持运行；退出时按 Ctrl+C，等待后台操作完成清理后再关闭窗口。脚本按仓库所在位置确定资料目录，不要求项目位于某个固定盘符。
 
@@ -64,7 +66,9 @@ B 站支持 BV 号、普通链接、短链接及含单个链接的分享文案�
 
 选择 PDF、DOCX、PPT、PPTX、XLSX、CSV、TXT 或 `.md` 后，网页先保存原文件并打开详情。取消后续确认不会删除原件，刷新后仍可继续处理。
 
-点击“开始处理”后确认本次配置。PDF、PPT 和 PPTX 未配置 MinerU Token 时默认轻量解析，已配置时默认精准解析，也可手动切换为本地提取。选择云端解析时，PDF 分批上传并在本机处理内嵌图片 OCR，演示文稿按原格式整份上传。单份演示文稿须满足所选接口的大小和页数限制（轻量 10 MB／20 页，精准 200 MB／200 页），超出时可拆分或更换解析方式。后台提取失败后，可以按提示重试或重新选择。提取期间不能删除资料。
+点击“开始处理”后确认本次配置。PDF、PPT 和 PPTX 未配置 MinerU Token 时默认轻量解析，已配置时默认精准解析，也可手动切换为本地提取。选择云端解析时，PDF 分批上传并在本机处理内嵌图片 OCR，演示文稿按原格式整份上传。演示文稿超出所选接口的大小或页数限制时，可拆分文件或切换为本地提取。[默认值与限制](contracts.md#默认值与限制)
+
+后台提取失败后，可以按提示重试或重新选择。提取期间不能删除资料。
 
 所选模型 API 没有密钥时，点击“开始提取”即可先保存和阅读材料。配置密钥后，可以在资料页点击“生成笔记”，复用已提取的内容。已有密钥时，可以在导入时一起生成笔记。材料保存后即可查看“提取内容”，预检超限或生成失败也可继续阅读材料。若要更换解析方式或 OCR 重新提取，应重新导入原文件。
 

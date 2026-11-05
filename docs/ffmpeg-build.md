@@ -1,43 +1,34 @@
-# 精简 Windows x64 FFmpeg
+# 构建 Windows x64 精简 FFmpeg
 
-此构建只交付独立 FFmpeg 和开发文件，不安装到现有应用，不构建 PyAV。
-源码固定为 FFmpeg 7.1 系列、x264、dav1d，具体提交见
-[源码清单](../scripts/ffmpeg/sources.json)。x264 提供 H.264 编码，dav1d 提供 AV1 软件解码；
-VP9、Opus 等读取能力使用 FFmpeg 原生实现。
+本指南用于构建 StudyBuddy 便携包中的 CPU 版 FFmpeg 和 FFprobe。x264 提供 H.264 编码，dav1d 提供 AV1 软件解码，VP9 和 Opus 等输入由 FFmpeg 原生解码器处理。
+
+## 准备环境
+
+- Windows x64 和 PowerShell。
+- 64 位 Windows 原生 Python 3.12 或更新版，以及 Git。终端需能调用 `python` 和 `git`。
+- Visual Studio 或 Build Tools，安装 MSVC 14.44 的 x64/x86 C++ 工具与 Windows SDK。
+- 网络连接，用于下载源码和构建工具。脚本会在项目的 `dist/.ffmpeg-tools/` 中准备 MSYS2、Make、NASM、pkgconf、Meson 和 Ninja。
 
 ## 构建
 
-需要 Windows x64、原生 Python 3.12+、Git、MSVC 14.44 和 Windows SDK。入口会在
-`dist/.ffmpeg-tools/` 准备隔离的 MSYS2、Make、NASM、pkgconf、Meson 1.12.1 和 Ninja 1.13.2。
-这些编译工具不进入成品包，也不修改全局 PATH。
+在 StudyBuddy 仓库根目录执行命令。构建使用 `tools/ffmpeg/bin/ffmpeg.exe` 生成样例文件。若该工具尚未准备，先运行项目的安装脚本。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-ffmpeg.ps1
+```
+
+随后运行构建脚本。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ffmpeg.ps1
 ```
 
-[构建入口](../scripts/build-ffmpeg.ps1)按固定提交准备独立源码工作副本，校验 Git 提交和树摘要。
-先构建使用静态 MSVC 运行库的 x264、dav1d 静态库，再构建 FFmpeg 自身 DLL、ffmpeg 和 ffprobe。
-关闭外部库自动探测，保留原生组件；启用 Windows 原生线程和 Schannel，不要求 GPU 或本机专属 CPU 指令。
+脚本按固定提交获取 FFmpeg 7.1 系列、x264 和 dav1d，编译 x264 与 dav1d 静态库，再链接进 FFmpeg 共享库。[源码清单](../scripts/ffmpeg/sources.json) · [编译脚本](../scripts/ffmpeg/build.sh)
 
-工作文件位于 `dist/.ffmpeg-build/<编号>/`，输出位于 `dist/ffmpeg-minimal/<编号>/`。
-失败保留日志与缓存，并在 `build-manifest.json` 中记录失败；重试生成新的构建目录。
+## 使用产物
 
-## 交付内容
+终端会显示输出目录 `dist/ffmpeg-minimal/<构建编号>/`。脚本完成自动检查后生成 ZIP。编译失败时，查看该目录中的 `build.log`。
 
-- `ffmpeg-win64/`：`bin/` 中的程序和 DLL，`include/`、`lib/` 中的开发文件，以及许可证和构建记录。
-- `ffmpeg-win64.zip`：上述独立成品。
-- `ffmpeg-sources.zip`：三份对应源码、本次构建脚本、配置与记录。
-- `SHA256SUMS.txt`：成品、源码包和构建清单的 SHA-256。
-- `build.log`、`validation/report.json`：编译日志和真实媒体验证结果。
-
-EXE 与 DLL 应保持在同一 `bin/` 目录。开发文件为下一轮编译 PyAV 准备，不表示本轮已经验证 PyAV。
-源码包保留各组件原有许可；此组合按 GPLv3 构建。
-
-## 验证范围
-
-测试素材由现有完整 FFmpeg 生成，再交给新成品处理；测试使用的编码器不会因此加入新成品。
-覆盖 H.264、HEVC、VP9、AV1 和现有测试中的主要容器，验证解码、音频提取、JPEG 截图、
-H.264/AAC 预览、无损封装与音画合并，以及无音轨、比例、非零时间起点、可变帧率和延迟音轨补静音。
-
-另检查 x64 文件、共享库依赖、开发文件、编译配置，并在排除编译工具目录的 PATH 中运行成品。
-这是本机验证，不代表已完成 Windows 10/11 干净系统验收，也不代表整个应用已完成许可审查。
+- 独立使用时，运行 `ffmpeg-win64/bin/` 下的 `ffmpeg.exe` 或 `ffprobe.exe`。也可完整解压 `ffmpeg-win64.zip` 到其他目录，保持程序与配套 DLL 同在 `bin/`。头文件和链接库分别在成品的 `include/` 和 `lib/` 中。
+- 构建便携包时，将整个输出目录传给 `scripts/build-portable.ps1` 的 `-FFmpegBuild` 参数。打包脚本需要同目录的 `ffmpeg-win64.zip`、`ffmpeg-sources.zip`、`build-manifest.json` 和 `SHA256SUMS.txt`。
+- `ffmpeg-sources.zip` 包含三个组件的对应源码、构建脚本、配置与补丁。该组合按 GPLv3 构建，各组件保留原有许可。

@@ -50,7 +50,9 @@
 
 后台提取入口为 `POST /documents/{id}/extract`，状态读取为 `GET /documents/{id}/extraction`。状态包含 `source_id`、`document_id`、`task_id`，以及 `status`、`parser`、`progress`、`error`；提取状态使用 `queued/running/done/failed/interrupted`，不与笔记状态混用。
 
-重试时省略 `parser` 会沿用原解析方式。传入 `generate_notes=false` 可只提取材料，完成后 `task_id` 为 `null`。首次请求省略该字段时沿用提取后生成笔记的流程，重试省略时保留原请求的选择。
+网页提交确认框中选定的解析方式。直接调用 API 首次省略 `parser` 时，PDF 按 MinerU Token 设置选择解析方式。已配置 Token 使用精准解析，未配置使用轻量解析。其他格式使用本地提取。重试时省略 `parser` 沿用原解析方式。[网页导入步骤](usage.md#处理文档)
+
+传入 `generate_notes=false` 可只提取材料，完成后 `task_id` 为 `null`。首次请求省略该字段时会在提取后生成笔记，重试省略时保留原请求的选择。
 
 材料先保存，笔记任务后提交。`done` 中的任务编号用于接管读取，不要求列表 `latest_task` 已同步。相同提取记录只交接一次。首次进入历史已完成材料时优先采用列表的最新任务，历史提取不能覆盖后来的手动任务。
 
@@ -75,9 +77,9 @@
 | 视频上传与时长 | 默认 5 GiB、18,000 秒（5 小时），可由启动配置设置 | [config.py](../backend/app/config.py) |
 | 文档原件 | 不超过 100 MiB，且不超过应用上传限制 | [extraction.py](../backend/app/documents/extraction.py) |
 | 提取材料 | 最多 500 万字符、10,000 个来源块；PDF 页数也受限制 | [extraction.py](../backend/app/documents/extraction.py)、[imports.py](../backend/app/documents/imports.py) |
-| 文档生成 | 最多 10 万字符、8 个片段、80 次实际模型请求 | [material.py](../backend/app/documents/material.py) |
+| 文档生成 | 最多 10 万字符和 80 次实际模型请求。段数按模型输入预算计算 | [material.py](../backend/app/documents/material.py) |
 | 文档图片 | 最多 200 张不同图片，单张及相关合成尺寸受 2,000 万像素限制 | [image_text.py](../backend/app/documents/image_text.py)、[extraction.py](../backend/app/documents/extraction.py) |
-| MinerU 分批 | 轻量每批最多 20 页／10 MiB，精准最多 200 页／200 MiB；原件仍受应用限制，批次按实际大小缩小 | [imports.py](../backend/app/documents/imports.py) |
+| MinerU 批次与演示文稿 | 每个 PDF 批次或每份 PPT、PPTX 的上限为轻量 20 页／10 MiB、精准 200 页／200 MiB。PDF 按页数和大小分批，原件仍受文档上传上限约束 | [imports.py](../backend/app/documents/imports.py) |
 | 视频画面采样 | 新任务均匀取 60 个计划位置；历史任务按保存的固定间隔恢复 | [recognition/extraction.py](../backend/app/recognition/extraction.py) |
 | 详尽视频分段 | 时间目标 20 分钟，并同时满足实际发送输入预算；前文取有限时间窗口 | [segments.py](../backend/app/videos/segments.py) |
 | 模型并发与间隔 | 默认并发 3、发送间隔 3 秒；设置允许 1～4 和 1～60 秒 | [model_settings.py](../backend/app/settings/model_settings.py) |

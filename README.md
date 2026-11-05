@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)
 [![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
 
-StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、PDF 或课件后，使用本地识别提取内容，再通过你配置的模型 API 生成笔记。
+StudyBuddy 是一个在本机运行的学习资料笔记工具。它从视频、PDF 和课件等资料中提取内容，通过你配置的模型 API 生成笔记。
 
 阅读时，可以跳回视频中的对应时间点，查看文档的提取内容与来源位置；复习时，可以搜索笔记、标记重点，或导出 Markdown 和纯文本。
 
@@ -51,8 +51,8 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 |---|---|
 | PDF | 本地文本与图片提取，或选择 MinerU 解析 |
 | DOCX | 正文、表格和内嵌图片 |
-| PPT | 旧版 PowerPoint 97–2003，按页提取文字和讲者备注 |
-| PPTX | 幻灯片文字、备注、基本表格、图片和支持的分类图表 |
+| PPT | 本地按页提取 PowerPoint 97–2003 的文字和讲者备注，也可选择 MinerU 解析 |
+| PPTX | 本地提取幻灯片文字、备注、基本表格、图片和支持的分类图表，也可选择 MinerU 解析 |
 | XLSX | 工作表内容、行号和公式原文 |
 | CSV | 按逻辑记录提取内容 |
 | TXT / Markdown | 按原行号组织材料 |
@@ -67,7 +67,7 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。导入视频、
 
 - 视频语音转写和画面 OCR 使用本地识别组件。
 - 生成笔记时，会把材料文字和标题等信息发送给你配置的模型 API。
-- 选择 MinerU 解析 PDF 时，会将 PDF 批次上传到对应服务。
+- 选用 MinerU 解析时，应用会把 PDF 分批上传到该服务，PPT 和 PPTX 则按原格式整份上传。
 - 笔记中心搜索不调用模型 API。
 - API 密钥、MinerU Token 和 B 站凭据使用 Windows 当前账户 DPAPI 加密保存；更换电脑或 Windows 账户后通常需要重新填写。
 
@@ -125,6 +125,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 </details>
 
 详细开发、测试及收录规则见 [开发与测试](docs/development.md)。
+
+<a name="使用文档"></a>
 
 <details>
 <summary>使用文档</summary>
