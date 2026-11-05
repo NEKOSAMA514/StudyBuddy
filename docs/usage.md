@@ -6,7 +6,9 @@
 
 使用 Windows x64 便携预览包时，无需执行下面的源码安装步骤。完整解压后双击 `启动.cmd`，等待首次环境准备；默认打开 `127.0.0.1:18000`，占用时自动选择 18000—18019 中的空闲端口。新用户凭据为空，在页面配置。保留控制台，按一次 Ctrl+C 正常退出；关闭浏览器不会停机。目录固定、错误处理及升级见 [便携包说明](portable.md)。预览包不代表已通过干净系统验收。
 
-当前使用 Windows 和 Miniconda。[环境配置](../environment.yml)统一安装 Python 3.12、Node.js 24（含 npm）和 FFmpeg/FFprobe。FFmpeg 选择包含现有视频预览所需 `libx264` 编码器的构建；前端依赖由 `npm ci` 按[锁文件](../frontend/package-lock.json)安装。
+源码安装使用 Windows x64 和 Miniconda。Conda 环境提供 Python 3.12 和 Node.js 24（含 npm）。`npm ci` 按锁文件安装前端依赖。[环境配置](../environment.yml) · [前端锁文件](../frontend/package-lock.json)
+
+创建环境时，pip 会安装 `portable-ffmpeg-full==0.5.0`，其中包含 FFmpeg 9.0.2 和 FFprobe。启动和媒体测试脚本会在首次使用时从已安装的 wheel 解包，并将程序目录加入当前进程的 `PATH`。GitHub CI 使用同一份依赖清单。[Python 依赖清单](../backend/requirements.txt)
 
 在 Miniconda Prompt 中先进入仓库根目录，再依次执行：
 
@@ -20,9 +22,9 @@ cd ..
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1
 ```
 
-创建环境时会按依赖清单安装 Python 包。Deno 和 EJS 随 yt-dlp 的附加依赖安装，语音模型权重在设置页按需准备。[Python 依赖清单](../backend/requirements.txt)
+Deno 和 EJS 随 yt-dlp 的附加依赖安装，语音模型权重在设置页按需准备。
 
-已有 Conda 环境需要同步依赖时，在仓库根目录执行 `conda env update -n 实际环境名 -f environment.yml`，再激活该环境。也可用项目的安装脚本把 FFmpeg 安装到 `tools/ffmpeg/bin`，本机启动脚本会优先从这里查找 FFmpeg 和 FFprobe。[FFmpeg 安装脚本](../scripts/install-ffmpeg.ps1)
+已有 Conda 环境需要同步依赖时，在仓库根目录执行 `conda env update -n 实际环境名 -f environment.yml`，再激活该环境。只需更新 pip 依赖时，在已激活的环境中执行 `python -m pip install -r backend/requirements.txt`。
 
 启动后打开 [工作台](http://localhost:18000)。终端应保持运行；退出时按 Ctrl+C，等待后台操作完成清理后再关闭窗口。脚本按仓库所在位置确定资料目录，不要求项目位于某个固定盘符。
 

@@ -32,7 +32,7 @@ GitHub 自动生成的源码归档提供本仓库的文件；下表所列第三�
 
 从本项目对应版本源码中取得以下构建材料，路径相对于项目仓库根目录：
 
-- `scripts/build-ffmpeg.ps1`：构建入口。
+- `scripts/build-ffmpeg.ps1` 是构建入口，`scripts/get-ffmpeg-bin.ps1` 定位用于生成验证素材的 FFmpeg。
 - `scripts/ffmpeg/build.py`、`scripts/ffmpeg/build.sh`：工具准备、编译、安装及归档步骤。
 - `scripts/ffmpeg/sources.json`：固定源码提交和 Git 树摘要。
 - `scripts/ffmpeg/patches/ffmpeg-mswindres-utf8.patch`：Windows 资源编译使用 UTF-8 的补丁。
@@ -41,7 +41,6 @@ GitHub 自动生成的源码归档提供本仓库的文件；下表所列第三�
 
 构建产物中的 `build-manifest.json` 记录实际编译配置、工具版本和归档哈希。
 生成的 `ffmpeg-sources.zip` 包含三份对应源码及本次构建材料。
-此索引不适用于此前使用的 Gyan FFmpeg 9.0.2 成品。
 
 ## 原装 PyAV 15.1.0 及内置 FFmpeg
 

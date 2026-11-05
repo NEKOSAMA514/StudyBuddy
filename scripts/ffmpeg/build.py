@@ -1,4 +1,5 @@
 """Build and verify one fixed Windows x64 shared FFmpeg; never install it into the app."""
+import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -153,7 +154,7 @@ def archive_directory(directory, destination):
                 archive.write(path, path.relative_to(directory.parent).as_posix())
 
 
-def verify_and_package(work, output, manifest, env):
+def verify_and_package(work, output, manifest, env, reference):
     log = output / "build.log"
     package = output / "ffmpeg-win64"
     for library in (package / "bin").glob("*.lib"):
@@ -171,7 +172,6 @@ def verify_and_package(work, output, manifest, env):
         "bin/: executables and FFmpeg DLLs. include/ and lib/: development files for a later PyAV build.\n"
         "This package does not include PyAV. Existing application tools were not replaced.\n"
         "See build-manifest.json, licenses/, and the matching source archive.\n", encoding="utf-8")
-    reference = ROOT / "tools/ffmpeg/bin/ffmpeg.exe"
     run([sys.executable, "-X", "utf8", "-B", HERE / "verify.py", "--package", package,
          "--reference", reference, "--output", output / "validation", "--dumpbin", Path(env["VCTOOLSINSTALLDIR"]) / "bin/Hostx64/x64/dumpbin.exe"],
         log, cwd=ROOT)
@@ -190,13 +190,15 @@ def verify_and_package(work, output, manifest, env):
     for path in (work / "source-archives").iterdir():
         shutil.copyfile(path, source_package / path.name)
     shutil.copytree(HERE, source_package / "scripts/ffmpeg", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    shutil.copyfile(ROOT / "scripts/build-ffmpeg.ps1", source_package / "scripts/build-ffmpeg.ps1")
+    for name in ("build-ffmpeg.ps1", "get-ffmpeg-bin.ps1"):
+        shutil.copyfile(ROOT / "scripts" / name, source_package / "scripts" / name)
     shutil.copyfile(ROOT / "LICENSE", source_package / "LICENSE")
     (source_package / "docs").mkdir()
     shutil.copyfile(ROOT / "docs/ffmpeg-build.md", source_package / "docs/ffmpeg-build.md")
     (source_package / "BUILD.txt").write_text(
         "Sources are pinned in scripts/ffmpeg/sources.json. Source archives contain the corresponding unmodified trees.\n"
-        "Run scripts/build-ffmpeg.ps1 from a source checkout with Python 3.12+, Git and MSVC 14.44.\n"
+        "Install the reference FFmpeg wheel as shown in docs/ffmpeg-build.md.\n"
+        "Run scripts/build-ffmpeg.ps1 with Python 3.12+, Git and MSVC 14.44.\n"
         "Build commands are in scripts/ffmpeg/build.sh. Actual compiler, SDK and tool versions are recorded in build-manifest.json.\n"
         "x264 and dav1d are static; FFmpeg libraries are shared. All use the static MSVC runtime.\n"
         "The FFmpeg mswindres UTF-8 patch is in scripts/ffmpeg/patches; build.sh applies it before configuration.\n"
@@ -213,9 +215,11 @@ def verify_and_package(work, output, manifest, env):
     print(f"VERIFIED {output}", flush=True)
 
 
-def build():
+def build(reference):
     if os.name != "nt" or sys.version_info < (3, 12):
         raise RuntimeError("Use native Windows x64 Python 3.12 or later")
+    if not reference.is_file():
+        raise FileNotFoundError(f"Reference FFmpeg not found: {reference}")
     identifier = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + os.urandom(3).hex()
     work = ROOT / "dist/.ffmpeg-build" / identifier
     output = ROOT / "dist/ffmpeg-minimal" / identifier
@@ -248,7 +252,7 @@ def build():
         manifest["tools"]["python_wheels"] = json.loads((TOOLS / "python-tools.json").read_text(encoding="utf-8"))
         save(output / "build-manifest.json", manifest)
         run([bash, "--noprofile", "--norc", str(HERE / "build.sh")], log, cwd=work, env=env)
-        verify_and_package(work, output, manifest, env)
+        verify_and_package(work, output, manifest, env, reference)
     except Exception as error:
         manifest.update(status="failed", error=str(error))
         save(output / "build-manifest.json", manifest)
@@ -256,8 +260,11 @@ def build():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reference", type=Path, required=True, help="FFmpeg executable used to generate validation media")
+    args = parser.parse_args()
     try:
-        build()
+        build(args.reference.resolve())
     except Exception as error:
         print(str(error), file=sys.stderr, flush=True)
         sys.exit(1)

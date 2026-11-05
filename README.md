@@ -18,9 +18,7 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。它从视频、
 ## 使用方式
 
 - **下载便携版。** 从 [Releases](https://github.com/NEKOSAMA514/StudyBuddy/releases) 下载 Windows x64 ZIP，完整解压到固定、可写的目录，再双击 `启动.cmd`。
-- **从源码运行。** 按[安装说明](docs/usage.md#安装并启动)配置环境。[environment.yml](environment.yml) 会安装 Python 3.12、FFmpeg/FFprobe 和前端构建用的 Node.js/npm，并读取 [backend/requirements.txt](backend/requirements.txt) 安装 Python 依赖。
-
-源码运行可以使用 Conda 安装的预编译 FFmpeg，也可以使用自己已安装的兼容版本。确保 `ffmpeg` 和 `ffprobe` 在 `PATH` 中可用，并且 FFmpeg 提供视频预览需要的 `libx264` 编码器。
+- **从源码运行。** 创建 Conda 环境，安装 Python 3.12、Node.js/npm 和包含 FFmpeg 9.0.2 的 pip 依赖。[安装说明](docs/usage.md#安装并启动) · [环境清单](environment.yml) · [Python 依赖](backend/requirements.txt)
 
 ## 功能特性
 

@@ -36,8 +36,10 @@ function Invoke-Checked([string]$Name, [string]$Command, [string[]]$Arguments) {
 $summary = [ordered]@{ status = 'failed'; cloud_model_called = $false; suites = @() }
 Push-Location $studyRoot
 try {
-    $localTools = Join-Path $studyRoot 'tools/ffmpeg/bin'
-    if (Test-Path -LiteralPath $localTools) { Set-TestEnv 'PATH' "$localTools;$env:PATH" }
+    if ($Suite -in @('All', 'Backend', 'Browser', 'BrowserSource')) {
+        $ffmpegBin = & (Join-Path $PSScriptRoot 'get-ffmpeg-bin.ps1') $pythonPath
+        Set-TestEnv 'PATH' "$ffmpegBin;$env:PATH"
+    }
     Set-TestEnv 'DATA_DIR' (Join-Path $output 'data')
     Set-TestEnv 'MODEL_DIR' (Join-Path $output 'data/models')
     Set-TestEnv 'LOG_DIR' (Join-Path $output 'log')

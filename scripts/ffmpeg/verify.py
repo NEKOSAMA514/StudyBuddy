@@ -110,7 +110,7 @@ def verify(args):
                 options = ["-x265-params", "pools=1:frame-threads=1"]
             reference("-f", "lavfi", "-i", "color=red:s=160x120:r=25:d=0.8", "-f", "lavfi", "-i", "sine=duration=0.8:sample_rate=44100",
                       "-c:v", encoder, *options, "-c:a", audio_encoder, "-pix_fmt", "yuv420p10le" if "10bit" in name else "yuv420p", "-threads", "1", fixtures / name)
-        # Generate all input media with the old build before processing it with the candidate.
+        # Generate input media with the reference build before checking the new binaries.
         reference("-f", "lavfi", "-i", "color=red:s=1920x1080:r=10:d=0.8", "-c:v", "mpeg4", fixtures / "silent.avi")
         reference("-f", "lavfi", "-i", "color=red:s=720x576:r=10:d=0.8", "-vf", "setsar=16/15", "-c:v", "mpeg4", fixtures / "aspect.mov")
         reference("-f", "lavfi", "-i", "color=red:s=160x120:r=25:d=1", "-f", "lavfi", "-i", "color=blue:s=160x120:r=10:d=1",

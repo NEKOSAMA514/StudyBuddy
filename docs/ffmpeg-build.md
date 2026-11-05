@@ -11,15 +11,10 @@
 
 ## 构建
 
-在 StudyBuddy 仓库根目录执行命令。构建使用 `tools/ffmpeg/bin/ffmpeg.exe` 生成样例文件。若该工具尚未准备，先运行项目的安装脚本。
+在 StudyBuddy 仓库根目录执行命令。构建脚本用当前 Python 环境中 `portable-ffmpeg-full` 提供的 FFmpeg 生成验证素材。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-ffmpeg.ps1
-```
-
-随后运行构建脚本。
-
-```powershell
+python -m pip install portable-ffmpeg-full==0.5.0
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ffmpeg.ps1
 ```
 

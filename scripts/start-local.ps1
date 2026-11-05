@@ -5,14 +5,9 @@
 $ErrorActionPreference = 'Stop'
 $studyRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $env:CONDA_PREFIX) { throw '请先执行 conda activate studybuddy。' }
-$localTools = Join-Path $studyRoot 'tools/ffmpeg/bin'
-if (Test-Path -LiteralPath $localTools) { $env:PATH = "$localTools;$env:PATH" }
 $pythonPath = (Get-Command python -ErrorAction Stop).Source
 & $pythonPath -c "import sys; assert sys.version_info[:2] == (3, 12), 'StudyBuddy requires Python 3.12'"
 if ($LASTEXITCODE -ne 0) { throw '请使用 studybuddy 的 Python 3.12 环境。' }
-foreach ($tool in @('ffmpeg', 'ffprobe')) {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "缺少 $tool，请按 environment.yml 补齐当前 Conda 环境，或运行 scripts/install-ffmpeg.ps1。" }
-}
 Push-Location $studyRoot
 try {
     # 沿用已有非路径设置，不打印凭据；原有私有 JSON 仍由后端加载。
@@ -38,6 +33,8 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $env:STATIC_DIR 'index.html'))) {
         throw '请先进入 frontend 运行 npm ci 和 npm run build。'
     }
+    $ffmpegBin = & (Join-Path $PSScriptRoot 'get-ffmpeg-bin.ps1') $pythonPath
+    $env:PATH = "$ffmpegBin;$env:PATH"
     $arguments = @('-m', 'uvicorn', 'app.main:create_app', '--factory', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', "$Port")
     if ($Reload) { $arguments += @('--reload', '--reload-dir', 'backend/app') }
     else { $arguments += @('--workers', '1') }
