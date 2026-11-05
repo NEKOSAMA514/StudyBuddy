@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Windows checks
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up StudyBuddy environment
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: studybuddy
+          environment-file: environment.yml
+
+      - name: Check documentation
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Docs
+
+      - name: Run backend tests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Backend
+
+      - name: Build frontend
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Frontend
