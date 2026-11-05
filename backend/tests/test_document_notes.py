@@ -105,19 +105,21 @@ def test_profile_budget_preview_and_queued_document_requests_use_snapshot(client
         "input_text_limit": 6000, "output_tokens": tokens, "stream": False})
     assert response.status_code == 201
     profile = response.json()["profiles"][-1]["id"]
-    doc = upload(client, raw=("材料原文。" * 2600).encode())
+    doc = upload(client, raw=("材料原文。" * 10000).encode())
     uri = f'/api/v1/documents/{doc["id"]}'
     normal = client.get(uri + "/analysis-preview").json()
     selected = client.get(uri + "/analysis-preview", params={"llm_profile_id": profile}).json()
-    assert normal["estimated_segments"] == 1
-    assert selected["eligible"] and selected["estimated_segments"] > 8
+    assert normal["eligible"] and selected["eligible"]
+    assert selected["estimated_segments"] > normal["estimated_segments"]
     assert client.get(uri + "/analysis-preview?llm_profile_id=missing").status_code == 404
     response = client.post(uri + "/analyses", json={"llm_profile_id": profile})
     assert response.status_code == 202, response.text
     task_id = response.json()["task_id"]
     assert client.put(f"/api/v1/settings/model/profiles/{profile}", json={"name": "改大范围", "input_text_limit": 25000, "output_tokens": OUTPUT_TOKENS}).status_code == 200
     app.state.document_pipeline.run(task_id)
-    assert client.get(f"/api/v1/document-tasks/{task_id}").json()["status"] == "succeeded"
+    status = client.get(f"/api/v1/document-tasks/{task_id}").json()
+    assert status["status"] == "succeeded", status
+    assert status["request_count"] == len(document_models) > 80
     for request, payload in document_models:
         operation = "outline" if "anchors" in payload else "chapters" if "chapters" in payload else "overview"
         assert json.loads(request.content)["max_tokens"] == tokens[operation]
@@ -260,18 +262,6 @@ def test_three_successes_retention_failure_and_transaction_rollback(client, app,
     assert [v["id"] for v in client.get(f'/api/v1/documents/{doc["id"]}/analyses').json()] == ids[:0:-1]
 
 
-def test_request_limit_is_persistent_and_prevents_network(client, app, document_models):
-    doc = upload(client)
-    identifier = start(client, doc)
-    with app.state.sessions.begin() as session:
-        session.get(DocumentTask, identifier).request_count = 80
-    app.state.document_pipeline.run(identifier)
-    assert not document_models
-    status = client.get(f"/api/v1/document-tasks/{identifier}").json()
-    assert status["status"] == "failed" and status["request_count"] == 80
-    assert client.post(f"/api/v1/document-tasks/{identifier}/retry").status_code == 409
-
-
 def test_multi_segment_drafts_resume_and_frozen_preferences(client, app, document_models):
     doc = upload(client, raw=("长文材料。\n" * 9000).encode())
     client.put("/api/v1/settings/note-style", json={"summary_prompt": "解释逻辑关系"})
@@ -381,7 +371,7 @@ def test_preflight_accepts_many_segments_and_rejects_blank_material():
                                       for i in range(12)]}
     info = preview(material, Settings(note_style="concise", llm_input_text_limit=4500))
     assert info["estimated_segments"] > 8 and info["eligible"]
-    assert info["limits"] == {"characters": 100_000, "requests": 80}
+    assert info["limits"] == {"characters": 100_000}
     assert not preview({"version": 1, "units": [{**material["units"][0], "text": " \n"}]}, Settings())["eligible"]
 
 
@@ -396,23 +386,15 @@ def test_oversize_single_source_generates_without_losing_offsets(client, app, do
     assert all(a["end_offset"] == b["start_offset"] for a, b in zip(spans, spans[1:]))
 
 
-def test_concurrent_reservations_cannot_exceed_task_limit(client, app):
+def test_concurrent_request_counts_are_atomic(client, app):
     from concurrent.futures import ThreadPoolExecutor
     doc = upload(client)
     identifier = start(client, doc)
     with app.state.sessions.begin() as session:
-        task = session.get(DocumentTask, identifier)
-        task.status, task.request_count = "running", 79
-    def reserve(_):
-        try:
-            app.state.document_pipeline.reserve_request(identifier)
-            return True
-        except AppError as exc:
-            assert exc.code == "document_request_limit"
-            return False
+        session.get(DocumentTask, identifier).status = "running"
     with ThreadPoolExecutor(max_workers=4) as pool:
-        assert sum(pool.map(reserve, range(8))) == 1
-    assert client.get(f"/api/v1/document-tasks/{identifier}").json()["request_count"] == 80
+        list(pool.map(app.state.document_pipeline.count_request, [identifier] * 8))
+    assert client.get(f"/api/v1/document-tasks/{identifier}").json()["request_count"] == 8
 
 
 def test_transport_retries_are_charged_and_do_not_reset(client, app, document_models, monkeypatch):
@@ -549,18 +531,6 @@ def test_outline_boundary_repair_is_counted_and_keeps_contiguous_sources(client,
     assert status["status"] == "succeeded" and status["request_count"] == len(document_models) == 4
     notes = client.get(f"/api/v1/document-analyses/{identifier}").json()
     assert [i for c in notes["chapters"] for i in c["source_ids"]] == ["D1", "D2"]
-
-
-def test_request_ceiling_applies_to_structure_repair(client, app, document_models):
-    doc = upload(client)
-    identifier = start(client, doc)
-    with app.state.sessions.begin() as session:
-        session.get(DocumentTask, identifier).request_count = 79
-    document_models.hook = lambda *_: httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
-    app.state.document_pipeline.run(identifier)
-    status = client.get(f"/api/v1/document-tasks/{identifier}").json()
-    assert status["status"] == "failed" and status["request_count"] == 80 and len(document_models) == 1
-    assert status["error"]["code"] == "document_request_limit"
 
 
 def test_nonconverging_extraction_fails_and_keeps_checkpoints(client, app, document_models):

@@ -8,7 +8,7 @@ from ..errors import AppError, TaskInterrupted, DocumentStopped
 from ..analysis.checkpoints import CheckpointCleanup
 from ..analysis.activity import TaskActivity, in_session
 from .detailed import DetailedDocumentGeneration
-from .material import load_material, verify_snapshot, MAX_DOCUMENT_REQUESTS
+from .material import load_material, verify_snapshot
 from .model import DocumentModelClient
 from .versions import check_generation
 from ..settings.model_profiles import execution_settings, EXECUTION_FIELDS
@@ -37,18 +37,15 @@ class DocumentPipeline:
             if self.model_control and self.model_control[0] == identifier:
                 self.model_control[1].call_soon_threadsafe(self.model_control[2].set)
 
-    # 每次实际模型请求前原子占用次数，重试与修正同样计入上限。
-    def reserve_request(self, identifier):
+    # 每次实际发送前原子计数，并在更新时确认任务仍在运行。
+    def count_request(self, identifier):
         self.check(identifier)
         with self.sessions.begin() as session:
             changed = session.execute(update(DocumentTask).where(DocumentTask.id == identifier,
-                DocumentTask.status == "running", DocumentTask.request_count < MAX_DOCUMENT_REQUESTS)
+                DocumentTask.status == "running")
                 .values(request_count=DocumentTask.request_count + 1)).rowcount
             if not changed:
-                task = session.get(DocumentTask, identifier)
-                if not task or task.status != "running":
-                    raise DocumentStopped()
-                raise AppError("document_request_limit", "已达到80次请求上限，草稿已保留，请拆分文档后重新生成。", 409)
+                raise DocumentStopped()
 
     def stage(self, identifier, stage, number, total, summary=None):
         self.check(identifier)
@@ -101,7 +98,7 @@ class DocumentPipeline:
             async with self.model_factory(settings) as model:
                 model.diagnostics = self.diagnostics
                 model.activity = TaskActivity(self.sessions, DocumentTask, task.id, task.attempts, self.diagnostics)
-                model.before_request = lambda: self.reserve_request(task.id)
+                model.before_request = lambda: self.count_request(task.id)
                 model.check_stop = lambda: self.check(task.id)
                 from .concise import ConciseDocumentGeneration
                 factory = ConciseDocumentGeneration if settings.note_style == "concise" else DetailedDocumentGeneration

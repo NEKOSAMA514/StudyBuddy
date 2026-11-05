@@ -15,7 +15,7 @@ async function mockSearch(page: Page, style = "detailed") {
     status, stage: status === "succeeded" ? "completed" : "summarizing", note_style: style,
     notes_state: status === "succeeded" ? "ready" : "partial", notes_revision: 1,
     config: {}, warnings: [], timings: {}, error: null, completed_at: "2026-10-24T00:00:00Z",
-    request_count: 0, request_limit: 80 });
+    request_count: 0 });
   const saved = { video: task("video", "video-saved"), document: task("document", "document-saved") };
   const draft = { video: task("video", "video-draft", "paused"), document: task("document", "document-draft", "paused") };
   const notes = (kind: string, id: string) => ({ id, [`${kind}_id`]: kind, format_version: kind === "video" ? 4 : 1,

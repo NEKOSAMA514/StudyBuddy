@@ -77,7 +77,7 @@
 | 视频上传与时长 | 默认 5 GiB、18,000 秒（5 小时），可由启动配置设置 | [config.py](../backend/app/config.py) |
 | 文档原件 | 不超过 100 MiB，且不超过应用上传限制 | [extraction.py](../backend/app/documents/extraction.py) |
 | 提取材料 | 最多 500 万字符、10,000 个来源块；PDF 页数也受限制 | [extraction.py](../backend/app/documents/extraction.py)、[imports.py](../backend/app/documents/imports.py) |
-| 文档生成 | 最多 10 万字符和 80 次实际模型请求。段数按模型输入预算计算 | [material.py](../backend/app/documents/material.py) |
+| 文档生成 | 最多 10 万字符，段数按模型输入预算计算 | [material.py](../backend/app/documents/material.py) |
 | 文档图片 | 最多 200 张不同图片，单张及相关合成尺寸受 2,000 万像素限制 | [image_text.py](../backend/app/documents/image_text.py)、[extraction.py](../backend/app/documents/extraction.py) |
 | MinerU 批次与演示文稿 | 每个 PDF 批次或每份 PPT、PPTX 的上限为轻量 20 页／10 MiB、精准 200 页／200 MiB。PDF 按页数和大小分批，原件仍受文档上传上限约束 | [imports.py](../backend/app/documents/imports.py) |
 | 视频画面采样 | 新任务均匀取 60 个计划位置；历史任务按保存的固定间隔恢复 | [recognition/extraction.py](../backend/app/recognition/extraction.py) |
@@ -89,7 +89,7 @@
 
 输入过大时按流程拆分或压缩发送材料；不能用截掉未覆盖原文来伪造完整结果。文档预检不通过仍可查看已提取材料，提取上限与生成上限不是同一个概念。
 
-明确可重试的上游请求错误最多尝试三次，共用发送间隔。结构或来源校验另有一次修正；章节只修正未完成部分，先等待成功章节保存。重试和修正都计入文档实际请求次数。
+单个模型请求遇到明确可重试的上游错误时，最多尝试三次，共用发送间隔。结构或来源校验另有一次修正。章节只修正未完成部分，先等待成功章节保存。视频和文档都累计实际请求次数，包含重试和修正。
 
 ## 前端读取与错误策略
 

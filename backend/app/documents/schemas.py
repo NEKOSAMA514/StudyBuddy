@@ -1,7 +1,6 @@
 """文档模型输出、请求及安全任务摘要的结构契约。"""
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ..analysis.schemas import Record, ChapterPlan, Extracted, ChapterBatch, Overview, QuoteRepairs
-from .material import MAX_DOCUMENT_REQUESTS
 from ..analysis.content_types import CONTENT_TYPES, complete_content_type
 from ..analysis.schemas import ConciseNote
 from typing import Literal
@@ -44,8 +43,7 @@ def public_task(task):
             "config": {k: task.config[k] for k in ("source", "outline_preview", "total_segments") if k in task.config},
             "notes_state": ("ready" if result.get("complete") else "partial") if result.get("chapters") else "none",
             "progress": {"stage_labels": {"checking": "检查文档材料", "concise": "生成简洁笔记"} if style == "concise" else STAGES, "segment": task.config.get("segment", 0),
-                         "total_segments": task.config.get("total_segments", 0)},
-            "request_limit": MAX_DOCUMENT_REQUESTS}
+                         "total_segments": task.config.get("total_segments", 0)}}
 
 
 def public_document(row):

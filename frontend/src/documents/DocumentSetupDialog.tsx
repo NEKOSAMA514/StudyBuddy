@@ -46,7 +46,7 @@ export function DocumentSetupDialog({ id, busy, onStart, onClose, onError }: {
     {!data ? <p role="status">{failed ? "读取失败，请关闭后重试。" : "正在检查材料…"}</p> : <>
       {previewReady ? <p>{data.preview.character_count.toLocaleString()} 字符 · 预计 {data.preview.estimated_segments} 段</p>
         : <p role="status">{failed ? "检查失败，请重新选择配置或关闭后重试。" : "正在检查所选配置的材料规模…"}</p>}
-      <p className="muted">最多 {data.preview.limits.characters.toLocaleString()} 字符、{data.preview.limits.requests} 次请求（含重试）。文档和视频按提交顺序排队。</p>
+      <p className="muted">最多 {data.preview.limits.characters.toLocaleString()} 字符。文档和视频按提交顺序排队。</p>
       {previewReady && !data.preview.eligible && <p className="notice">{data.preview.reason}</p>}
       <APIProfileSelect profiles={data.profiles} value={selected} disabled={busy} onChange={setSelected} />
       <NoteStyleSelect value={noteStyle} disabled={busy} onChange={setNoteStyle} />

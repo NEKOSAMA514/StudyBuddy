@@ -5,7 +5,7 @@ import { settingsRead } from "./support/settings";
 async function workspace(page: Page, kind: "video" | "document") {
   const time = "2026-10-27T00:00:00Z";
   const task = { id: "tracked", video_id: "file", document_id: "file", status: "paused", stage: "checking", config: {}, timings: {}, warnings: [], error: null,
-    created_at: time, updated_at: time, notes_state: "none", notes_revision: 0, request_count: 0, request_limit: 80,
+    created_at: time, updated_at: time, notes_state: "none", notes_revision: 0, request_count: 0,
     progress: { stage_labels: {}, segment: 0, total_segments: 1 } };
   const state = { task, latest: true, failures: 0, reads: 0, writes: [] as string[], bodies: [] as any[], failWrite: false, missing: false, failList: false,
     extraction: null as any, listDelay: 0, active: 0, maxActive: 0, lists: 0, fileId: "file" };
@@ -40,7 +40,7 @@ async function workspace(page: Page, kind: "video" | "document") {
     }
     if (path.endsWith("/extraction")) return route.fulfill({ json: state.extraction });
     if (path.endsWith("/analysis-preview")) return route.fulfill({ json: { eligible: true, character_count: 10, estimated_segments: 1,
-      reason: null, limits: { characters: 100000, requests: 80 } } });
+      reason: null, limits: { characters: 100000 } } });
     if (path.endsWith("/analyses") || path.endsWith("/evidence")) return route.fulfill({ json: [] });
     if (path.endsWith("/content")) return route.fulfill({ json: { units: [], total: 0, offset: 0 } });
     if (path.endsWith("/playback")) return route.fulfill({ json: { status: "unprepared", direct: true, original_url: "/empty.mp4", mime_type: "video/mp4", error: null } });

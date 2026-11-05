@@ -116,7 +116,7 @@ export function DocumentDetail({ document, onBack, onError, onTaskChanged, refre
       </section>}
       {(current || !extraction) && <TaskProgress progress={progress} status={current?.status} label="文档处理" detail={progress?.detail} />}
       {current && <>
-        <p className="muted">已尝试 {current.request_count}/{current.request_limit} 次模型请求（含重试与修正）</p>
+        <p className="muted">已尝试 {current.request_count} 次模型请求（含重试与修正）</p>
         <TaskActivity key={current.id} activity={current.activity} status={current.status} reconnecting={analysis.reconnecting}
           stage={current.progress.stage_labels[current.stage] || taskStatusLabels[current.status]}
           error={current.error} warnings={current.warnings} />
@@ -125,8 +125,8 @@ export function DocumentDetail({ document, onBack, onError, onTaskChanged, refre
       </>}
       <div className="document-task-actions">
         {current && ["queued", "running"].includes(current.status) && <button className="secondary" disabled={analysis.busy || analysis.missing} onClick={() => void analysis.operate("stop")}>停止处理</button>}
-        {current && ["paused", "interrupted"].includes(current.status) && <button className="secondary" disabled={analysis.busy || analysis.missing || current.request_count >= current.request_limit} onClick={() => void analysis.operate("resume")}>继续处理</button>}
-        {current?.status === "failed" && <button className="secondary" disabled={analysis.busy || analysis.missing || current.request_count >= current.request_limit} onClick={() => void analysis.operate("retry")}>重试任务</button>}
+        {current && ["paused", "interrupted"].includes(current.status) && <button className="secondary" disabled={analysis.busy || analysis.missing} onClick={() => void analysis.operate("resume")}>继续处理</button>}
+        {current?.status === "failed" && <button className="secondary" disabled={analysis.busy || analysis.missing} onClick={() => void analysis.operate("retry")}>重试任务</button>}
         {(!current || terminal.has(current.status)) && !extracting && <button className="secondary" disabled={analysis.busy || !!analysis.receipt || analysis.missing || processing || !pending && !document.character_count} onClick={() => setSetup(true)}>
           {pending ? "开始处理" : current ? "重新生成笔记" : "生成笔记"}</button>}
         {current && current.notes_state !== "none" && <button className="secondary" onClick={() => {

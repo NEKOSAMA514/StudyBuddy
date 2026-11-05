@@ -85,7 +85,7 @@ def test_chunked_upload_limit_before_registration(app, monkeypatch, declared):
 
 @pytest.mark.parametrize("code", ["model_input_budget", "processing_failed", "invalid_checkpoint", "media_cancelled",
     "document_missing", "document_task_missing", "document_busy", "document_not_prepared", "document_content_missing",
-    "document_source_changed", "document_generation_changed", "document_generation_limit", "document_request_limit",
+    "document_source_changed", "document_generation_changed", "document_generation_limit",
     "document_limit", "document_encoding", "document_dependency", "encrypted_document", "invalid_document",
     "invalid_document_task_state", "notes_unavailable"])
 def test_registered_business_error_keeps_actionable_message(code):

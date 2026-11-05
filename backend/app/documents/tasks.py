@@ -5,8 +5,7 @@ from sqlalchemy import select
 from ..db import DocumentTask, now, ACTIVE_TASK_STATUSES, TASK_CONTROL_STATUSES
 from ..errors import AppError
 from ..settings.model_profiles import for_profile, find, task_model_config, execution_settings, EXECUTION_FIELDS
-from .material import (load_material, verify_snapshot, snapshot, detailed_segments,
-                       MAX_DOCUMENT_CHARACTERS, MAX_DOCUMENT_REQUESTS)
+from .material import load_material, verify_snapshot, snapshot, detailed_segments, MAX_DOCUMENT_CHARACTERS
 from .schemas import public_task
 from .notes import DocumentNotes
 from .task_rules import get_task
@@ -18,7 +17,7 @@ from ..analysis.activity import in_session
 def preview(material, settings, title=""):
     from .model import DocumentModelClient
     source = snapshot(material)
-    limits = {"characters": MAX_DOCUMENT_CHARACTERS, "requests": MAX_DOCUMENT_REQUESTS}
+    limits = {"characters": MAX_DOCUMENT_CHARACTERS}
     if source["character_count"] > MAX_DOCUMENT_CHARACTERS:
         return {"source": source, "character_count": source["character_count"], "estimated_segments": 0,
             "eligible": False, "reason": "文档超过10万字符，请拆分文件后生成；仍可查看提取内容。",
@@ -120,8 +119,6 @@ class DocumentAnalyses:
             else:
                 verify_snapshot(self.material(session, task.document_id), task.config["source"])
                 check_generation(task.config)
-                if task.request_count >= MAX_DOCUMENT_REQUESTS:
-                    raise AppError("document_request_limit", "已达到80次请求上限，请拆分文档后重新生成。", 409)
                 execution_settings(self.get_settings(), task.config, required_fields=EXECUTION_FIELDS)
                 active = session.scalar(select(DocumentTask.id).where(DocumentTask.document_id == task.document_id,
                                                                        DocumentTask.status.in_(ACTIVE_TASK_STATUSES)))

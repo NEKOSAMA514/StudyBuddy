@@ -12,7 +12,7 @@ async function workspace(page: Page, kind: "video" | "document", style: "concise
   const base = { id: "activity-task", video_id: "activity-file", document_id: "activity-file", status: "running", stage: style === "concise" ? "concise:1/1" : "summarizing",
     note_style: style, notes_state: "none", notes_revision: 0, attempts: 1, config: {}, timings: {}, warnings: [] as string[],
     error: null as { message: string; error_id: string; log_file: string } | null, created_at: time, updated_at: time,
-    activity: activity as TaskActivityData | null, request_count: 1, request_limit: 80,
+    activity: activity as TaskActivityData | null, request_count: 1,
     progress: { stage_labels: { checking: "检查文档材料", planning: "规划文档章节", concise: "生成简洁笔记", summarizing: "生成章节正文", finalizing: "整理概览与校验" }, segment: 1, total_segments: 1 } };
   const state = { task: base, polls: 0, failPoll: false, writes: [] as string[] };
   const task = () => kind === "video" ? taskResponse(state.task) : state.task;
@@ -89,6 +89,7 @@ for (const style of ["concise", "detailed"] as const) for (const totalSegments o
     const { state, open } = await workspace(page, "document", style);
     state.task.status = "queued";
     state.task.stage = "checking";
+    state.task.request_count = 81;
     state.task.progress.segment = 0;
     state.task.progress.total_segments = totalSegments;
     await page.clock.install();
@@ -153,7 +154,7 @@ for (const style of ["concise", "detailed"] as const) for (const totalSegments o
     await expect(progress).toHaveAttribute("aria-valuenow", "100");
     await expect(panel.locator('.workflow-steps [data-done="true"]')).toHaveCount(count);
     await expect(panel.locator('.workflow-steps [aria-current="step"]')).toHaveCount(0);
-    await expect(panel).toContainText("已尝试 1/80 次模型请求");
+    await expect(panel).toContainText("已尝试 81 次模型请求");
     await expect(panel.getByRole("region", { name: "任务动态", exact: true })).toBeVisible();
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 871 });

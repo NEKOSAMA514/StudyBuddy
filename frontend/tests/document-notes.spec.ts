@@ -58,7 +58,6 @@ test("文档切换 API 预算重新预检，超过八段仍可生成", async ({ 
   await page.unroute(pattern);
   await picker.selectOption(profile);
   await expect(dialog.getByText(/预计 (?:9|[1-9]\d+) 段/)).toBeVisible();
-  await expect(dialog.getByText(/最多 .* 字符、80 次请求/)).toBeVisible();
   await expect(start).toBeEnabled();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
 });

@@ -23,7 +23,7 @@ KNOWN_ERRORS.update({"mineru_token_missing", "mineru_failed", "mineru_download",
                      "mineru_submission_uncertain", "document_already_prepared"})
 KNOWN_ERRORS.update({"document_missing", "document_task_missing", "document_busy", "document_not_prepared",
                      "document_content_missing", "document_source_changed", "document_generation_changed",
-                     "document_generation_limit", "document_request_limit", "document_limit", "document_encoding",
+                     "document_generation_limit", "document_limit", "document_encoding",
                      "document_dependency", "encrypted_document", "invalid_document", "invalid_document_task_state",
                      "notes_unavailable"})
 

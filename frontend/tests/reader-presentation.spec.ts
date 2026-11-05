@@ -14,7 +14,7 @@ async function reader(page: Page, kind: "video" | "document", failures = { notes
   const base = { id: taskId, video_id: id, document_id: id, status: "succeeded", stage: "completed",
     created_at: "2026-10-20T00:00:00Z", updated_at: "2026-10-20T00:00:00Z", completed_at: "2026-10-20T00:00:00Z",
     notes_state: "ready", notes_revision: 1, config: {}, timings: {}, warnings: [], error: null };
-  const task = kind === "video" ? taskResponse(base) : { ...base, progress: { stage_labels: {}, segment: 1, total_segments: 1 }, request_count: 1, request_limit: 80 };
+  const task = kind === "video" ? taskResponse(base) : { ...base, progress: { stage_labels: {}, segment: 1, total_segments: 1 }, request_count: 1 };
   const file = { id, kind, filename: "阅读检查", duration: 120, format: "md", unit_count: 1,
     character_count: 50, size_bytes: 100, pinned: false, created_at: base.created_at, latest_task: task };
   const result = { note_style: style, format_version: kind === "video" ? 4 : 1, complete: true,
