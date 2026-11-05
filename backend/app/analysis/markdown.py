@@ -33,10 +33,29 @@ math_parts = re.compile(
     r"|(?<!\\)\\\((?P<inline>[\s\S]+?)\\\)"
     r"|(?P<chem>(?<!\\)\\ce\{)")
 
+table_separator = re.compile(r"(?<!\\)\|")
 
-# 只规范正文中的公式定界与化学表达式，代码区域保持原文。
+
+def protect_table_math(row, width):
+    def column_count(value):
+        cells = table_separator.split(value.strip().lstrip("> \t"))
+        return len(cells) - (not cells[0]) - (not cells[-1])
+
+    # 只修复超出表头列数的行，避免把金额等普通单元格之间的分隔符当作公式。
+    if column_count(row) <= width:
+        return row
+
+    def protect(match):
+        if match.group("math") or match.group("inline"):
+            return table_separator.sub(lambda _: r"\vert ", match[0])
+        return match[0]
+
+    repaired = math_parts.sub(protect, row)
+    return repaired if column_count(repaired) == width else row
+
+
 def normalize_math(markdown):
-    """规范公式定界符，仅构造显示/导出副本，保留代码及化学式内容。"""
+    """规范公式定界符与表格内的竖线，仅构造显示/导出副本。"""
     def display(value, indent):
         # 列表内的公式正文和结束定界符必须保留同一层缩进。
         lines = value.strip().splitlines()
@@ -80,7 +99,12 @@ def normalize_math(markdown):
 
     lines, parts, cursor = markdown.splitlines(keepends=True), [], 0
     for token in parser.parse(markdown):
-        if token.type in {"fence", "code_block", "html_block"}:
+        if token.type == "table_open":
+            start, end = token.map
+            width = sum("-" in cell for cell in lines[start + 1].split("|"))
+            for row in range(start + 2, end):
+                lines[row] = protect_table_math(lines[row], width)
+        elif token.type in {"fence", "code_block", "html_block"}:
             start, end = token.map
             parts.extend([plain("".join(lines[cursor:start])), "".join(lines[start:end])])
             cursor = end

@@ -89,6 +89,21 @@ def test_multiline_display_math_in_list_preserves_relative_formula_indentation()
     assert normalize_math(source) == source
 
 
+def test_absolute_value_math_preserves_table_columns():
+    table = r"""| 指标 | 公式 | 说明 |
+|---|---|---|
+| 平均偏差 | $\bar{d}=\frac{1}{n}\sum_{i=1}^{n}|x_i-\bar{x}|$ | 取绝对值后求和再平均 |
+| 金额 | $5 | $10 |
+| 示例 | `$\|x\|$` | 代码 |
+"""
+    repaired = table.replace(r"|x_i-\bar{x}|", r"\vert x_i-\bar{x}\vert ")
+    assert normalize_math(table) == repaired
+    assert normalize_math(repaired) == repaired
+    assert "取绝对值后求和再平均" in markdown_text(repaired)
+    literal = "符号 $|x|$。\n\n```markdown\n" + table + "```"
+    assert normalize_math(literal) == literal
+
+
 def test_markdown_plain_text_preserves_content_code_lists_tables_and_links():
     text = markdown_text(SAMPLE)
     assert has_markdown_body(SAMPLE)
