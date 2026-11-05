@@ -110,7 +110,7 @@ test("确认后才发送 OCR 提取，失败保留原件且可重试，处理中
   await page.keyboard.press("Escape");
   await expect(dialog(page)).toBeVisible();
   await expect.poll(() => sends).toBe(1);
-  expect(JSON.parse(body)).toEqual({ ocr_option: "rapidocr", parser: "mineru_agent", llm_profile_id: "default", note_style: "concise" });
+  expect(JSON.parse(body)).toEqual({ ocr_option: "rapidocr", parser: "mineru_agent", llm_profile_id: "default", note_style: "concise", generate_notes: true });
   release();
   await expect(dialog(page).locator("p.notice[role=alert]")).toContainText("模拟提取失败");
   await expect(dialog(page).getByLabel("OCR 模型")).toHaveValue("rapidocr");

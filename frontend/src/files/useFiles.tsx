@@ -186,7 +186,7 @@ export function useFiles({
       const uploaded = await uploadFile(file, setUploadPercent, document);
       await refresh();
       onUploaded(uploaded);
-      importing.uploaded(uploaded);
+      importing.uploaded();
     } catch (error) {
       onError(error);
     } finally {

@@ -28,6 +28,7 @@ class DocumentExtractionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ocr_option: Literal["rapidocr"] | None = None
     parser: Literal["local", "mineru_agent", "mineru_vlm"] | None = None
+    generate_notes: bool | None = None
     llm_profile_id: str | None = Field(default=None, min_length=1, max_length=64)
     note_style: Literal["concise", "detailed"] | None = None
 

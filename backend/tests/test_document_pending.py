@@ -79,6 +79,42 @@ def test_pending_survives_reopen_and_failure_keeps_original(client, app, monkeyp
         assert other.get('/api/v1/documents').json()[0]['extracted'] is False
 
 
+def test_extract_only_without_model_key_keeps_selected_local_mode_on_retry(client, app, monkeypatch):
+    from app.documents.mineru import MinerUClient
+    imports = app.state.document_imports
+    app.state.current_settings.replace(replace(app.state.settings_service.current,
+                                               llm_key='', mineru_token='isolated-mineru-token'))
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError('Local extraction must not call MinerU or create a note task')
+
+    def unavailable(*args, **kwargs):
+        raise OSError('simulated temporary file error')
+
+    monkeypatch.setattr(MinerUClient, 'parse', unexpected)
+    monkeypatch.setattr(imports.analyses, 'create', unexpected)
+    pending = import_file(client, 'pdf')
+    path = f"/api/v1/documents/{pending['id']}"
+    with monkeypatch.context() as scoped:
+        scoped.setattr(imports.documents, 'prepare', unavailable)
+        response = client.post(path + '/extract', json={'parser': 'local', 'generate_notes': False})
+        assert response.status_code == 202, response.text
+        assert response.json()['parser'] == 'local' and response.json()['task_id'] is None
+        imports.executor.submit(lambda: None).result(timeout=10)
+    assert client.get(path + '/extraction').json()['status'] == 'failed'
+    assert client.get(path + '/original').status_code == 200
+
+    assert client.post(path + '/extract').status_code == 202
+    imports.executor.submit(lambda: None).result(timeout=10)
+    state = client.get(path + '/extraction').json()
+    assert state['status'] == 'done' and state['task_id'] is None, state
+    assert 'notes' not in state['progress']
+    prepared = client.get('/api/v1/documents').json()[0]
+    assert prepared['id'] == state['document_id'] and prepared['latest_task'] is None
+    content = client.get(f"/api/v1/documents/{prepared['id']}/content").json()
+    assert 'First page evidence' in content['units'][0]['text']
+
+
 def test_rename_and_pin_survive_background_processing(client, app):
     pending = import_file(client)
     client.patch(f"/api/v1/documents/{pending['id']}", json={'filename':'课堂笔记','pinned':True})

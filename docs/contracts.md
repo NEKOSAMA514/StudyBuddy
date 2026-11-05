@@ -50,7 +50,9 @@
 
 后台提取入口为 `POST /documents/{id}/extract`，状态读取为 `GET /documents/{id}/extraction`。状态包含 `source_id`、`document_id`、`task_id`，以及 `status`、`parser`、`progress`、`error`；提取状态使用 `queued/running/done/failed/interrupted`，不与笔记状态混用。
 
-材料先保存，笔记任务后提交。`done` 中的任务编号用于接管读取，不要求列表 `latest_task` 已同步。相同提取记录只交接一次；首次进入历史已完成材料时优先采用列表的最新任务，历史提取不能覆盖后来的手动任务。
+重试时省略 `parser` 会沿用原解析方式。传入 `generate_notes=false` 可只提取材料，完成后 `task_id` 为 `null`。首次请求省略该字段时沿用提取后生成笔记的流程，重试省略时保留原请求的选择。
+
+材料先保存，笔记任务后提交。`done` 中的任务编号用于接管读取，不要求列表 `latest_task` 已同步。相同提取记录只交接一次。首次进入历史已完成材料时优先采用列表的最新任务，历史提取不能覆盖后来的手动任务。
 
 视频依据使用真实时间与稳定来源 ID；文档材料块使用 `D` 编号及页、幻灯片、正文块或行范围，生成切片另保存字符偏移。Word 来源不推算页码。请求中的短别名与内部来源通过映射关联，模型不能自行编造原件位置。
 

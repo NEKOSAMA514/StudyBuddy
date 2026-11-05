@@ -16,9 +16,8 @@ test.beforeEach(async ({ request }) => {
   await request.put("/api/v1/settings/mineru", { data: { clear_token: true } });
 });
 
-test("轻量默认、Markdown按批保存、后台生成及刷新恢复", async ({ page, request }) => {
+test("无MinerU Token默认轻量解析，可生成笔记并刷新恢复", async ({ page, request }) => {
   const source = await importPDF(page, request);
-  await expect(page.locator(".mineru-hint")).toContainText("免费申请 API Token");
   await page.getByRole("button", { name: "开始处理", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "生成文档笔记" });
   await expect(dialog.getByLabel("PDF 解析方式")).toHaveValue("mineru_agent");
@@ -28,7 +27,6 @@ test("轻量默认、Markdown按批保存、后台生成及刷新恢复", async 
   await expect.poll(async () => (await (await request.get(`/api/v1/documents/${source}/extraction`)).json()).status).toBe("done");
   const state = await (await request.get(`/api/v1/documents/${source}/extraction`)).json();
   await expect(page).toHaveURL(new RegExp(`#summary/${state.document_id}$`));
-  await expect(page.locator(".mineru-hint")).toHaveCount(0);
   const content = await (await request.get(`/api/v1/documents/${state.document_id}/content`)).json();
   expect(content.units).toHaveLength(1);
   expect(content.units[0]).toMatchObject({ id: "D1", format: "markdown", locator: { page_start: 1, page_end: 2 } });
@@ -45,7 +43,7 @@ test("轻量默认、Markdown按批保存、后台生成及刷新恢复", async 
   await request.delete(`/api/v1/documents/${state.document_id}`);
 });
 
-test("Token独立保存清除，配置后PDF默认精准，仍可选择本地", async ({ page, request }) => {
+test("MinerU Token独立保存清除，配置后PDF默认精准且可选本地", async ({ page, request }) => {
   await importPDF(page, request);
   await page.goto("/#settings");
   const settings = page.getByRole("dialog", { name: "设置", exact: true });
@@ -63,16 +61,47 @@ test("Token独立保存清除，配置后PDF默认精准，仍可选择本地", 
   await expect(settings.getByText("MinerU 设置已保存。", { exact: true })).toBeVisible();
   expect(await (await request.get("/api/v1/settings/mineru")).json()).toEqual({ has_token: true });
   await settings.getByRole("button", { name: "关闭设置", exact: true }).click();
-  await expect(page.locator(".mineru-hint")).toHaveCount(0);
   await page.getByRole("button", { name: "开始处理", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "生成文档笔记" });
-  await expect(dialog.getByLabel("PDF 解析方式")).toHaveValue("mineru_vlm");
-  await dialog.getByLabel("PDF 解析方式").selectOption("local");
+  const parser = dialog.getByLabel("PDF 解析方式");
+  await expect(parser).toHaveValue("mineru_vlm");
+  await expect(dialog.getByText("确认开始后会将 PDF", { exact: false })).toBeVisible();
+  await parser.selectOption("local");
   await expect(dialog.getByText("仅在本机提取文字并识别内嵌图片。", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await page.goto("/#settings");
   await settings.getByRole("button", { name: "清除 MinerU Token", exact: true }).click();
   await expect(settings.getByText("MinerU Token 已清除。", { exact: true })).toBeVisible();
+});
+
+test("没有模型密钥时仍可切换本地提取，补齐密钥后生成笔记", async ({ page, request }) => {
+  expect((await request.put("/api/v1/settings/model", { data: { clear_token: true } })).ok()).toBe(true);
+  const source = await importPDF(page, request);
+  await expect(page.getByRole("link", { name: /免费申请.*Token/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "开始处理", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "提取文档", exact: true });
+  const parser = dialog.getByLabel("PDF 解析方式");
+  await expect(parser).toHaveValue("mineru_agent");
+  await parser.selectOption("local");
+  await expect(dialog.getByRole("link", { name: /配置 MinerU Token/ })).toHaveCount(0);
+  const submitted = page.waitForResponse(response => response.url().endsWith("/extract") && response.request().method() === "POST");
+  await dialog.getByRole("button", { name: "开始提取", exact: true }).click();
+  const response = await submitted;
+  expect(response.status()).toBe(202);
+  expect(response.request().postDataJSON()).toMatchObject({ parser: "local", generate_notes: false });
+  const extraction = `/api/v1/documents/${source}/extraction`;
+  await expect.poll(async () => (await (await request.get(extraction)).json()).status).toBe("done");
+  const state = await (await request.get(extraction)).json();
+  expect(state.task_id).toBeNull();
+  await expect(page).toHaveURL(new RegExp(`#summary/${state.document_id}$`));
+  await page.getByRole("heading", { name: "提取内容", exact: true }).click();
+  await expect(page.getByText("First page evidence", { exact: true })).toBeVisible();
+
+  expect((await request.put("/api/v1/settings/model", { data: { token: "fake-mineru-notes" } })).ok()).toBe(true);
+  await page.getByRole("button", { name: "生成笔记", exact: true }).click();
+  await page.getByRole("dialog", { name: "生成文档笔记", exact: true }).getByRole("button", { name: "开始生成", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "文档笔记", exact: true })).toBeVisible();
+  await request.delete(`/api/v1/documents/${state.document_id}`);
 });
 
 test("刷新保留并行进度、当前错误常驻及手动重试和本地选择", async ({ page, request }, testInfo) => {
@@ -96,7 +125,9 @@ test("刷新保留并行进度、当前错误常驻及手动重试和本地选�
   await page.route(`**/api/v1/documents/${id}/extraction`, route => route.fulfill(disconnected
     ? { status: 503, json: { error: { message: "模拟断线", error_id: "connection" } } } : { json: state() }));
   await page.getByRole("button", { name: "开始处理", exact: true }).click();
-  await page.getByRole("dialog", { name: "生成文档笔记" }).getByRole("button", { name: "开始生成", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "生成文档笔记" });
+  await dialog.getByLabel("PDF 解析方式").selectOption("mineru_agent");
+  await dialog.getByRole("button", { name: "开始生成", exact: true }).click();
   const progress = page.getByRole("region", { name: "文档提取进度" });
   await expect(progress).toContainText("本地图片 OCR");
   await page.reload();
@@ -131,7 +162,6 @@ test("刷新保留并行进度、当前错误常驻及手动重试和本地选�
   await expect(progress.getByRole("alert")).toContainText("模拟云端失败");
   await progress.getByRole("button", { name: "整份改用本地提取" }).click();
   await expect.poll(() => parser).toBe("local");
-  await expect(page.locator(".mineru-hint")).toHaveCount(0);
   await page.goto("/#");
   await page.unrouteAll({ behavior: "wait" });
 });

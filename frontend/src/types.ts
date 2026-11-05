@@ -266,7 +266,10 @@ export type RecognitionCatalog = { settings: RecognitionSelection; models: Recog
 
 
 export type AnalysisSelection = Pick<RecognitionSelection, "asr_option" | "ocr_option"> & { llm_profile_id: string; note_style: NoteStyle };
-export type DocumentImportSelection = { llm_profile_id: string; note_style: NoteStyle; ocr_option: string; parser?: "local" | "mineru_agent" | "mineru_vlm" };
+export type DocumentImportSelection = {
+  llm_profile_id: string; note_style: NoteStyle; ocr_option: string;
+  parser?: "local" | "mineru_agent" | "mineru_vlm"; generate_notes?: boolean;
+};
 // 登录公开状态只说明会话与本机保存能力，不包含 Cookie 内容。
 export type BilibiliSession = {
   state: "logged_out" | "logged_in" | "expired" | "unknown";

@@ -13,8 +13,7 @@ import { TaskActivity } from "../shared/TaskActivity";
 import type { NoteTarget } from "../navigation";
 import { useNoteTarget } from "../notes/useNoteTarget";
 import { TaskProgress } from "../TaskProgress";
-import { api, errorText } from "../api";
-import { mineruHint, mineruTokenURL, supportsMinerU } from "../documents/mineru";
+import { errorText } from "../api";
 
 const Markdown = lazy(() => import("../notes/NoteMarkdown"));
 const versionTime = (task: DocumentTask) => task.completed_at || task.updated_at;
@@ -76,18 +75,9 @@ export function DocumentDetail({ document, onBack, onError, onTaskChanged, refre
     versions.requestedUnavailable, "document-note", "document-notes");
   const pending = document.extracted === false;
   const extraction = document.extraction;
-  const offerToken = pending && supportsMinerU(document.format) && (!extraction || extraction.parser === "mineru_agent");
   const reader = useDocumentPreview(document.id, versions.task?.id, onError, !pending);
   const { content, offset, target, setTarget, loading, preview, jump, expanded, setExpanded } = reader;
   const [setup, setSetup] = useState(false);
-  const [needsToken, setNeedsToken] = useState(false);
-  useEffect(() => {
-    if (!offerToken || settingsOpen) { setNeedsToken(false); return; }
-    const controller = new AbortController();
-    api<{ has_token: boolean }>("/settings/mineru", { signal: controller.signal, errorPolicy: "silent" })
-      .then(value => { if (!controller.signal.aborted) setNeedsToken(!value.has_token); }).catch(() => {});
-    return () => controller.abort();
-  }, [document.id, offerToken, settingsOpen]);
   useEffect(() => { if (settingsOpen) setSetup(false); }, [settingsOpen]);
   const current = analysis.receipt ? null : analysis.task;
   const progress = documentProgress(current);
@@ -111,7 +101,6 @@ export function DocumentDetail({ document, onBack, onError, onTaskChanged, refre
       </div>
       {analysis.receipt && !analysis.missing && <p role="status">操作已接受，正在同步状态</p>}
       {analysis.missing && <p className="notice" role="alert">任务不存在，无法更新状态。<button className="secondary" onClick={analysis.retryRead}>重新读取任务</button></p>}
-      {offerToken && needsToken && <p className="notice mineru-hint">{mineruHint}<a href={mineruTokenURL} target="_blank" rel="noopener noreferrer">免费申请 API Token ↗</a></p>}
       {processingError && <p className="notice" role="alert">{processingError}</p>}
       {extraction && <section className="task-activity" aria-label="文档提取进度">
         <h3>资料提取 · {extraction.parser === "local" ? "本地提取" : extraction.parser === "mineru_vlm" ? "MinerU 精准解析" : "MinerU 轻量解析"}</h3>

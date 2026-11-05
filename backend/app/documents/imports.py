@@ -94,7 +94,9 @@ class DocumentImports:
                 extension, original = row.format, row.fingerprint
                 if not previous and not original.startswith("pending:"):
                     raise AppError("document_already_prepared", "文档已经提取，请沿用已有材料生成笔记。", 409)
-            mode = value.parser or (("mineru_vlm" if current.mineru_token else "mineru_agent") if extension == "pdf" else "local")
+            mode = value.parser or (previous["parser"] if previous else "local")
+            if value.parser is None and previous is None and extension == "pdf":
+                mode = "mineru_vlm" if current.mineru_token else "mineru_agent"
             if previous and previous.get("document_id") and previous["parser"] != mode:
                 raise AppError("document_not_prepared", "材料已经提取，请重新导入原文件以更换解析方式。", 409)
             if extension not in CLOUD_FORMATS and mode != "local":
@@ -107,24 +109,33 @@ class DocumentImports:
                     raise AppError("runtime_missing", "所选 OCR 模型的运行组件不可用，请在设置中检查。")
                 if not model_ready(current, engine):
                     raise AppError("model_not_downloaded", "所选 OCR 模型文件未准备好，请在设置中检查。")
-            if previous and previous["parser"] == mode and previous["status"] != "done":
+            model = previous["model"] if previous else None
+            generate_notes = value.generate_notes
+            if generate_notes is None:
+                generate_notes = previous is None or model is not None
+            if generate_notes:
+                if model is None:
+                    settings = for_profile(current, find(current, value.llm_profile_id)) if value.llm_profile_id else current
+                    if not settings.llm_key:
+                        raise AppError("model_not_configured", "请先在设置中填写所选 API 配置的密钥。")
+                    model = task_model_config(replace(settings, note_style=value.note_style or settings.note_style))
+                task_id = (previous and previous["task_id"]) or uuid.uuid4().hex
+            else:
+                model, task_id = None, None
+            if previous and previous["parser"] == mode:
                 state = previous
-                state.update(status="queued", error=None)
+                state.update(status="queued", error=None, model=model, task_id=task_id)
                 # 只清除明确失败的云端请求；成功或状态未明的请求继续查询。
                 for path in (self.folder(identifier) / state["run_id"]).glob("*/remote.json"):
                     if read_json(path, {}).get("failed"):
                         path.unlink()
             else:
-                settings = for_profile(current, find(current, value.llm_profile_id)) if value.llm_profile_id else current
-                settings = replace(settings, note_style=value.note_style or settings.note_style)
-                if not settings.llm_key:
-                    raise AppError("model_not_configured", "请先在设置中填写所选 API 配置的密钥。")
                 ocr = {key: getattr(current, key) for key in ("ocr_engine", "ocr_languages", "ocr_min_confidence", "asr_threads")}
                 ocr["ocr_engine"] = value.ocr_option or current.ocr_engine
                 state = {"status": "queued", "parser": mode, "extension": extension, "original": original,
-                         "model": previous["model"] if previous else task_model_config(settings),
+                         "model": model,
                          "ocr": previous["ocr"] if previous else ocr, "run_id": uuid.uuid4().hex,
-                         "task_id": previous["task_id"] if previous else uuid.uuid4().hex,
+                         "task_id": task_id,
                          "document_id": None, "error": None, "progress": {}}
             self.write(identifier, state)
             self.executor.submit(self.run, identifier)
@@ -155,15 +166,16 @@ class DocumentImports:
             state["status"] = "running"
             self.write(identifier, state)
             # 数据库提交成功、导入状态尚未落盘时重启，不需要再次解析配置或创建任务。
-            with self.sessions() as session:
-                submitted = session.get(DocumentTask, state["task_id"])
-                already_submitted = submitted is not None and submitted.document_id == state["document_id"]
-            if already_submitted:
-                state.update(status="done", error=None)
-                self.write(identifier, state)
-                return
-            settings = execution_settings(self.get_settings(), state["model"])
-            settings = replace(settings, **state["ocr"])
+            task_id = state["task_id"]
+            if task_id:
+                with self.sessions() as session:
+                    submitted = session.get(DocumentTask, task_id)
+                    already_submitted = submitted is not None and submitted.document_id == state["document_id"]
+                if already_submitted:
+                    state.update(status="done", error=None)
+                    self.write(identifier, state)
+                    return
+            settings = replace(self.get_settings(), **state["ocr"])
             mode = state["parser"]
             identity = json.dumps({"parser": mode, "is_ocr": mode == "mineru_vlm", "ocr": state["ocr"],
                                    "version": EXTRACTION_VERSION}, sort_keys=True) if mode in MODES else None
@@ -189,12 +201,15 @@ class DocumentImports:
                     self.write(identifier, state)
                 self.report(identifier, "merge", "材料已保存", "完整提取内容已保存到本机")
             self.check()
-            self.report(identifier, "notes", "检查并生成笔记", "材料已就绪，正在执行现有预检")
-            result = self.analyses.create(state["document_id"], None, task_id=state["task_id"], settings=settings)
-            self.report(identifier, "notes", "已提交笔记任务", "按确认配置继续生成笔记")
+            if state["model"] is not None:
+                settings = execution_settings(settings, state["model"])
+                self.report(identifier, "notes", "检查并生成笔记", "材料已就绪，正在执行现有预检")
+                result = self.analyses.create(state["document_id"], None, task_id=task_id, settings=settings)
+                task_id = result["task_id"]
+                self.report(identifier, "notes", "已提交笔记任务", "按确认配置继续生成笔记")
             with self.lock:
                 state = self.state(identifier)
-                state.update(status="done", task_id=result["task_id"], error=None)
+                state.update(status="done", task_id=task_id, error=None)
                 self.write(identifier, state)
         except TaskInterrupted:
             with self.lock:
