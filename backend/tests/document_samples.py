@@ -1,5 +1,6 @@
 """Small generated documents, shared by parser and browser tests."""
 from io import BytesIO
+from pathlib import Path
 
 
 def sample(extension):
@@ -18,6 +19,8 @@ def sample(extension):
                 cell.text = value
         doc.add_paragraph("表格之后")
         doc.save(stream)
+    elif extension == "ppt":
+        return (Path(__file__).parent / "fixtures/ppt/basic_test_ppt_file.ppt").read_bytes()
     elif extension == "pptx":
         from pptx import Presentation
         slides = Presentation()

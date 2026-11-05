@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ReportedError } from "../api";
 import { notifyInfo } from "../notifications";
 import type { DocumentExtraction, DocumentFile, DocumentImportSelection, LibraryFile, TaskReceipt } from "../types";
-import { mineruHint, mineruTokenURL } from "./mineru";
+import { mineruHint, mineruTokenURL, supportsMinerU } from "./mineru";
 
 const pending = (value?: DocumentExtraction | null) => !!value && ["queued", "running", "interrupted"].includes(value.status);
 
@@ -90,7 +90,7 @@ export function useDocumentImport({ targetId, target, allowMissingRecovery, read
   // PDF 上传后按需提示免费凭据入口，静默读取失败不影响文档使用。
   function uploaded(file: LibraryFile) {
     setOperation(value => ({ ...value, error: "" }));
-    if (file.kind !== "document" || file.format !== "pdf") return;
+    if (file.kind !== "document" || !supportsMinerU(file.format)) return;
     const signal = lifetime.current.signal;
     void api<{ has_token: boolean }>("/settings/mineru", { signal, errorPolicy: "silent" }).then(value => {
       if (!signal.aborted && !value.has_token) notifyInfo(mineruHint, { href: mineruTokenURL, label: "免费申请 MinerU Token ↗" });

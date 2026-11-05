@@ -14,7 +14,7 @@ import type { NoteTarget } from "../navigation";
 import { useNoteTarget } from "../notes/useNoteTarget";
 import { TaskProgress } from "../TaskProgress";
 import { api, errorText } from "../api";
-import { mineruHint, mineruTokenURL } from "../documents/mineru";
+import { mineruHint, mineruTokenURL, supportsMinerU } from "../documents/mineru";
 
 const Markdown = lazy(() => import("../notes/NoteMarkdown"));
 const versionTime = (task: DocumentTask) => task.completed_at || task.updated_at;
@@ -76,7 +76,7 @@ export function DocumentDetail({ document, onBack, onError, onTaskChanged, refre
     versions.requestedUnavailable, "document-note", "document-notes");
   const pending = document.extracted === false;
   const extraction = document.extraction;
-  const offerToken = pending && document.format === "pdf" && (!extraction || extraction.parser === "mineru_agent");
+  const offerToken = pending && supportsMinerU(document.format) && (!extraction || extraction.parser === "mineru_agent");
   const reader = useDocumentPreview(document.id, versions.task?.id, onError, !pending);
   const { content, offset, target, setTarget, loading, preview, jump, expanded, setExpanded } = reader;
   const [setup, setSetup] = useState(false);

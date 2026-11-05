@@ -13,10 +13,10 @@ from ..db import Document, DocumentTask
 from ..errors import AppError, TaskInterrupted
 from ..settings.model_profiles import for_profile, find, task_model_config, execution_settings
 from ..util.json_io import atomic_json
-from .extraction import EXTRACTION_VERSION, MAX_TEXT, MAX_UNITS
+from .extraction import EXTRACTION_VERSION, MAX_TEXT, MAX_UNITS, validate_archive
 from .pdf import PdfDocument, page_images, image_entries
 from .image_text import ImageText
-from .mineru import MinerUClient, MODES, page_markdown, supplement, read_json
+from .mineru import MinerUClient, MODES, CLOUD_FORMATS, page_markdown, supplement, read_json
 from ..recognition.model_catalog import model_ready, runtime_ready
 
 ACTIVE = {"queued", "running"}
@@ -97,12 +97,12 @@ class DocumentImports:
             mode = value.parser or (("mineru_vlm" if current.mineru_token else "mineru_agent") if extension == "pdf" else "local")
             if previous and previous.get("document_id") and previous["parser"] != mode:
                 raise AppError("document_not_prepared", "材料已经提取，请重新导入原文件以更换解析方式。", 409)
-            if extension != "pdf" and mode != "local":
-                raise AppError("invalid_input", "目前只有 PDF 支持 MinerU 云端解析。")
+            if extension not in CLOUD_FORMATS and mode != "local":
+                raise AppError("invalid_input", "目前只有 PDF、PPT 和 PPTX 支持 MinerU 云端解析。")
             if mode == "mineru_vlm" and not current.mineru_token:
                 raise AppError("mineru_token_missing", "请先在 API 设置中填写 MinerU Token。")
             engine = previous["ocr"]["ocr_engine"] if previous else value.ocr_option or current.ocr_engine
-            if extension in {"pdf", "docx", "pptx"}:
+            if extension in {"pdf", "docx", "pptx"} and (extension == "pdf" or mode == "local"):
                 if not runtime_ready(engine):
                     raise AppError("runtime_missing", "所选 OCR 模型的运行组件不可用，请在设置中检查。")
                 if not model_ready(current, engine):
@@ -219,6 +219,8 @@ class DocumentImports:
         if cached:
             self.report(identifier, "merge", "复用结果", "复用已合并的完整材料")
             return cached
+        if state["extension"] in {"ppt", "pptx"}:
+            return self.cloud_presentation(identifier, state, settings, folder)
         source = self.documents.folder(identifier) / "original.pdf"
         # OCR 与网络等待并行；识别器始终留在自身执行线程。
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="document-image-ocr") as executor:
@@ -238,13 +240,49 @@ class DocumentImports:
                     body = page_markdown([b for b in blocks if b["page_idx"] == page - first])
                     units.append({"label": f"第 {page} 页", "locator": {"page": page},
                                   "text": supplement(body, [r for r in records if r["page"] == page])})
-        if sum(len(u["text"]) for u in units) > MAX_TEXT:
+        return self.save_cloud_content(identifier, folder, units, warnings)
+
+    def save_cloud_content(self, identifier, folder, units, warnings):
+        character_count = sum(len(unit["text"]) for unit in units)
+        if character_count > MAX_TEXT:
             raise AppError("document_limit", "文档内容超过500万字符，请拆分后上传。")
         content = {"version": EXTRACTION_VERSION, "units": [{**unit, "id": f"D{i}", "format": "markdown"} for i, unit in enumerate(units, 1)],
-                   "warnings": warnings, "character_count": sum(len(u["text"]) for u in units)}
-        self.report(identifier, "merge", "合并材料", "云端正文与对应页面图片文字已完成")
+                   "warnings": warnings, "character_count": character_count}
+        self.report(identifier, "merge", "合并材料", "已整理完整云端解析材料")
         atomic_json(folder / "content.json", content)
         return content
+
+    # Office 原件由 MinerU 原生解析；不作为 PDF 打开，也不重复运行本地图片 OCR。
+    def cloud_presentation(self, identifier, state, settings, folder):
+        extension, mode = state["extension"], state["parser"]
+        source = self.documents.folder(identifier) / ("original." + extension)
+        page_limit, size_limit = BATCH_LIMITS[mode]
+        if source.stat().st_size > size_limit:
+            raise AppError("document_limit", f"演示文稿超过当前 MinerU 接口的 {size_limit // 1024 ** 2} MB 上限，请更换解析方式或拆分后上传。")
+        try:
+            if extension == "ppt":
+                from .legacy_ppt import presentation_units
+                pages = sum(1 for _ in presentation_units(source, self.check, MAX_UNITS))
+            else:
+                from pptx import Presentation
+                validate_archive(source, extension)
+                pages = len(Presentation(source).slides)
+        except (AppError, TaskInterrupted):
+            raise
+        except Exception as exc:
+            raise AppError("invalid_document", "无法读取演示文稿页数，请检查文件是否损坏或已加密。") from exc
+        if not 0 < pages <= page_limit:
+            raise AppError("document_limit", f"当前 MinerU 接口每份演示文稿最多 {page_limit} 页，请更换解析方式或拆分文件。")
+        self.check()
+        report = lambda stage, message: self.report(identifier, "cloud", stage, message)
+        text, blocks = MinerUClient(settings.mineru_token, self.check, self.wait, report).parse(source, folder / "source", mode, pages)
+        if blocks is None:
+            units = [{"label": f"幻灯片 1–{pages}", "locator": {"slide_start": 1, "slide_end": pages}, "text": text}]
+        else:
+            units = [{"label": f"幻灯片 {page + 1}", "locator": {"slide": page + 1},
+                      "text": page_markdown([block for block in blocks if block["page_idx"] == page])}
+                     for page in range(pages)]
+        return self.save_cloud_content(identifier, folder, units, [])
 
     # 同时按页数和上传大小拆分 PDF，每批保留远端状态以避免重复上传。
     def cloud_batches(self, source, folder, mode, token, identifier):

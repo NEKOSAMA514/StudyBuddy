@@ -52,11 +52,11 @@ class DocumentStore:
         filename = (filename or "document").replace("\\", "/").split("/")[-1]
         extension = filename.rsplit(".", 1)[-1].lower()
         if extension not in DOCUMENT_EXTENSIONS:
-            raise AppError("unsupported_extension", "请选择 PDF、DOCX、PPTX、XLSX、CSV、TXT 或 Markdown 文件。")
+            raise AppError("unsupported_extension", "请选择 PDF、DOCX、PPT、PPTX、XLSX、CSV、TXT 或 Markdown 文件。")
         settings = _settings or self.get_settings()
         if ocr_option is not None and not defer_extraction:
             settings = replace(settings, ocr_engine=ocr_option)
-            if extension in {"pdf", "docx", "pptx"}:
+            if extension in {"pdf", "docx", "pptx"} and not (extension == "pptx" and _content is not None and _identity):
                 if not runtime_ready(ocr_option):
                     raise AppError("runtime_missing", "所选 OCR 模型的运行组件不可用，请在设置中检查。")
                 if not model_ready(settings, ocr_option):
@@ -105,10 +105,10 @@ class DocumentStore:
             shutil.rmtree(folder, ignore_errors=True)
             raise
 
-    # 只有可含图片 OCR 的格式合成解析身份，其他格式保持原件哈希。
+    # 含图片 OCR 或云端解析的结果按处理方式区分，其余保留原件哈希。
     @staticmethod
     def fingerprint(extension, original, engine, identity=None):
-        if extension not in {"pdf", "docx", "pptx"}:
+        if extension not in {"pdf", "docx", "pptx"} and not identity:
             return original
         value = f"{original}:{engine}" + (":" + identity if identity else "")
         return hashlib.sha256(value.encode()).hexdigest()

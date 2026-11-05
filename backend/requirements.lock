@@ -34,6 +34,7 @@ cffi==2.1.1
 pycparser==3.12
 python-docx==1.2.0
 python-pptx==1.0.2
+olefile==0.47
 XlsxWriter==3.2.9
 markdown-it-py==4.2.0
 mdit-py-plugins==0.6.1

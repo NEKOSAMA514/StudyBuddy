@@ -17,6 +17,7 @@ from .formatting import literal
 
 API = "https://mineru.net"
 MODES = {"mineru_agent", "mineru_vlm"}
+CLOUD_FORMATS = {"pdf", "ppt", "pptx"}
 
 
 def read_json(path, default=None):
@@ -84,7 +85,7 @@ class MinerUClient:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def parse(self, pdf, folder, mode, pages):
+    def parse(self, source, folder, mode, pages):
         folder.mkdir(parents=True, exist_ok=True)
         markdown = folder / "full.md"
         if markdown.exists() and (mode == "mineru_agent" or (folder / "pages.json").exists()):
@@ -99,11 +100,11 @@ class MinerUClient:
                 self.report("提交解析", "申请云端解析任务")
                 try:
                     if mode == "mineru_agent":
-                        data = self.api(api, "POST", "/api/v1/agent/parse/file", json={"file_name": "batch.pdf", "language": "ch",
+                        data = self.api(api, "POST", "/api/v1/agent/parse/file", json={"file_name": "batch" + source.suffix.lower(), "language": "ch",
                             "enable_formula": True, "enable_table": True, "is_ocr": False})
                         state = {"task_id": data["task_id"], "upload_url": data["file_url"], "uploaded": False}
                     else:
-                        data = self.api(api, "POST", "/api/v4/file-urls/batch", json={"files": [{"name": "batch.pdf", "is_ocr": True}],
+                        data = self.api(api, "POST", "/api/v4/file-urls/batch", json={"files": [{"name": "batch" + source.suffix.lower(), "is_ocr": True}],
                             "model_version": "vlm", "enable_formula": True, "enable_table": True, "language": "ch"})
                         state = {"task_id": data["batch_id"], "upload_url": data["file_urls"][0], "uploaded": False}
                 except AppError:
@@ -127,10 +128,10 @@ class MinerUClient:
             # 上传响应丢失时先查询原任务，不重新创建解析任务。
             result = status()
             if not state["uploaded"] and result["state"] == "waiting-file":
-                self.report("上传文件", "正在上传当前 PDF 批次")
+                self.report("上传文件", "正在上传待解析文件")
                 self.check()
-                with pdf.open("rb") as source:
-                    response = storage.put(trusted_url(state["upload_url"]), content=source)
+                with source.open("rb") as stream:
+                    response = storage.put(trusted_url(state["upload_url"]), content=stream)
                 response.raise_for_status()
                 state["uploaded"] = True
                 atomic_json(state_path, state)
@@ -156,7 +157,7 @@ class MinerUClient:
             archive = folder / "result.zip"
             if not archive.exists():
                 self.download(storage, result["full_zip_url"], archive, 256 * 1024 * 1024)
-            text, content = read_archive(archive, pages)
+            text, content = read_archive(archive, pages, allow_unpaged=source.suffix.lower() in {".ppt", ".pptx"})
             atomic_json(folder / "pages.json", content)
             temporary = markdown.with_suffix(".tmp")
             temporary.write_text(text, encoding="utf-8")
@@ -165,7 +166,7 @@ class MinerUClient:
 
 
 # 读取并校验官方结果包及页码范围，不能确认页码时明确拒绝结果。
-def read_archive(path, pages):
+def read_archive(path, pages, *, allow_unpaged=False):
     with zipfile.ZipFile(path) as archive:
         entries = archive.infolist()
         if len(entries) > 2000 or sum(item.file_size for item in entries) > 128 * 1024 * 1024:
@@ -177,9 +178,18 @@ def read_archive(path, pages):
                     stat.S_ISLNK(item.external_attr >> 16)):
                 raise AppError("mineru_result", "MinerU 压缩结果包含不安全的文件路径。")
         markdown = next(item for item in entries if PurePosixPath(item.filename).name == "full.md")
-        content = next(item for item in entries if item.filename.endswith("_content_list.json"))
+        content = next((item for item in entries if item.filename.endswith("_content_list.json")), None)
         text = archive.read(markdown).decode("utf-8-sig")
+        # Office 原生解析可能只返回全文；此时只能引用整份演示文稿，不猜测单页位置。
+        if content is None:
+            if allow_unpaged:
+                return text, None
+            raise AppError("mineru_result", "MinerU 逐页结果缺失，未猜测原文件页码。")
         blocks = json.loads(archive.read(content))
+    if allow_unpaged:
+        items = blocks if isinstance(blocks, list) else [blocks]
+        if all(isinstance(item, dict) and "page_idx" not in item for item in items):
+            return text, None
     if (not isinstance(blocks, list) or any(not isinstance(item, dict) or type(item.get("page_idx")) is not int or
             not 0 <= item["page_idx"] < pages for item in blocks)):
         raise AppError("mineru_result", "MinerU 逐页结果无法验证，未猜测原文件页码。")

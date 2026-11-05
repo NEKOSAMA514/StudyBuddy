@@ -34,7 +34,7 @@ def finish(client, app, identifier, engine='rapidocr'):
     return state
 
 
-@pytest.mark.parametrize('extension', ['pdf','docx','pptx','xlsx','csv','txt','md'])
+@pytest.mark.parametrize('extension', ['pdf','docx','ppt','pptx','xlsx','csv','txt','md'])
 def test_original_only_until_confirmed_then_background_extraction(client, app, monkeypatch, extension):
     from app.documents import store as service
     original = service.extract
@@ -126,7 +126,7 @@ def test_duplicate_confirm_reuses_job_and_delete_is_blocked_without_holding_lock
     assert len(client.get('/api/v1/documents').json())==1
 
 
-@pytest.mark.parametrize('extension', ['pdf','docx','pptx','xlsx','csv','txt','md'])
+@pytest.mark.parametrize('extension', ['pdf','docx','ppt','pptx','xlsx','csv','txt','md'])
 def test_restart_between_material_commit_and_import_mapping(client, app, monkeypatch, extension):
     import hashlib
     from app.db import DocumentTask

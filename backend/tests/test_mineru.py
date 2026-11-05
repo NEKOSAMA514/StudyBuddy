@@ -49,7 +49,9 @@ def zip_result(blocks=None, extra=None):
 
 
 @pytest.mark.parametrize('mode', ['mineru_agent', 'mineru_vlm'])
-def test_download_retry_reuses_remote_task_and_auth_isolated(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize('extension', ['pdf', 'ppt', 'pptx'])
+def test_download_retry_reuses_remote_task_and_auth_isolated(tmp_path, monkeypatch, mode, extension):
+    raw = sample(extension)
     calls, fail_download = [], [True]
     def handle(request):
         calls.append(request)
@@ -59,6 +61,9 @@ def test_download_retry_reuses_remote_task_and_auth_isolated(tmp_path, monkeypat
                 payload = json.loads(request.content)
                 if mode == 'mineru_vlm':
                     assert payload['model_version'] == 'vlm' and payload['files'][0]['is_ocr'] is True
+                    assert payload['files'][0]['name'] == 'batch.' + extension
+                else:
+                    assert payload['file_name'] == 'batch.' + extension
                 return httpx.Response(200,json={'code':0,'data':{'task_id':'fixed','file_url':'https://cdn-mineru.openxlab.org.cn/upload',
                     'batch_id':'fixed','file_urls':['https://cdn-mineru.openxlab.org.cn/upload']}})
             state = 'waiting-file' if not any(r.method == 'PUT' for r in calls) else 'done'
@@ -66,14 +71,16 @@ def test_download_retry_reuses_remote_task_and_auth_isolated(tmp_path, monkeypat
                       'full_zip_url':'https://cdn-mineru.openxlab.org.cn/result.zip'}
             return httpx.Response(200,json={'code':0,'data':result if mode == 'mineru_agent' else {'extract_result':[result]}})
         assert 'authorization' not in request.headers
-        if request.method == 'PUT': return httpx.Response(200)
+        if request.method == 'PUT':
+            assert request.content == raw
+            return httpx.Response(200)
         if fail_download[0]:
             fail_download[0] = False
             return httpx.Response(503)
         return httpx.Response(200,content=b'# Official\n\n$$x=1$$' if mode == 'mineru_agent' else zip_result())
     original = httpx.Client
     monkeypatch.setattr(mineru,'Client',lambda **kwargs: original(transport=httpx.MockTransport(handle),**kwargs))
-    pdf = tmp_path/'batch.pdf'; pdf.write_bytes(sample('pdf'))
+    pdf = tmp_path/('batch.' + extension); pdf.write_bytes(raw)
     adapter = mineru.MinerUClient('not-for-storage',lambda:None,lambda _:None,lambda *_:None)
     with pytest.raises(httpx.HTTPStatusError): adapter.parse(pdf,tmp_path/'cache',mode,2)
     text, blocks = adapter.parse(pdf,tmp_path/'cache',mode,2)
@@ -208,6 +215,77 @@ def pending(client,pages=2):
 
 def drain(imports):
     imports.executor.submit(lambda:None).result(timeout=10)
+
+
+@pytest.mark.parametrize('extension', ['ppt', 'pptx'])
+@pytest.mark.parametrize('mode', ['mineru_agent', 'mineru_vlm'])
+def test_presentation_cloud_import_preserves_format_skips_local_ocr_and_separates_local_results(client, app, configured, monkeypatch, extension, mode):
+    from app.documents import imports as module, store
+    imports = configured
+    raw, calls = sample(extension), []
+    local = client.post('/api/v1/documents', files={'file': ('local.' + extension, raw)}).json()
+    doc = client.post('/api/v1/documents', data={'defer_extraction': 'true'}, files={'file': ('cloud.' + extension, raw)}).json()
+    if mode == 'mineru_vlm':
+        assert client.put('/api/v1/settings/mineru', json={'token': 'fake-office-mineru'}).status_code == 200
+
+    def parse(self, source, folder, parser, pages):
+        assert source.suffix == '.' + extension and source.read_bytes() == raw and pages == 2 and parser == mode
+        calls.append(source)
+        return '# Official presentation', None if mode == 'mineru_agent' else [
+            {'type': 'text', 'text': 'Official first slide', 'page_idx': 0},
+            {'type': 'text', 'text': 'Official second slide', 'page_idx': 1}]
+
+    monkeypatch.setattr(mineru.MinerUClient, 'parse', parse)
+    monkeypatch.setattr(imports, 'images', lambda *args: pytest.fail('PPT must not use the PDF image OCR path'))
+    for owner in (module, store):
+        monkeypatch.setattr(owner, 'runtime_ready', lambda *_: False)
+        monkeypatch.setattr(owner, 'model_ready', lambda *_: False)
+    path = f"/api/v1/documents/{doc['id']}"
+    response = client.post(path + '/extract', json={'parser': mode})
+    assert response.status_code == 202, response.text
+    drain(imports)
+    state = imports.state(doc['id'])
+    assert state['status'] == 'done', state.get('error')
+    assert state['document_id'] != local['id']
+    content = client.get(f"/api/v1/documents/{state['document_id']}/content").json()
+    expected = [{'slide_start': 1, 'slide_end': 2}] if mode == 'mineru_agent' else [{'slide': 1}, {'slide': 2}]
+    assert [unit['locator'] for unit in content['units']] == expected
+    assert all('Official' in unit['text'] for unit in content['units'])
+    assert client.post(path + '/extract', json={'parser': mode}).status_code == 202
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('boundary', ['pages', 'bytes'])
+def test_presentation_cloud_limits_are_checked_before_upload(client, configured, monkeypatch, boundary):
+    from app.documents import imports as module
+    doc = client.post('/api/v1/documents', data={'defer_extraction': 'true'}, files={'file': ('source.ppt', sample('ppt'))}).json()
+    monkeypatch.setitem(module.BATCH_LIMITS, 'mineru_agent', (1, 10 * 1024 ** 2) if boundary == 'pages' else (20, 1))
+    monkeypatch.setattr(mineru.MinerUClient, 'parse', lambda *args: pytest.fail('over-limit PPT must not be uploaded'))
+    assert client.post(f"/api/v1/documents/{doc['id']}/extract", json={'parser': 'mineru_agent'}).status_code == 202
+    drain(configured)
+    state = configured.state(doc['id'])
+    assert state['status'] == 'failed'
+    assert any(word in state['error']['message'] for word in ('上限', '最多'))
+    assert client.get(f"/api/v1/documents/{doc['id']}/original").status_code == 200
+
+
+@pytest.mark.parametrize('blocks', [None, [{'type': 'text', 'text': 'Native Office content'}], {'elements': []}])
+def test_office_result_without_page_index_uses_full_document_reference(tmp_path, blocks):
+    path = tmp_path / 'office.zip'
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('full.md', '# Native Office content')
+        if blocks is not None:
+            archive.writestr('source_content_list.json', json.dumps(blocks))
+    assert mineru.read_archive(path, 2, allow_unpaged=True) == ('# Native Office content', None)
+    with pytest.raises(AppError):
+        mineru.read_archive(path, 2)
+
+
+def test_office_result_does_not_guess_invalid_page_numbers(tmp_path):
+    path = tmp_path / 'office.zip'
+    path.write_bytes(zip_result([{'type': 'text', 'text': 'Unverifiable', 'page_idx': 10}]))
+    with pytest.raises(AppError):
+        mineru.read_archive(path, 2, allow_unpaged=True)
 
 
 def test_batches_resume_and_note_creation_is_idempotent(client,app,configured,monkeypatch):

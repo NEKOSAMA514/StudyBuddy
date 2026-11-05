@@ -255,7 +255,7 @@ def test_document_preview_execution_and_500_character_context_match(tmp_path, co
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("extension", ["pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"])
+@pytest.mark.parametrize("extension", ["pdf", "docx", "ppt", "pptx", "xlsx", "csv", "txt", "md"])
 def test_document_concise_api_source_export_and_default_override(client, app, concise_calls, extension):
     client.put("/api/v1/settings/model", json={"token": "fake-style", "stream": False})
     assert client.get("/api/v1/settings/note-style").json()["note_style"] == "detailed"

@@ -88,7 +88,7 @@ test("文档笔记复用清单与脚注修复，窄屏保留章节层级", async
   expect(page.url()).toContain(`/#summary/${doc.id}`);
 });
 
-for (const extension of ["pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"]) {
+for (const extension of ["pdf", "docx", "ppt", "pptx", "xlsx", "csv", "txt", "md"]) {
   test(`${extension}文档生成和双格式下载无需识别模型`, async ({ page, request }) => {
     const sample = await request.get(`/__test__/document-samples/${extension}`);
     const uploaded = await request.post("/api/v1/documents", { multipart: {

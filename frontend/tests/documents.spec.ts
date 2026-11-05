@@ -14,7 +14,7 @@ test.beforeEach(async ({ request }) => {
   }
 });
 
-for (const extension of ["pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"]) {
+for (const extension of ["pdf", "docx", "ppt", "pptx", "xlsx", "csv", "txt", "md"]) {
   test(`本地文档上传与来源预览 ${extension}`, async ({ page, request }) => {
     await page.goto("/#summary");
     const filename = `sample.${extension}`;
@@ -31,6 +31,7 @@ for (const extension of ["pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"]) {
     await page.getByRole("button", { name: "开始处理", exact: true }).click();
     await expect(setup).toBeVisible();
     if (extension === "pdf") await setup.getByLabel("PDF 解析方式").selectOption("local");
+    if (["ppt", "pptx"].includes(extension)) await setup.getByLabel("PPT 解析方式").selectOption("local");
     if (extension === "txt") await setup.getByRole("combobox", { name: /^笔记风格/ }).selectOption("concise");
     await setup.getByRole("button", { name: "开始生成", exact: true }).click();
     await expect(page.getByRole("heading", { name: filename, exact: true })).toBeVisible();
@@ -39,7 +40,7 @@ for (const extension of ["pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"]) {
     await expect(preview.getByRole("spinbutton")).toBeHidden();
     await preview.locator("summary").click();
     await expect(preview.locator("article").first()).toBeVisible();
-    const labels: Record<string, string> = { pdf: "第 1 页", docx: "正文块 1", pptx: "幻灯片 1", xlsx: "测量记录", csv: "第 1–2 条记录", txt: "第 1–2 行", md: "第 1–7 行" };
+    const labels: Record<string, string> = { pdf: "第 1 页", docx: "正文块 1", ppt: "幻灯片 1", pptx: "幻灯片 1", xlsx: "测量记录", csv: "第 1–2 条记录", txt: "第 1–2 行", md: "第 1–7 行" };
     await expect(preview.locator("h3").first()).toContainText(labels[extension]);
     await expect(page.getByRole("button", { name: "开始处理", exact: true })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "下载原文件" })).toHaveCount(0);

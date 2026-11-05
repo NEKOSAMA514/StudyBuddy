@@ -290,16 +290,56 @@ test("提取重连不重复通知或上报客户端日志，恢复后清除连�
   }
 });
 
-test("PPTX配置不增加MinerU选项或提示", async ({ page, request }) => {
-  const raw = await (await request.get("/__test__/document-samples/pptx")).body();
-  const calls: string[] = [];
-  page.on("request", request => { if (request.url().endsWith("/settings/mineru")) calls.push(request.url()); });
-  await page.goto("/#summary");
-  await page.getByLabel("选择本地文件", { exact: true }).setInputFiles({ name: "本地PPT.pptx", mimeType: "application/octet-stream", buffer: raw });
-  await expect(page.getByRole("heading", { name: "本地PPT.pptx", exact: true })).toBeVisible();
-  await expect(page.locator(".mineru-hint")).toHaveCount(0);
-  await page.getByRole("button", { name: "开始处理", exact: true }).click();
-  await expect(page.getByLabel("OCR 模型")).toBeVisible();
-  await expect(page.getByLabel("PDF 解析方式")).toHaveCount(0);
-  expect(calls).toEqual([]);
-});
+for (const extension of ["ppt", "pptx"]) {
+  for (const mode of ["mineru_agent", "mineru_vlm"]) {
+    test(`${extension}显示MinerU选择，${mode}无需本地OCR并提交所选解析方式`, async ({ page, request }, testInfo) => {
+      if (mode === "mineru_vlm") await request.put("/api/v1/settings/mineru", { data: { token: "fake-ppt-mineru" } });
+      const raw = await (await request.get(`/__test__/document-samples/${extension}`)).body();
+      const recognition = await (await request.get("/api/v1/settings/recognition")).json();
+      await page.route("**/api/v1/settings/recognition", route => route.fulfill({ json: {
+        ...recognition, models: recognition.models.map((model: object) => ({ ...model, ready: false, runtime_ready: false })),
+      } }));
+      const submitted: { parser: string }[] = [];
+      let receipt: object | null = null;
+      // 只验证网页提交，不向真实 MinerU 发送文件或消耗额度。
+      await page.route("**/api/v1/documents/*/extract", route => {
+        const body = route.request().postDataJSON();
+        submitted.push(body);
+        receipt = { source_id: new URL(route.request().url()).pathname.split("/")[4], parser: body.parser,
+          status: "running", document_id: null, task_id: "fake-cloud-task", progress: {}, error: null };
+        return route.fulfill({ status: 202, json: receipt });
+      });
+      await page.route("**/api/v1/documents/*/extraction", route => receipt
+        ? route.fulfill({ json: receipt }) : route.fallback());
+      await page.goto("/#summary");
+      await page.getByLabel("选择本地文件", { exact: true }).setInputFiles({ name: `云端选择.${extension}`, mimeType: "application/octet-stream", buffer: raw });
+      await expect(page.getByRole("heading", { name: `云端选择.${extension}`, exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "开始处理", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "生成文档笔记" });
+      const parser = dialog.getByLabel("PPT 解析方式", { exact: true });
+      await expect(parser).toHaveValue(mode);
+      await expect(parser.locator("option")).toHaveCount(3);
+      await expect(dialog.getByLabel("OCR 模型", { exact: true })).toHaveCount(0);
+      const start = dialog.getByRole("button", { name: "开始生成", exact: true });
+      await expect(start).toBeEnabled();
+      await parser.selectOption("local");
+      if (extension === "pptx") await expect(start).toBeDisabled();
+      else await expect(start).toBeEnabled();
+      await parser.selectOption(mode);
+      if (extension === "pptx" && mode === "mineru_agent") {
+        for (const width of [1280, 686, 375]) {
+          await page.setViewportSize({ width, height: 871 });
+          for (const theme of ["light", "dark"]) {
+            await page.locator("html").evaluate((element, value) => { element.dataset.theme = value; }, theme);
+            expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+            await dialog.screenshot({ path: testInfo.outputPath(`ppt-parser-${theme}-${width}.png`), animations: "disabled" });
+          }
+        }
+      }
+      await start.click();
+      await expect(dialog).toHaveCount(0);
+      expect(submitted).toHaveLength(1);
+      expect(submitted[0].parser).toBe(mode);
+    });
+  }
+}

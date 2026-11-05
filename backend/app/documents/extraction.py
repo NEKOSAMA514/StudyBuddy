@@ -8,7 +8,7 @@ from pathlib import Path
 from ..errors import AppError, TaskInterrupted
 from .formatting import literal, table
 
-DOCUMENT_EXTENSIONS = ("pdf", "docx", "pptx", "xlsx", "csv", "txt", "md")
+DOCUMENT_EXTENSIONS = ("pdf", "docx", "ppt", "pptx", "xlsx", "csv", "txt", "md")
 MAX_DOCUMENT_BYTES = 100 * 1024 * 1024
 MAX_TEXT = 5_000_000
 MAX_UNITS = 10_000
@@ -79,6 +79,11 @@ def extract(path: Path, extension: str, images=None):
             for text, label, locator, markdown in word_units(path, images):
                 add(text, label, locator, markdown)
             warnings.append("Word 按正文顺序提取段落、表格及内嵌图片文字，不推算页码；图片文字来自本地 OCR。页眉页脚、批注、修订及复杂公式未提取。")
+        elif extension == "ppt":
+            from .legacy_ppt import presentation_units
+            for text, label, locator in presentation_units(path, check, MAX_UNITS):
+                add(literal(text), label, locator, True)
+            warnings.append("旧版 PPT 按幻灯片提取文字和讲者备注；图片文字、图表数据及复杂对象需另存为 PPTX 后提取。")
         elif extension == "pptx":
             from .office import presentation_units
             for text, label, locator in presentation_units(path, images):

@@ -124,7 +124,7 @@ def test_profile_budget_preview_and_queued_document_requests_use_snapshot(client
         assert config["total_segments"] == selected["estimated_segments"] and config["llm_output_tokens"] == tokens
 
 
-@pytest.mark.parametrize("extension", ["pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"])
+@pytest.mark.parametrize("extension", ["pdf", "docx", "ppt", "pptx", "xlsx", "csv", "txt", "md"])
 def test_document_notes_end_to_end_without_recognizers(client, app, document_models, extension):
     doc = upload(client, extension)
     info = client.get(f'/api/v1/documents/{doc["id"]}/analysis-preview').json()

@@ -60,7 +60,7 @@ export function FileLibrary({ files, busy, loading, loadError, retryRead, upload
         <button className="file-upload-button" type="button" disabled={busy} onClick={() => input.current?.click()}>
           <span className="file-upload-plus" aria-hidden="true">＋</span>
           <strong>{uploadPercent !== null ? `正在上传 ${uploadPercent}%` : "点击或拖拽文件到这里"}</strong>
-          <span>支持视频、PDF、DOCX、PPTX、XLSX、CSV、TXT、Markdown</span>
+          <span>支持视频、PDF、DOCX、PPT、PPTX、XLSX、CSV、TXT、Markdown</span>
           <span>视频最大 {Number((maxUploadBytes / 1024 ** 3).toFixed(2))} GB · 最长 {Number((maxDurationSeconds / 3600).toFixed(2))} 小时；文档最大 {Math.round(maxDocumentBytes / 1024 ** 2)} MB</span>
         </button>
         {uploadPercent !== null && <progress aria-label="文件上传进度" max={100} value={uploadPercent} />}

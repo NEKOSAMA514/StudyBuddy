@@ -109,7 +109,7 @@ def local_capabilities(package, output, repo, speech_source):
         sys.path.insert(0, str(repo / "backend"))
         from tests.document_samples import sample
         documents = {}
-        for extension in ("pdf", "docx", "pptx", "xlsx", "csv", "txt", "md"):
+        for extension in ("pdf", "docx", "ppt", "pptx", "xlsx", "csv", "txt", "md"):
             path = output / ("synthetic." + extension)
             path.write_bytes(sample(extension))
             result = extract(path, extension)
