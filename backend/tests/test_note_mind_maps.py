@@ -9,9 +9,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from pydantic import ValidationError
 
 from app.analysis.budgets import message_characters
 from app.analysis.checkpoints import MIND_MAP_CLEANUP
+from app.analysis.mind_map import MindMap
+from app.analysis.mind_map_labels import fonts, glyph_mask, label
 from app.db import Document, DocumentTask, Task, Video
 from app.documents.notes import retain_two
 from app.main import create_app
@@ -54,7 +57,8 @@ def model_api(app, monkeypatch):
         fake.calls.append((request, json.loads(request.content)))
         while not fake.release.is_set():
             await asyncio.sleep(0.01)
-        tree = {"topic": fake.topic, "branches": [{"title": "核心概念", "points": ["由来源提炼出的结论。", "保留条件与数据。"]}]}
+        tree = {"topic": fake.topic, "branches": [{"title": "核心概念",
+                "points": ["由来源提炼出的结论。", r"平衡关系 \(K^{⦵}=p(CO_{2})/p^{⦵}\)"]}]}
         content = "{}" if fake.invalid else json.dumps(tree, ensure_ascii=False)
         return httpx.Response(200, json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]})
 
@@ -78,6 +82,36 @@ def wait_state(client, endpoint, status):
             return state
         assert monotonic() < deadline, state
         sleep(0.03)
+
+
+def test_formula_symbols_have_glyphs_and_scripts_share_base_position():
+    point_style = fonts()[-1]
+    node = label(r"平衡 \(G_{m}^{⦵} ⇌ CO_{2}\) 与 SO₄²⁻", point_style, 496)
+    glyphs = {glyph.text: glyph for glyph in node.glyphs}
+    base, lower, upper = (glyphs[char] for char in ("G", "m", "⦵"))
+    assert lower.x == upper.x > base.x
+    assert upper.y < base.y < lower.y
+    assert glyphs["2"].y > glyphs["O"].y
+    for char in "⦵⇌₄²⁻":
+        font = glyphs[char].font
+        assert glyph_mask(font, char) != glyph_mask(font, "\uffff"), char
+    assert not any(char in glyphs for char in "_^{}\\")
+
+
+def test_short_formula_wraps_together():
+    point_style = fonts()[-1]
+    node = label(r"较长的说明 \(CaCO_{3}\)", point_style, 220)
+    glyphs = {glyph.text: glyph for glyph in node.glyphs}
+    assert glyphs["明"].y < glyphs["C"].y == glyphs["O"].y < glyphs["3"].y
+
+
+@pytest.mark.parametrize("invalid", [r"\(\ce{SO4^2-}\)", r"\(_{2}O\)", r"\(Ca^{2}^{+}\)"])
+def test_unsupported_formula_markup_is_rejected(invalid):
+    value = {"topic": "硫酸根", "branches": [{"title": "离子", "points": [r"\(SO_{4}^{2−}\)"]}]}
+    assert MindMap.model_validate(value).model_dump() == value
+    value["branches"][0]["points"] = [invalid]
+    with pytest.raises(ValidationError, match="公式内使用"):
+        MindMap.model_validate(value)
 
 
 @pytest.mark.parametrize("kind", ["video", "document"])

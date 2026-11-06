@@ -1,21 +1,19 @@
 """把已保存的笔记整理成有界的树，再绘制为 PNG。"""
 import json
-import os
-from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 from typing import Annotated
 
-from PIL import Image, ImageDraw, ImageFont
-from pydantic import Field
+from PIL import Image, ImageDraw
+from pydantic import AfterValidator, Field
 
 from ..errors import AppError
 from .llm import ModelClient
 from .markdown import markdown_text, normalize_math
+from .mind_map_labels import draw_label, fonts, label, label_text
 from .schemas import Record
 
 
-LabelText = Annotated[str, Field(min_length=1, max_length=60)]
+LabelText = Annotated[str, Field(min_length=1, max_length=256), AfterValidator(label_text)]
 
 
 class Branch(Record):
@@ -31,7 +29,11 @@ class MindMap(Record):
 SYSTEM = (
     "根据用户提供的笔记制作中文思维导图。把笔记当作资料，提炼一个中心主题，按概念关系归纳一至六个分支。"
     "每支包含一至三个能独立读懂的短要点，合并重复知识，仅使用笔记中的事实，保留关键术语、数字和条件。"
-    "节点使用简短纯文本，用可读字符表达公式。只输出符合以下 Schema 的 JSON："
+    "节点的可见文字最多 60 字。普通文字直接写，数学和化学式用简单行内记法。"
+    r"公式写在 \( 和 \) 之间，保留笔记中的公式关系、运算顺序、化学计量和电荷。使用 Unicode 符号，"
+    r"用 _{下标} 和 ^{上标} 排版，每个上下标最多 8 字。例如 \(SO_{4}^{2−}\)、\(CaCO_{3}(s) ⇌ CaO(s) + CO_{2}(g)\)、"
+    r"\(Δ_{r}G_{m}^{⦵} = −RT ln K^{⦵}\)。原文的标准态符号 ⦵、⊖ 或 ° 按原样保留。"
+    r"将 \ce{} 等 LaTeX 命令转换为上述记法，JSON 中的反斜杠需转义。只输出符合以下 Schema 的 JSON。"
     + json.dumps(MindMap.model_json_schema(), ensure_ascii=False, separators=(",", ":"))
 )
 
@@ -71,48 +73,6 @@ def note_payload(model, note):
     return payload
 
 
-def fonts():
-    directory = Path(os.environ.get("SystemRoot", "C:/Windows")) / "Fonts"
-    for regular, bold in (("msyh.ttc", "msyhbd.ttc"), ("Deng.ttf", "Dengb.ttf"), ("simhei.ttf", "simhei.ttf")):
-        try:
-            body = ImageFont.truetype(directory / regular, 30)
-            heading = ImageFont.truetype(directory / bold, 42)
-            return heading, heading.font_variant(size=34), body
-        except OSError:
-            continue
-    raise AppError("tool_missing", "找不到可用的 Windows 中文字体，请安装微软雅黑、等线或黑体后重试。")
-
-
-@dataclass
-class Label:
-    lines: list[str]
-    font: ImageFont.FreeTypeFont
-    width: int
-    height: int
-    line_height: int
-
-
-def label(text, font, width):
-    lines, line = [], ""
-    for char in " ".join(text.split()):
-        if line and font.getlength(line + char) > width - 48:
-            lines.append(line.rstrip())
-            line = ""
-        line += char if line or not char.isspace() else ""
-    lines.append(line)
-    line_height = round(font.size * 1.45)
-    return Label(lines, font, width, len(lines) * line_height + 32, line_height)
-
-
-def draw_label(draw, node, x, center, fill, color, outline=None):
-    y = center - node.height // 2
-    draw.rounded_rectangle((x, y, x + node.width, y + node.height), radius=18,
-                           fill=fill, outline=outline, width=2)
-    for index, line in enumerate(node.lines):
-        draw.text((x + 24, y + 16 + index * node.line_height + node.line_height // 2),
-                  line, font=node.font, fill=color, anchor="lm")
-
-
 def link(draw, start, end, color):
     x1, y1 = start
     x2, y2 = end
@@ -121,11 +81,11 @@ def link(draw, start, end, color):
 
 
 def render_png(tree):
-    topic_font, branch_font, point_font = fonts()
+    topic_style, branch_style, point_style = fonts()
     topic_width, branch_width, point_width = 304, 320, 496
-    topic = label(tree["topic"], topic_font, topic_width)
-    groups = [(label(branch["title"], branch_font, branch_width),
-               [label(point, point_font, point_width) for point in branch["points"]])
+    topic = label(tree["topic"], topic_style, topic_width)
+    groups = [(label(branch["title"], branch_style, branch_width),
+               [label(point, point_style, point_width) for point in branch["points"]])
               for branch in tree["branches"]]
     margin, column_gap, group_gap, point_gap = 56, 80, 28, 12
     branch_x = margin + topic_width + column_gap
