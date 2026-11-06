@@ -65,7 +65,7 @@ class Pipeline:
                     values["result"].get("complete", True)):
                 task = session.get(Task, task_id)
                 task.config = {**task.config, "checkpoint_cleanup_pending": True}
-                retain_two_notes(session, task.video_id)
+                self.checkpoint_cleanup.defer_mind_maps(retain_two_notes(session, task.video_id))
             if values.get("status") == "failed" and not changed:
                 session.execute(sql_update(Task).where(Task.id == task_id, Task.status == "stopping")
                                 .values(status="paused", error=None, updated_at=now()))

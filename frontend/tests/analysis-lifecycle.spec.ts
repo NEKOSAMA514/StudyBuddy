@@ -1,4 +1,4 @@
-import { taskResponse } from "./support/taskContract";
+import { readEmptyMindMap, taskResponse } from "./support/taskContract";
 import { settingsRead, settingsValues } from "./support/settings";
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -90,6 +90,7 @@ async function mockWorkspace(page: Page) {
   });
   state.release = release;
   await page.route("**/api/v1/**", async (route) => {
+    if (await readEmptyMindMap(route)) return;
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const method = request.method();

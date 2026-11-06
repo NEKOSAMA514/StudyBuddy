@@ -29,6 +29,8 @@ from .documents.imports import DocumentImports
 from .documents.api import analysis_router as document_analysis_router
 from .note_search import search_router
 from .note_marks import mark_router
+from .analysis.mind_map import MindMapModel
+from .note_mind_maps import MindMaps, mind_map_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 # httpx 的请求日志可能包含供应商 URL；应用日志只保留任务编号及错误码。
@@ -36,7 +38,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 # 先完成设置迁移和校验，再装配共享资源、两类任务及 HTTP 入口。
-def create_app(settings=None, pipeline_factory=Pipeline, start_worker=True, document_model_factory=DocumentModelClient):
+def create_app(settings=None, pipeline_factory=Pipeline, start_worker=True, document_model_factory=DocumentModelClient,
+               mind_map_model_factory=MindMapModel):
     settings = load_application_settings(settings)
     database_path = settings.data_dir / "studybuddy.sqlite3"
     legacy_path = settings.data_dir / "studynote.sqlite3"
@@ -58,6 +61,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, start_worker=True, docu
     document_pipeline = DocumentPipeline(current.read, sessions, diagnostics, document_model_factory)
     worker.register("document", DocumentTask, document_pipeline)
     playback = PlaybackCopies(diagnostics)
+    mind_maps = MindMaps(current.read, sessions, diagnostics, mind_map_model_factory)
 
     # 启动时恢复后台导入，退出时先等待任务清理，再释放下载和诊断资源。
     @asynccontextmanager
@@ -68,6 +72,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, start_worker=True, docu
         try:
             yield
         finally:
+            await mind_maps.close()
             imports.close()
             if start_worker:
                 worker.stop()
@@ -114,6 +119,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, start_worker=True, docu
     app.include_router(evidence_router(evidence))
     app.include_router(search_router(sessions))
     app.include_router(mark_router(sessions))
+    app.include_router(mind_map_router(mind_maps))
 
     if settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="frontend")

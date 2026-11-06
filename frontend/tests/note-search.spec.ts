@@ -2,7 +2,7 @@ import { settingsRead } from "./support/settings";
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { taskResponse } from "./support/taskContract";
+import { readEmptyMindMap, taskResponse } from "./support/taskContract";
 
 function gate() {
   let release!: () => void;
@@ -36,6 +36,7 @@ async function mockSearch(page: Page, style = "detailed") {
     holdBody: null as ReturnType<typeof gate> | null,
   };
   await page.route("**/api/v1/**", async (route: Route) => {
+    if (await readEmptyMindMap(route)) return;
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api/v1", "");
     if (route.request().method() !== "GET") state.writes.push(path);

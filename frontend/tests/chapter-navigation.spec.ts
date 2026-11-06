@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { taskResponse } from "./support/taskContract";
+import { readEmptyMindMap, taskResponse } from "./support/taskContract";
 
 function chapters(count: number, prefix = "章节") {
   return Array.from({ length: count }, (_, index) => ({
@@ -27,6 +27,7 @@ async function workspace(page: Page, count = 5, running = false) {
   if (!count) Object.assign(state.current, { notes_state: "none", config: { outline_preview: "只有材料导览，暂无章节正文。" } });
   if (running) Object.assign(state.current, { status: "running", stage: "segments", notes_state: "partial" });
   await page.route("**/api/v1/**", async route => {
+    if (await readEmptyMindMap(route)) return;
     const path = new URL(route.request().url()).pathname;
     let body: unknown;
     if (path === "/api/v1/health") body = { model_configured: true, max_upload_bytes: 2147483648, max_duration_seconds: 7200 };

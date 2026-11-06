@@ -85,7 +85,7 @@ class DocumentPipeline:
             task.config = {**task.config, "checkpoint_cleanup_pending": True}
             in_session(session, task, self.diagnostics)
             session.flush()
-            retain_two(session, task.document_id)
+            self.checkpoint_cleanup.defer_mind_maps(retain_two(session, task.document_id))
 
     # 按任务风格选择生成器，并将跨线程停止信号转为异步取消。
     async def generate(self, task, settings, folder, material, timings=None):

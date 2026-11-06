@@ -1,4 +1,12 @@
 import type { Task } from "../../src/types";
+import type { Route } from "@playwright/test";
+
+export async function readEmptyMindMap(route: Route) {
+  const path = new URL(route.request().url()).pathname;
+  if (route.request().method() !== "GET" || !/^\/api\/v1\/note-mind-maps\/(video|document)\/[^/]+$/.test(path)) return false;
+  await route.fulfill({ json: { status: "idle", image_revision: null, error: null } });
+  return true;
+}
 
 const stage_labels = { queued: "等待处理", checking: "检查视频", transcribing: "识别讲解语音", ocr: "提取画面文字",
   planning: "规划视频章节", summarizing: "生成章节正文", segments: "逐段生成笔记", finalizing: "生成整体概览与校验引用", completed: "分析完成" };

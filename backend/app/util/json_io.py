@@ -7,6 +7,10 @@ from time import sleep
 def atomic_json(path, value, *, ensure_ascii=False):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=ensure_ascii), encoding="utf-8")
+    replace_file(temporary, path)
+
+
+def replace_file(temporary, path):
     for attempt in range(6):
         try:
             temporary.replace(path)

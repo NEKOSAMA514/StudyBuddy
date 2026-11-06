@@ -18,10 +18,12 @@ def completed(session, identifier):
 
 # 在成功提交事务内只保留最近两份完整笔记，同步移除被淘汰版本的重点。
 def retain_two(session, identifier):
-    for task in completed(session, identifier)[2:]:
+    retired = completed(session, identifier)[2:]
+    for task in retired:
         clear_marks(session, "document", [task.id])
         task.result = None
         task.config = {k: v for k, v in task.config.items() if k != "outline_preview"}
+    return retired
 
 
 # 读取和导出当前或指定任务的文档笔记，不触发重新生成。

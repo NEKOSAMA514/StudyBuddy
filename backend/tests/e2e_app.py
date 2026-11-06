@@ -4,12 +4,15 @@
 """
 from app.config import Settings
 from app.main import create_app
+from app.analysis.mind_map import MindMapModel
 from app.videos.pipeline import Pipeline
 from app.recognition.extraction import extraction_config, extraction_signature, speech_cache_path, ocr_cache_path
 from app.db import Video, Task, Document
 from app.documents.model import DocumentModelClient
 from app.recognition.local_models import MODELS, model_path
+from app.settings.model_profiles import ProfileInput, active_id, edit
 from .fakes import FakeRecognizer, FakeModel
+from dataclasses import replace
 import time
 import asyncio
 import json
@@ -89,7 +92,46 @@ def factory():
                 value = {"title": "文档主题总结", "tags": ["概念"], "overview_paragraphs": ["模拟生成的文档总结：资料介绍概念及其条件。"]}
             return validate(value)
 
-    app = create_app(settings, pipeline_factory=pipeline, document_model_factory=BrowserDocumentModel)
+    class BrowserMindMapModel(MindMapModel):
+        async def stage_request(self, operation, messages):
+            if self.settings.llm_model.startswith("e2e-mind-map-held-"):
+                release = holds.setdefault(self.settings.llm_model, threading.Event())
+                while not release.is_set():
+                    await asyncio.sleep(0.02)
+            if self.settings.llm_model == "e2e-mind-map-invalid":
+                return "{}"
+            return json.dumps({"topic": "学习笔记要点",
+                               "branches": [{"title": "关键概念", "points": ["理解概念的主要用途", "区分条件和结论"]},
+                                            {"title": "适用范围", "points": ["对照来源判断适用条件，复习时关注例外与边界"]}]},
+                              ensure_ascii=False)
+
+    app = create_app(settings, pipeline_factory=pipeline, document_model_factory=BrowserDocumentModel,
+                     mind_map_model_factory=BrowserMindMapModel)
+
+    map_settings = {}
+
+    @app.post("/__test__/mind-maps/profiles")
+    def configure_mind_maps(model: str):
+        # 本场景只读取模型配置。测试凭据作为快照放在内存中，不测试系统密钥写入。
+        current = app.state.current_settings
+        saved = current.read()
+        map_settings[model] = saved
+        staged = replace(saved, llm_key="fake-browser-map-default", llm_stream=False)
+        staged = edit(staged, ProfileInput(name="导图测试配置", model=model, token="fake-browser-map"))
+        selected = staged.llm_profiles[-1]["id"]
+        staged = edit(staged, ProfileInput(name="导图失败配置", model="e2e-mind-map-invalid", token="fake-browser-map"))
+        current.replace(staged)
+        return {"active": active_id(staged), "selected": selected, "invalid": staged.llm_profiles[-1]["id"]}
+
+    @app.delete("/__test__/mind-maps/profiles")
+    def reset_mind_map_profiles(model: str):
+        app.state.current_settings.replace(map_settings.pop(model))
+        return {"reset": True}
+
+    @app.post("/__test__/mind-maps/release")
+    def release_mind_map(model: str):
+        holds.setdefault(model, threading.Event()).set()
+        return {"released": True}
 
     # 浏览器测试使用确定的本地替身，任何 PDF 都不会访问真实 MinerU。
     from app.documents import mineru
@@ -165,6 +207,6 @@ def factory():
         return {"released": True}
 
     # create_app already mounted the frontend at '/'; match test-only routes first.
-    for _ in range(6):
+    for _ in range(9):
         app.router.routes.insert(0, app.router.routes.pop())
     return app

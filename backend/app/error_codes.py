@@ -25,7 +25,7 @@ KNOWN_ERRORS.update({"document_missing", "document_task_missing", "document_busy
                      "document_content_missing", "document_source_changed", "document_generation_changed",
                      "document_generation_limit", "document_limit", "document_encoding",
                      "document_dependency", "encrypted_document", "invalid_document", "invalid_document_task_state",
-                     "notes_unavailable"})
+                     "notes_unavailable", "mind_map_generation_failed"})
 
 REQUEST_RETRY_ERRORS = frozenset({"model_unavailable", "model_output_filtered", "model_response_invalid",
                                   "model_stream_error", "model_incomplete", "model_timeout"})

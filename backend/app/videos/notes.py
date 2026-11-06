@@ -96,7 +96,9 @@ def completed_notes(session, video_id):
 
 # 成功事务内保留两份完整笔记，旧版本正文和关联重点同步淘汰。
 def retain_two_notes(session, video_id):
-    for task in completed_notes(session, video_id)[2:]:
+    retired = completed_notes(session, video_id)[2:]
+    for task in retired:
         clear_marks(session, "video", [task.id])
         task.result = None
         task.config = {key: value for key, value in task.config.items() if key != "outline_preview"}
+    return retired
