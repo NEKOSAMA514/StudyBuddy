@@ -10,26 +10,33 @@ from PIL import ImageFont
 from ..errors import AppError
 
 
-FORMULA = re.compile(r"\\\((.*?)\\\)", re.S)
+FORMULA = re.compile(r"(?<!\\)\\\((.*?)\\\)", re.S)
+# 成对美元符号以后的数字可能是另一处金额，如 $5 到 $10。
+UNSUPPORTED_FORMULA = re.compile(r"\\(?:[()\[\]]|ce\s*\{)"
+                                 r"|(?<![\\$])(?P<dollars>\${1,2})(?!\$)[^$]+?(?<!\\)(?P=dollars)(?![\d$])")
 SCRIPT = re.compile(r"([_^])\{([^{}\\_^]{1,8})\}")
 ATOM = re.compile(rf"(.)( (?:{SCRIPT.pattern})* )", re.X)
 WORDS = re.compile(r"[A-Za-z0-9]+|.")
 
 
 def label_text(value):
-    def visible(match):
-        formula = " ".join(match[1].split())
-        parts = []
+    visible = 0
+    for index, segment in enumerate(FORMULA.split(value)):
+        if index % 2 == 0:
+            if UNSUPPORTED_FORMULA.search(segment):
+                raise ValueError(r"公式请用 \( 和 \) 成对标记，化学式请展开为普通字符和上下标。")
+            visible += len(segment)
+            continue
+        formula = " ".join(segment.split())
+        if not formula:
+            raise ValueError("公式需要正文。")
         for atom in ATOM.finditer(formula):
             base, scripts = atom[1], SCRIPT.findall(atom[2])
             if base in r"\{}_^" or (base.isspace() and scripts) or len(dict(scripts)) != len(scripts):
                 raise ValueError("公式内使用普通字符，每个基字符可带一个 _{下标} 和一个 ^{上标}。")
-            parts.append(base + "".join(text for _, text in scripts))
-        if not parts:
-            raise ValueError("公式需要正文。")
-        return "".join(parts)
+            visible += 1 + sum(len(text) for _, text in scripts)
 
-    if len(FORMULA.sub(visible, value)) > 60:
+    if visible > 60:
         raise ValueError("节点可见文字最多 60 字。")
     return value
 

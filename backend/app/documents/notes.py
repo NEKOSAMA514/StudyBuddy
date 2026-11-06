@@ -1,24 +1,17 @@
 """文档笔记读取、导出及事务内的成功版本保留。"""
 from pathlib import Path
-from sqlalchemy import select
-from ..db import DocumentTask
 from ..errors import AppError
 from ..analysis.markdown import normalize_math, markdown_text
 from .schemas import public_task
 from .task_rules import get_task
 from ..note_marks import clear_marks
+from ..note_versions import note_versions
 from .formatting import plain_sources
-
-
-def completed(session, identifier):
-    tasks = session.scalars(select(DocumentTask).where(DocumentTask.document_id == identifier, DocumentTask.status == "succeeded")
-                            .order_by(DocumentTask.completed_at.desc(), DocumentTask.id.desc()))
-    return [t for t in tasks if t.result and t.result.get("complete") and t.result.get("chapters")]
 
 
 # 在成功提交事务内只保留最近两份完整笔记，同步移除被淘汰版本的重点。
 def retain_two(session, identifier):
-    retired = completed(session, identifier)[2:]
+    retired = note_versions(session, "document", identifier, retired=True)
     for task in retired:
         clear_marks(session, "document", [task.id])
         task.result = None
@@ -34,7 +27,7 @@ class DocumentNotes:
     def versions(self, identifier):
         with self.sessions() as session:
             self.documents.get(session, identifier)
-            return [public_task(t) for t in completed(session, identifier)[:2]]
+            return [public_task(t) for t in note_versions(session, "document", identifier)]
 
     def analysis(self, identifier):
         with self.sessions() as session:

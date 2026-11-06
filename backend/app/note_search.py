@@ -3,7 +3,7 @@ import re
 from sqlalchemy import select
 from .db import Video, Task, Document, DocumentTask
 from .analysis.markdown import markdown_text
-from .videos.schemas import current_notes
+from .note_versions import is_complete_note
 
 PAGE_SIZE = 20
 
@@ -49,9 +49,7 @@ def search_notes(sessions, query, page):
                                    .order_by(date.desc(), task.id.desc()))
             seen = set()
             for task_id, file_id, filename, result, saved_at in rows:
-                valid = (current_notes(result) and result.get("complete", True)) if kind == "video" else (
-                    result and result.get("complete") and result.get("chapters"))
-                if file_id in seen or not valid:
+                if file_id in seen or not is_complete_note(kind, result):
                     continue
                 seen.add(file_id)
                 units = [("overview", None, result["title"], "\n\n".join(result.get("overview_paragraphs", [])))]

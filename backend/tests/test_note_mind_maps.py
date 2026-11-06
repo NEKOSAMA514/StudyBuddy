@@ -13,13 +13,13 @@ from pydantic import ValidationError
 
 from app.analysis.budgets import message_characters
 from app.analysis.checkpoints import MIND_MAP_CLEANUP
-from app.analysis.mind_map import MindMap
+from app.analysis.mind_map import MindMap, MindMapModel, note_payload
 from app.analysis.mind_map_labels import fonts, glyph_mask, label
 from app.db import Document, DocumentTask, Task, Video
 from app.documents.notes import retain_two
 from app.main import create_app
 from app.note_mind_maps import MindMaps
-from app.settings.model_profiles import ProfileInput, edit
+from app.settings.model_profiles import ProfileInput, edit, find, for_profile
 from app.videos.notes import retain_two_notes
 
 
@@ -49,7 +49,7 @@ def model_api(app, monkeypatch):
                            token="isolated-map-token", stream=False, input_text_limit=2400)
     saved = edit(current.read(), profile)
     current.replace(saved)
-    fake = SimpleNamespace(profile_id=saved.llm_profiles[-1]["id"], calls=[], release=threading.Event(),
+    fake = SimpleNamespace(profile_id=saved.llm_profiles[-1]["id"], calls=[], answers=[], release=threading.Event(),
                            invalid=False, topic="关系图")
     fake.release.set()
 
@@ -59,7 +59,10 @@ def model_api(app, monkeypatch):
             await asyncio.sleep(0.01)
         tree = {"topic": fake.topic, "branches": [{"title": "核心概念",
                 "points": ["由来源提炼出的结论。", r"平衡关系 \(K^{⦵}=p(CO_{2})/p^{⦵}\)"]}]}
-        content = "{}" if fake.invalid else json.dumps(tree, ensure_ascii=False)
+        if fake.answers:
+            content = fake.answers.pop(0)
+        else:
+            content = "{}" if fake.invalid else json.dumps(tree, ensure_ascii=False)
         return httpx.Response(200, json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]})
 
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", response)
@@ -105,13 +108,56 @@ def test_short_formula_wraps_together():
     assert glyphs["明"].y < glyphs["C"].y == glyphs["O"].y < glyphs["3"].y
 
 
-@pytest.mark.parametrize("invalid", [r"\(\ce{SO4^2-}\)", r"\(_{2}O\)", r"\(Ca^{2}^{+}\)"])
+@pytest.mark.parametrize("invalid", [r"\(\ce{SO4^2-}\)", r"\(_{2}O\)", r"\(Ca^{2}^{+}\)",
+                                     r"\ce{SO4^2-}", "$SO_{4}^{2-}$", "$$SO_{4}^{2-}$$",
+                                     r"\(SO_{4}^{2-}", r"SO_{4}^{2-}\)", r"\[SO_{4}^{2-}\]"])
 def test_unsupported_formula_markup_is_rejected(invalid):
-    value = {"topic": "硫酸根", "branches": [{"title": "离子", "points": [r"\(SO_{4}^{2−}\)"]}]}
+    value = {"topic": "硫酸根", "branches": [{"title": "离子",
+             "points": [r"\(SO_{4}^{2−}\)", "SO₄²⁻", "file_name 价格 $5 到 $10"]}]}
     assert MindMap.model_validate(value).model_dump() == value
     value["branches"][0]["points"] = [invalid]
-    with pytest.raises(ValidationError, match="公式内使用"):
+    with pytest.raises(ValidationError, match="公式"):
         MindMap.model_validate(value)
+
+
+def test_raw_chemical_formula_triggers_repair_before_rendering(app, client, model_api):
+    store_note(app, "video", "first", 1)
+    endpoint = "/api/v1/note-mind-maps/video/first"
+    invalid = json.dumps({"topic": "化学", "branches": [{"title": "离子", "points": [r"\ce{SO4^2-}"]}]})
+    model_api.answers.append(invalid)
+    start(client, endpoint, model_api)
+    assert wait_state(client, endpoint, "idle")["image_revision"]
+    assert len(model_api.calls) == 2
+    assert model_api.calls[1][1]["messages"][-2] == {"role": "assistant", "content": invalid}
+    assert client.get(endpoint + "/image").headers["content-type"] == "image/png"
+
+
+def test_repair_fits_when_complete_note_uses_exact_input_budget(app, client, model_api):
+    store_note(app, "video", "first", 1)
+    endpoint = "/api/v1/note-mind-maps/video/first"
+    current = app.state.current_settings.read()
+    model = MindMapModel(for_profile(current, find(current, model_api.profile_id)))
+    limit = model.settings.llm_input_text_limit
+    with app.state.sessions.begin() as session:
+        task = session.get(Task, "first")
+        original = task.result
+        remaining = limit - model.input_characters("mind_map", note_payload(model, original))
+        first, *other = original["chapters"]
+        task.result = {**original, "chapters": [{**first, "markdown": first["markdown"] + "字" * remaining}, *other]}
+    model_api.answers.append('{"topic":"缺少分支"}')
+    start(client, endpoint, model_api)
+    state = wait_state(client, endpoint, "idle")
+    assert state["image_revision"]
+    first_request, repair = [body["messages"] for _, body in model_api.calls]
+    assert message_characters(first_request) == limit
+    assert message_characters(repair) <= limit
+    assert [message["role"] for message in repair] == ["system", "user"]
+    assert "上次输出未通过校验" in repair[0]["content"]
+    whole, compressed = (json.loads(messages[1]["content"]) for messages in (first_request, repair))
+    assert (compressed["title"], compressed["overview"]) == (whole["title"], whole["overview"])
+    assert [chapter["title"] for chapter in compressed["sections"]] == ["第一章", "短章", "末章"]
+    assert [chapter["text"][:4] for chapter in compressed["sections"]] == ["首章正文", "短章正文", "末章正文"]
+    assert len(compressed["sections"][0]["text"]) < len(whole["sections"][0]["text"])
 
 
 @pytest.mark.parametrize("kind", ["video", "document"])
@@ -203,14 +249,19 @@ def test_retirement_cleans_files_and_prevents_late_publication(app, client, mode
 
     monkeypatch.setattr(MindMaps, "save", watch_save)
     start(client, endpoint, model_api, replace=True)
-    kept = store_note(app, kind, "second", 2)
-    store_note(app, kind, "third", 3)
+    kept = store_note(app, kind, "second", 1)
+    store_note(app, kind, "third", 1)
+    store_note(app, kind, "partial", 4, complete=False)
     retain = retain_two_notes if kind == "video" else retain_two
     task_table = Task if kind == "video" else DocumentTask
     pipeline = app.state.pipeline if kind == "video" else app.state.document_pipeline
     with app.state.sessions.begin() as session:
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        if kind == "document":
+            session.get(task_table, "first").updated_at = "2026-11-05"
         pipeline.checkpoint_cleanup.defer_mind_maps(retain(session, "source"))
+    versions = client.get(f"/api/v1/{kind}s/source/analyses").json()
+    assert [task["id"] for task in versions] == ["third", "second"]
     assert client.get(endpoint).status_code == 409
     assert client.get(endpoint + "/image").status_code == 409
     with app.state.sessions() as session:

@@ -1,12 +1,10 @@
 """TXT与Markdown下载读取同一份章节Markdown，不重新生成正文。"""
 import re
-from sqlalchemy import select
-from ..db import Task
-from .schemas import current_notes
 from ..util.time import timestamp
 from ..analysis.markdown import markdown_text
 from .timestamps import plain_timestamps
 from ..note_marks import clear_marks
+from ..note_versions import note_versions
 
 
 def partial_notice(result):
@@ -88,15 +86,9 @@ def concise_markdown(filename, duration, result):
     return "\n".join(lines).rstrip() + "\n"
 
 
-def completed_notes(session, video_id):
-    tasks = session.scalars(select(Task).where(Task.video_id == video_id, Task.status == "succeeded")
-                            .order_by(Task.updated_at.desc(), Task.id.desc()))
-    return [task for task in tasks if current_notes(task.result) and task.result.get("complete", True)]
-
-
 # 成功事务内保留两份完整笔记，旧版本正文和关联重点同步淘汰。
 def retain_two_notes(session, video_id):
-    retired = completed_notes(session, video_id)[2:]
+    retired = note_versions(session, "video", video_id, retired=True)
     for task in retired:
         clear_marks(session, "video", [task.id])
         task.result = None

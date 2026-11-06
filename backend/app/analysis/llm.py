@@ -347,13 +347,16 @@ class ModelClient:
                 if repair:
                     raise AppError("invalid_model_output", "模型结构无效，修正一次后仍失败。") from exc
                 self.validation_diagnostic(operation, payload, exc)
-                messages.append({"role": "assistant", "content": content})
-                messages.append({"role": "user", "content": "上次输出未通过校验：" + str(exc) +
-                                 "。只修正上述结构或真实来源错误，返回符合Schema的完整JSON。"})
+                messages = self._repair_messages(operation, payload, messages, content, exc)
                 size = message_characters(messages)
                 limit = self.settings.llm_input_text_limit
                 if size > limit:
                     raise AppError("model_input_budget", "结构修正请求超过输入预算，成功检查点已保留。") from exc
+
+    def _repair_messages(self, operation, payload, messages, content, error):
+        return [*messages, {"role": "assistant", "content": content},
+                {"role": "user", "content": "上次输出未通过校验：" + str(error) +
+                 "。只修正上述结构或真实来源错误，返回符合Schema的完整JSON。"}]
 
     # 只解包完整代码围栏，畸形围栏交由现有结构修正流程处理。
     @staticmethod

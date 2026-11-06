@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw
 from pydantic import AfterValidator, Field
 
 from ..errors import AppError
+from .budgets import message_characters
 from .llm import ModelClient
 from .markdown import markdown_text, normalize_math
 from .mind_map_labels import draw_label, fonts, label, label_text
@@ -48,29 +49,44 @@ class MindMapModel(ModelClient):
     async def stage_request(self, operation, messages):
         return await self.request(messages, max_tokens=4096)
 
+    def _repair_messages(self, operation, payload, messages, content, error):
+        repair = super()._repair_messages(operation, payload, messages, content, error)
+        limit = self.settings.llm_input_text_limit
+        if message_characters(repair) <= limit:
+            return repair
+        instruction = "\n上次输出未通过校验。请根据笔记重新输出完整 JSON，遵守 Schema 和公式写法。"
+        fitted = _fit_note_payload(self, payload, limit - len(instruction))
+        system, material = self.messages(operation, fitted)
+        return [{**system, "content": system["content"] + instruction}, material]
+
 
 def note_payload(model, note):
     chapters = [{"title": chapter["title"],
                  "text": markdown_text(normalize_math(chapter["markdown"]), include_link_urls=False)}
                 for chapter in note["chapters"]]
     payload = {"title": note["title"], "overview": note.get("overview_paragraphs", []), "sections": chapters}
-    limit = model.settings.llm_input_text_limit
+    return _fit_note_payload(model, payload, model.settings.llm_input_text_limit, reserve_repair=True)
+
+
+def _fit_note_payload(model, payload, limit, *, reserve_repair=False):
     if model.input_characters("mind_map", payload) <= limit:
         return payload
 
+    chapters = payload["sections"]
     excerpts = [{"title": chapter["title"], "text": ""} for chapter in chapters]
-    payload["sections"] = excerpts
-    remaining = limit - model.input_characters("mind_map", payload)
-    if remaining <= 0:
-        raise AppError("model_input_budget", "笔记概览和章节标题已达到输入上限，请选择输入预算更大的 API 配置。")
-    remaining -= min(2000, remaining // 3)  # 为一次结构修正保留空间。
+    fitted = {**payload, "sections": excerpts}
+    remaining = limit - model.input_characters("mind_map", fitted)
+    if remaining < 0:
+        raise AppError("model_input_budget", "笔记标题、概览和章节标题超过本次输入预算，请选择输入预算更大的 API 配置。")
+    if reserve_repair:
+        remaining -= min(2000, remaining // 3)
     # 先满足短章，将余量分给长章，避免前几章用光整份笔记的正文预算。
     order = sorted(range(len(chapters)), key=lambda index: len(chapters[index]["text"]))
     for left, index in enumerate(order):
         excerpt = chapters[index]["text"][:remaining // (len(order) - left)]
         excerpts[index]["text"] = excerpt.rstrip()
         remaining -= len(excerpt)
-    return payload
+    return fitted
 
 
 def link(draw, start, end, color):

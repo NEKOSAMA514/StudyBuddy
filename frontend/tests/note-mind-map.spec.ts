@@ -168,6 +168,46 @@ for (const kind of ["video", "document"] as const) {
       }
       await page.keyboard.press("Escape");
       await expect(regenerate).toBeHidden();
+
+      const revision = new URL(src!, page.url()).searchParams.get("v");
+      let status = 200;
+      let polls = 0;
+      await page.route(`**${root}/${latest}`, route => {
+        if (route.request().method() !== "GET") return route.fallback();
+        polls++;
+        return route.fulfill({ status, json: status === 200
+          ? { status: "generating", image_revision: revision, error: null }
+          : { error: { message: "读取失败", error_id: "test-mind-map-status", log_saved: true } } });
+      });
+      await page.clock.install();
+      await page.reload();
+      await expect(overviewMap.getByText("正在生成思维导图…")).toBeVisible();
+      const readError = overviewMap.getByText("思维导图状态读取失败。");
+      status = 503;
+      await page.clock.runFor(1300);
+      await expect(readError).toBeVisible();
+      await expect(small).toHaveAttribute("src", src!);
+      status = 200;
+      const recovered = page.waitForResponse(response => response.url().endsWith(`${root}/${latest}`) && response.ok());
+      await page.clock.runFor(4100);
+      await recovered;
+      await expect(readError).toBeHidden();
+      await expect(overviewMap.getByText("正在生成思维导图…")).toBeVisible();
+
+      await thumbnail.click();
+      await expect(preview).toBeVisible();
+      status = video ? 409 : 404;
+      await page.clock.runFor(1300);
+      await expect(preview).toBeHidden();
+      await expect(overviewMap.getByRole("status")).toHaveText("当前笔记版本已不可用，请切换版本或刷新页面");
+      await expect(overviewMap.getByRole("button")).toHaveCount(0);
+      await expect(menu).toHaveCount(0);
+      await expect(body).toBeVisible();
+      const stoppedAt = polls;
+      await page.clock.runFor(8200);
+      expect(polls).toBe(stoppedAt);
+      await panel.getByRole("button", { name: "上一份笔记" }).click();
+      await expect(older).toHaveAttribute("src", new RegExp(`${previous}/image`));
     } finally {
       await request.post(`/__test__/mind-maps/release?model=${model}`);
       if (id) await request.delete(`/api/v1/${kind}s/${id}`);

@@ -1,22 +1,30 @@
 // 原位显示导图和进度。配置弹窗以生成动作为主，大图以原图为主。
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { api, apiUrl, errorText, type ErrorReference } from "../api";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { api, apiUrl, errorText, ReportedError, type ErrorReference } from "../api";
 import { APIProfileSelect } from "../settings/APIProfileSelect";
 import { loadAPIProfiles } from "../settings/generationSettings";
 import { useScopedRead } from "../shared/useScopedRead";
 
 type MapStatus = { status: "idle" | "generating" | "failed"; image_revision: string | null; error: ErrorReference | null };
 type DialogMode = "create" | "replace" | "preview";
-const inlineReadError = () => {};
-
 // 每个阅读面板已有版本 key。旧请求在面板卸载时取消，服务端生成继续运行。
 export function useNoteMindMap(kind: "video" | "document", taskId?: string) {
   const path = taskId ? `/note-mind-maps/${kind}/${encodeURIComponent(taskId)}` : "";
-  const reading = useScopedRead<MapStatus>({ identity: path, path, enabled: !!path,
-    errorMessage: "思维导图状态读取失败。", onError: inlineReadError });
+  const [unavailablePath, setUnavailablePath] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<MapStatus | null>(null);
   const [dialog, setDialog] = useState<DialogMode | null>(null);
-  const state = reading.confirmed ? reading.data : receipt || reading.data;
+  const unavailable = unavailablePath === path;
+  const enabled = !!path && !unavailable;
+  const onReadError = useCallback((error: unknown) => {
+    if (error instanceof ReportedError && (error.status === 404 || error.status === 409)) {
+      setUnavailablePath(path);
+      setReceipt(null);
+      setDialog(null);
+    }
+  }, [path]);
+  const reading = useScopedRead<MapStatus>({ identity: path, path, enabled,
+    errorMessage: "思维导图状态读取失败。", onError: onReadError });
+  const state = enabled ? (reading.confirmed ? reading.data : receipt || reading.data) : null;
   const running = state?.status === "generating";
   const image = state?.image_revision ? apiUrl(`${path}/image?v=${state.image_revision}`) : null;
   const canCreate = reading.confirmed && state?.status === "idle" && !image;
@@ -30,7 +38,7 @@ export function useNoteMindMap(kind: "video" | "document", taskId?: string) {
     return () => window.clearTimeout(timer);
   }, [running, reading.loading, reading.error, retry]);
 
-  const actions = path ? [{
+  const actions = enabled ? [{
     label: image ? "查看思维导图" : running ? "正在生成思维导图…" : reading.error ? "重新读取思维导图" : "生成思维导图",
     disabled: !image && (running || (!state && reading.loading)),
     onSelect: () => {
@@ -55,7 +63,8 @@ export function useNoteMindMap(kind: "video" | "document", taskId?: string) {
     }
   }
 
-  return { actions, canCreate, dialog, setDialog, running, image, generate, retry, readError: reading.error,
+  return { actions, canCreate, dialog: enabled ? dialog : null, setDialog, running, image, generate, retry,
+    unavailable, readError: reading.error,
     generationError: state?.error };
 }
 
@@ -139,10 +148,10 @@ function MindMapSetup({ replace, generate, close }: {
 export function NoteMindMap({ map, title, inlineRegenerate }: {
   map: ReturnType<typeof useNoteMindMap>; title: string; inlineRegenerate?: boolean;
 }) {
-  const { dialog, setDialog, canCreate, image, running, generationError, readError } = map;
+  const { dialog, setDialog, canCreate, image, running, generationError, readError, unavailable } = map;
   const close = () => setDialog(null);
   return <>
-    {(canCreate || image || running || generationError || readError) && <section className="note-mind-map" aria-label="思维导图">
+    {(canCreate || image || running || generationError || readError || unavailable) && <section className="note-mind-map" aria-label="思维导图">
       <h4>思维导图</h4>
       {canCreate && <button type="button" className="secondary" aria-haspopup="dialog" onClick={() => setDialog("create")}>
         生成思维导图
@@ -159,6 +168,7 @@ export function NoteMindMap({ map, title, inlineRegenerate }: {
       {readError && <div className="reader-state" role="status"><span>{readError}</span>
         <button type="button" className="secondary" onClick={map.retry}>重新读取</button>
       </div>}
+      {unavailable && <p className="muted" role="status">当前笔记版本已不可用，请切换版本或刷新页面</p>}
     </section>}
     {dialog === "preview" && image && <MindMapDialog title="思维导图" fullscreen close={close}>
       <img src={image} alt={`${title}的思维导图`} />

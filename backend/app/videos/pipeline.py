@@ -13,8 +13,9 @@ from ..errors import AppError, TaskInterrupted, TaskPaused
 from .model import ModelClient
 from .versions import PROMPT_VERSION, check_generation
 from .detailed import DetailedVideoGeneration
-from .schemas import FORMAT_VERSION, current_notes
+from .schemas import FORMAT_VERSION
 from .notes import retain_two_notes
+from ..note_versions import is_complete_note
 from ..analysis.checkpoints import CheckpointCleanup
 from ..analysis.activity import TaskActivity, in_session, merge_config
 from ..util.json_io import atomic_json
@@ -61,8 +62,7 @@ class Pipeline:
             changed = session.execute(statement.values(**values, updated_at=now())).rowcount
             if values.get("status") == "succeeded" and not changed:
                 raise TaskPaused()
-            if (values.get("status") == "succeeded" and current_notes(values.get("result")) and
-                    values["result"].get("complete", True)):
+            if values.get("status") == "succeeded" and is_complete_note("video", values.get("result")):
                 task = session.get(Task, task_id)
                 task.config = {**task.config, "checkpoint_cleanup_pending": True}
                 self.checkpoint_cleanup.defer_mind_maps(retain_two_notes(session, task.video_id))

@@ -7,8 +7,7 @@ from sqlalchemy import delete, select
 from .db import Task, DocumentTask, Video, Document, NoteMark
 from .errors import AppError
 from .analysis.markdown import normalize_math, text_parser, inline_text, markdown_text
-from .videos.schemas import current_notes
-from .note_versions import retained_note
+from .note_versions import NOTE_VERSION_LIMIT, is_complete_note, retained_note
 
 
 class MarkInput(BaseModel):
@@ -53,12 +52,10 @@ def marked_notes(sessions, page):
                                    .order_by(date.desc(), task.id.desc()))
             versions = {}
             for task_id, file_id, filename, result, saved_at in rows:
-                valid = current_notes(result) and result.get("complete", True) if kind == "video" else (
-                    result and result.get("complete") and result.get("chapters"))
-                if not valid:
+                if not is_complete_note(kind, result):
                     continue
                 version = versions[file_id] = versions.get(file_id, 0) + 1
-                if version > 2 or (kind, task_id) not in marks:
+                if version > NOTE_VERSION_LIMIT or (kind, task_id) not in marks:
                     continue
                 concise = result.get("note_style") == "concise"
                 for order, chapter in enumerate(result["chapters"]):
