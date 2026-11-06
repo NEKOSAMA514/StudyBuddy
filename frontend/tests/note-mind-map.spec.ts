@@ -118,6 +118,22 @@ for (const kind of ["video", "document"] as const) {
       const older = panel.locator(".note-title + .note-mind-map img");
       await loaded(older);
       await expect(older).toHaveAttribute("src", new RegExp(`${previous}/image`));
+      const mapTitle = panel.getByRole("heading", { name: "思维导图", exact: true });
+      const subheading = panel.locator(".note-markdown[data-density=body] h2").first();
+      const typography = (element: Element) => {
+        const style = getComputedStyle(element);
+        return [style.fontFamily, style.fontSize, style.fontWeight, style.lineHeight, style.color];
+      };
+      const viewport = page.viewportSize()!;
+      for (const width of [viewport.width, 686, 375]) {
+        await page.setViewportSize({ ...viewport, width });
+        expect(await mapTitle.evaluate(typography)).toEqual(await subheading.evaluate(typography));
+        if (video && test.info().project.name === "desktop-1280") {
+          await mapTitle.evaluate(element => element.scrollIntoView({ block: "center" }));
+          await page.screenshot({ path: test.info().outputPath(`mind-map-heading-${width}.png`), animations: "disabled" });
+        }
+      }
+      await page.setViewportSize(viewport);
       await panel.getByRole("button", { name: "最新笔记" }).click();
       await expect(small).toHaveAttribute("src", src!);
 

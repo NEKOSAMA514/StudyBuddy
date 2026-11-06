@@ -218,6 +218,17 @@
   border-top: 1px solid var(--border);
 }
 
+.note-markdown[data-density="body"] h2,
+.note-mind-map > h4 {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.note-mind-map > h4 {
+  margin: 0;
+}
+
 .note-mind-map .mind-map-thumbnail {
   display: block;
   max-width: min(100%, 320px);

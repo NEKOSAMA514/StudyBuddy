@@ -140,7 +140,7 @@ export function NoteMindMap({ map, title }: { map: ReturnType<typeof useNoteMind
   const close = () => setDialog(null);
   return <>
     {(image || running || generationError || readError) && <section className="note-mind-map" aria-label="思维导图">
-      <span className="eyebrow">思维导图</span>
+      <h4>思维导图</h4>
       {image && <button type="button" className="mind-map-thumbnail" aria-label="放大思维导图" onClick={() => setDialog("preview")}>
         <img src={image} alt={`${title}的思维导图`} />
       </button>}
