@@ -50,7 +50,7 @@ export function Notes({
   const preview = task?.config?.outline_preview;
   const overview = concise ? [] : finalOverview?.overview_paragraphs || (preview ? [preview] : []);
   const mindMap = useNoteMindMap("video", result && task?.status === "succeeded" && result.complete !== false ? task.id : undefined);
-  const mindMapView = <NoteMindMap map={mindMap} title={result?.title || ""} />;
+  const mindMapView = <NoteMindMap map={mindMap} title={result?.title || ""} inlineRegenerate />;
   function citation(block: NoteChapter) {
     const evidenceIds = new Set(block.evidence_ids);
     const open = openCitations.includes(block.chapter_id);
@@ -94,7 +94,6 @@ export function Notes({
     <NotesPanel id="video-notes" title="视频笔记" notesRef={notesRef} style={result?.note_style}
       navigation={!concise && headings.length >= 2 ? <ChapterNavigator chapters={headings} notesRef={notesRef} /> : undefined}
       downloads={result && task ? { txt: notesUrl(task.id), md: notesUrl(task.id, "md") } : undefined}
-      actions={mindMap.actions}
       versions={{ ...versionReading, visible: hasVersions, selectedId: task?.id, latestId: latestVersionId,
         previousId: previousVersionId, select: onVersionChange, returnToGeneration: onReturnToGeneration }} reading={reading}>
       {result?.complete === false && (

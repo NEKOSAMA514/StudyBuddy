@@ -42,12 +42,15 @@ for (const kind of ["video", "document"] as const) {
       await page.goto(`/#summary/${id}`);
       const panel = page.locator(`#${kind}-notes`);
       const menu = panel.getByRole("button", { name: "笔记操作" });
-      const openSetup = async () => {
-        await menu.click();
-        await page.getByRole("button", { name: "生成思维导图", exact: true }).click();
-        return page.getByRole("dialog", { name: "生成思维导图", exact: true });
-      };
-      const setup = await openSetup();
+      const menuActions = panel.getByRole("group", { name: "笔记操作", exact: true });
+      const generate = { name: "生成思维导图", exact: true };
+      const overviewMap = panel.locator(".overview > .summary-tags + .note-mind-map");
+      const conciseMap = panel.locator(".note-title + .note-mind-map");
+      const inlineGenerate = overviewMap.getByRole("button", generate);
+      await expect(inlineGenerate).toBeVisible();
+      await expect(menu).toHaveCount(video ? 0 : 1);
+      await inlineGenerate.click();
+      const setup = page.getByRole("dialog", generate);
       const picker = setup.getByRole("combobox", { name: "API 配置" });
       await expect(picker).toHaveValue(active);
       await expect(setup.getByRole("combobox")).toHaveCount(1);
@@ -56,13 +59,13 @@ for (const kind of ["video", "document"] as const) {
       await setup.getByRole("button", { name: "开始生成" }).click();
       expect((await sent).postDataJSON()).toEqual({ llm_profile_id: selected, replace_existing: false });
       await expect(setup).toBeHidden();
-      const overviewMap = panel.locator(".overview > .note-mind-map");
       await expect(overviewMap.getByRole("status")).toHaveText("正在生成思维导图…");
+      await expect(inlineGenerate).toBeHidden();
       await page.reload();
       await expect(overviewMap.getByRole("status")).toHaveText("正在生成思维导图…");
       await panel.getByRole("button", { name: "上一份笔记" }).click();
-      await expect(panel.locator(".note-title")).toBeVisible();
-      await expect(panel.locator(".note-mind-map")).toHaveCount(0);
+      await expect(conciseMap.getByRole("button", generate)).toBeEnabled();
+      await expect(conciseMap.getByRole("img")).toHaveCount(0);
       await panel.getByRole("button", { name: "最新笔记" }).click();
       await expect(overviewMap.getByRole("status")).toHaveText("正在生成思维导图…");
 
@@ -72,7 +75,7 @@ for (const kind of ["video", "document"] as const) {
       await loaded(small);
       const src = await small.getAttribute("src");
       expect(src).toContain(`${root}/${latest}/image?v=`);
-      await expect(panel.locator(".overview > .summary-tags + .note-mind-map")).toBeVisible();
+      await expect(inlineGenerate).toBeHidden();
       if (video && test.info().project.name === "desktop-1280") {
         await overviewMap.scrollIntoViewIfNeeded();
         await page.screenshot({ path: test.info().outputPath("mind-map-desktop.png") });
@@ -100,22 +103,23 @@ for (const kind of ["video", "document"] as const) {
       await preview.getByRole("button", { name: "关闭思维导图" }).click();
       await expect(preview).toBeHidden();
 
-      const openRegenerate = async () => {
-        await menu.click();
-        await page.getByRole("button", { name: "重新生成思维导图", exact: true }).click();
-        return page.getByRole("dialog", { name: "重新生成思维导图" });
-      };
-      const regenerate = await openRegenerate();
+      const replace = { name: "重新生成思维导图", exact: true };
+      if (!video) await menu.click();
+      await (video ? overviewMap : menuActions).getByRole("button", replace).click();
+      const regenerate = page.getByRole("dialog", replace);
       await regenerate.getByRole("combobox").selectOption(invalid);
       await regenerate.getByRole("button", { name: "开始生成" }).click();
-      await expect(overviewMap.getByRole("button", { name: "重试生成" })).toBeVisible();
+      const retryGenerate = overviewMap.getByRole("button", { name: "重试生成" });
+      await expect(retryGenerate).toBeVisible();
       await expect(small).toHaveAttribute("src", src!);
       await page.reload();
       await expect(small).toHaveAttribute("src", src!);
 
       await panel.getByRole("button", { name: "上一份笔记" }).click();
-      await (await openSetup()).getByRole("button", { name: "开始生成" }).click();
-      const older = panel.locator(".note-title + .note-mind-map img");
+      if (!video) await menu.click();
+      await (video ? conciseMap : menuActions).getByRole("button", generate).click();
+      await setup.getByRole("button", { name: "开始生成" }).click();
+      const older = conciseMap.getByRole("img");
       await loaded(older);
       await expect(older).toHaveAttribute("src", new RegExp(`${previous}/image`));
       const mapTitle = panel.getByRole("heading", { name: "思维导图", exact: true });
@@ -144,9 +148,9 @@ for (const kind of ["video", "document"] as const) {
       await expect(small).toHaveAttribute("src", src!);
 
       await page.setViewportSize({ width: 375, height: 800 });
-      await menu.click();
-      const view = page.getByRole("button", { name: "查看思维导图" });
-      await expect(view).toBeInViewport();
+      if (!video) await menu.click();
+      const view = video ? thumbnail : menuActions.getByRole("button", { name: "查看思维导图" });
+      if (!video) await expect(view).toBeInViewport();
       await view.click();
       await expectFullScreen();
       await expect(preview.getByRole("button")).toHaveCount(1);
@@ -155,7 +159,8 @@ for (const kind of ["video", "document"] as const) {
       }
       await page.keyboard.press("Escape");
       await expect(preview).toBeHidden();
-      await openRegenerate();
+      if (!video) await menu.click();
+      await (video ? retryGenerate : menuActions.getByRole("button", replace)).click();
       await expect(regenerate.getByRole("combobox")).toBeInViewport();
       await expect(regenerate.getByRole("button", { name: "开始生成" })).toBeInViewport();
       if (video && test.info().project.name === "desktop-1280") {

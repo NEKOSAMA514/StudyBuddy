@@ -19,6 +19,7 @@ export function useNoteMindMap(kind: "video" | "document", taskId?: string) {
   const state = reading.confirmed ? reading.data : receipt || reading.data;
   const running = state?.status === "generating";
   const image = state?.image_revision ? apiUrl(`${path}/image?v=${state.image_revision}`) : null;
+  const canCreate = reading.confirmed && state?.status === "idle" && !image;
   const retry = reading.retry;
   useEffect(() => {
     if (reading.confirmed) setReceipt(null);
@@ -54,7 +55,7 @@ export function useNoteMindMap(kind: "video" | "document", taskId?: string) {
     }
   }
 
-  return { actions, dialog, setDialog, running, image, generate, retry, readError: reading.error,
+  return { actions, canCreate, dialog, setDialog, running, image, generate, retry, readError: reading.error,
     generationError: state?.error };
 }
 
@@ -135,15 +136,22 @@ function MindMapSetup({ replace, generate, close }: {
   </MindMapDialog>;
 }
 
-export function NoteMindMap({ map, title }: { map: ReturnType<typeof useNoteMindMap>; title: string }) {
-  const { dialog, setDialog, image, running, generationError, readError } = map;
+export function NoteMindMap({ map, title, inlineRegenerate }: {
+  map: ReturnType<typeof useNoteMindMap>; title: string; inlineRegenerate?: boolean;
+}) {
+  const { dialog, setDialog, canCreate, image, running, generationError, readError } = map;
   const close = () => setDialog(null);
   return <>
-    {(image || running || generationError || readError) && <section className="note-mind-map" aria-label="思维导图">
+    {(canCreate || image || running || generationError || readError) && <section className="note-mind-map" aria-label="思维导图">
       <h4>思维导图</h4>
+      {canCreate && <button type="button" className="secondary" aria-haspopup="dialog" onClick={() => setDialog("create")}>
+        生成思维导图
+      </button>}
       {image && <button type="button" className="mind-map-thumbnail" aria-label="放大思维导图" onClick={() => setDialog("preview")}>
         <img src={image} alt={`${title}的思维导图`} />
       </button>}
+      {inlineRegenerate && image && !generationError && <button type="button" className="secondary" aria-haspopup="dialog"
+        disabled={running} onClick={() => setDialog("replace")}>重新生成思维导图</button>}
       {running && <p className="muted" role="status">正在生成思维导图…</p>}
       {generationError && <div className="reader-state" role="status"><span>{errorText(generationError, "思维导图生成失败。")}</span>
         <button type="button" className="secondary" onClick={() => setDialog(image ? "replace" : "create")}>重试生成</button>

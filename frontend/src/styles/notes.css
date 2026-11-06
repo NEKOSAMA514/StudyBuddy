@@ -229,6 +229,10 @@
   margin: 0;
 }
 
+.note-mind-map > .secondary {
+  font-size: 14px;
+}
+
 .note-mind-map .mind-map-thumbnail {
   display: block;
   max-width: min(100%, 320px);
