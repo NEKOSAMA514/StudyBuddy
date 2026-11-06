@@ -303,9 +303,10 @@
   font-size: 22px;
 }
 
-.timeline {
+.timeline,
+.summary-panel[data-note-style="concise"] > .note-mind-map {
   max-width: 1280px;
-  margin: 0 auto;
+  margin-inline: auto;
 }
 
 .summary-section {
