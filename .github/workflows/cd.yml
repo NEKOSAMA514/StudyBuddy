@@ -119,7 +119,7 @@ jobs:
         run: |
           python -I -B scripts/portable/release.py verify
           if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP verification failed.' }
-          $zip = Join-Path $env:GITHUB_WORKSPACE "dist/StudyBuddy-v$env:RELEASE_VERSION-windows-x64-preview.zip"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist/StudyBuddy-v$env:RELEASE_VERSION-windows-x64.zip"
           $destination = Join-Path $env:RUNNER_TEMP "StudyBuddy 中文 验收/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           Expand-Archive -LiteralPath $zip -DestinationPath $destination
           "package=$(Join-Path $destination 'StudyBuddy-Windows-x64')" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8

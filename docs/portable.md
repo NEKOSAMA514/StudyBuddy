@@ -45,8 +45,8 @@ ZIP 排除 `.env`、用户 `data/`、`log/`、项目测试、报告、实验、�
 运行环境通过 conda-pack 打包后只解压入暂存目录，不执行路径修复。所有验证在原始 ZIP 的独立副本中进行。清单记录包内文件 SHA-256、尺寸、依赖、模型、工具与来源；清单不递归包含自身摘要，ZIP 外部 SHA-256 覆盖整个包。输出为：
 
 ```text
-dist/StudyBuddy-v1.0.0-windows-x64-preview.zip
-dist/StudyBuddy-v1.0.0-windows-x64-preview.zip.sha256
+dist/StudyBuddy-v1.0.0-windows-x64.zip
+dist/StudyBuddy-v1.0.0-windows-x64.zip.sha256
 ```
 
 第三方说明位于包内 `THIRD_PARTY_NOTICES.txt`，原始许可证、版权和模型声明位于 `licenses/`。依赖版本、来源和文件信息见 `release-manifest.json`。对应源码获取方式见随包的[源码说明](SOURCE.md)。[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases) 要求每个附件小于 2 GiB。

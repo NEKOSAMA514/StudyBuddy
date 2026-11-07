@@ -63,7 +63,7 @@ def check_release(repository, version, commit):
 
 
 def verify_zip(directory, version, commit):
-    archive = directory / f"StudyBuddy-{version_tag(version)}-windows-x64-preview.zip"
+    archive = directory / f"StudyBuddy-{version_tag(version)}-windows-x64.zip"
     for path in (archive, Path(str(archive) + ".sha256")):
         if path.stat().st_size >= ASSET_LIMIT:
             raise RuntimeError(f"Release asset must be smaller than 2 GiB: {path.name}")

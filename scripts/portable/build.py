@@ -332,7 +332,7 @@ def main(args):
                 "unpacked_bytes_excluding_manifest": sum(value["size"] for value in files.values()),
                 "manifest_excludes_itself": True, "files": files}
     (package / "release-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    zip_path = root / "dist" / f"StudyBuddy-v{args.version}-windows-x64-preview.zip"
+    zip_path = root / "dist" / f"StudyBuddy-v{args.version}-windows-x64.zip"
     if zip_path.exists() or zip_path.with_suffix(".zip.sha256").exists():
         raise FileExistsError(zip_path)
     with zipfile.ZipFile(zip_path, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=4, allowZip64=True) as output:

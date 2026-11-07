@@ -28,7 +28,7 @@ class ReleaseTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.assets = self.root / "dist/release"
         self.assets.mkdir(parents=True)
-        self.archive = self.assets / f"StudyBuddy-v{VERSION}-windows-x64-preview.zip"
+        self.archive = self.assets / f"StudyBuddy-v{VERSION}-windows-x64.zip"
         self.manifest = {"version": VERSION, "source": {"commit": COMMIT, "status": ""}}
         self.report = {"status": "passed", "mode": "smoke", "source_commit": COMMIT, "version": VERSION}
         self.write_zip()

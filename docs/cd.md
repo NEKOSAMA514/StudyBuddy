@@ -21,7 +21,7 @@ CD 为 Windows x64 CPU 便携预览版准备未公开的 Release 草稿。正常
 
 默认附件只有三份：
 
-- `StudyBuddy-v<版本>-windows-x64-preview.zip`：完整便携包。
+- `StudyBuddy-v<版本>-windows-x64.zip`：完整便携包。
 - 同名 `.zip.sha256`：ZIP 的 SHA-256 校验值。
 - `acceptance.json`：自动启动验收报告，记录版本、源码 SHA、检查结果及未执行项目。
 

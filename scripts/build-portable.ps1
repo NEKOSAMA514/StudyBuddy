@@ -33,7 +33,7 @@ foreach ($file in @('backend/requirements.lock', 'frontend/package-lock.json', '
     if (-not (Test-Path -LiteralPath (Join-Path $studyRoot $file) -PathType Leaf)) { throw "Missing build input: $file" }
 }
 $dist = Join-Path $studyRoot 'dist'
-$zip = Join-Path $dist "StudyBuddy-v$Version-windows-x64-preview.zip"
+$zip = Join-Path $dist "StudyBuddy-v$Version-windows-x64.zip"
 if ((Test-Path -LiteralPath $zip) -or (Test-Path -LiteralPath "$zip.sha256")) { throw "Output already exists: $zip" }
 $work = Join-Path $dist ('.build/' + [guid]::NewGuid().ToString('N').Substring(0, 10))
 $null = New-Item -ItemType Directory -Path $work -Force
