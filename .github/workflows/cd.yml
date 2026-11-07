@@ -1,0 +1,183 @@
+name: CD / Windows portable draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without v, e.g. 1.0.1-beta.1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  preflight:
+    name: Check version and draft
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Check out fixed source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check release inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I -B scripts/portable/release.py check
+
+  checks:
+    name: CI
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build and validate portable ZIP
+    needs: checks
+    runs-on: windows-2025
+    timeout-minutes: 120
+    outputs:
+      artifact-id: ${{ steps.attachments.outputs.artifact-id }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out fixed source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up build Python and Conda
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          activate-environment: portable-build
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Identify FFmpeg toolchain
+        id: toolchain
+        run: |
+          $key = python -I -B -c "import hashlib,json,runpy,sys; env=runpy.run_path('scripts/ffmpeg/build.py')['compiler_environment'](); print(hashlib.sha256(json.dumps([env['VCTOOLSVERSION'],env['WINDOWSSDKVERSION'],sys.version]).encode()).hexdigest()[:16])"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the required FFmpeg toolchain.' }
+          "key=$key" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Restore verified FFmpeg inputs
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: dist/cd-ffmpeg
+          key: ffmpeg-windows-x64-${{ steps.toolchain.outputs.key }}-${{ hashFiles('scripts/ffmpeg/**', 'scripts/build-ffmpeg.ps1', 'scripts/get-ffmpeg-bin.ps1', 'docs/ffmpeg-build.md', 'LICENSE') }}
+
+      - name: Build and verify FFmpeg on cache miss
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          python -I -m pip install --disable-pip-version-check portable-ffmpeg-full==0.5.0
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install reference FFmpeg.' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ffmpeg.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg build failed.' }
+          $builds = @(Get-ChildItem -LiteralPath dist/ffmpeg-minimal -Directory)
+          if ($builds.Count -ne 1) { throw 'Expected one FFmpeg build in this fresh checkout.' }
+          $manifest = Get-Content -LiteralPath (Join-Path $builds[0].FullName 'build-manifest.json') -Raw | ConvertFrom-Json
+          if ($manifest.status -ne 'verified') { throw 'FFmpeg build is not verified.' }
+          $null = New-Item -ItemType Directory -Path dist/cd-ffmpeg
+          foreach ($name in @('ffmpeg-win64.zip', 'ffmpeg-sources.zip', 'build-manifest.json', 'SHA256SUMS.txt')) {
+            Copy-Item -LiteralPath (Join-Path $builds[0].FullName $name) -Destination dist/cd-ffmpeg
+          }
+
+      - name: Build portable ZIP and revalidate FFmpeg inputs
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -Version $env:RELEASE_VERSION -FFmpegBuild dist/cd-ffmpeg
+          if ($LASTEXITCODE -ne 0) { throw 'Portable build failed.' }
+
+      - name: Cache verified FFmpeg inputs
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: dist/cd-ffmpeg
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
+
+      - name: Verify and extract an independent ZIP copy
+        id: extraction
+        run: |
+          python -I -B scripts/portable/release.py verify
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP verification failed.' }
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist/StudyBuddy-v$env:RELEASE_VERSION-windows-x64-preview.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "StudyBuddy 中文 验收/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          Expand-Archive -LiteralPath $zip -DestinationPath $destination
+          "package=$(Join-Path $destination 'StudyBuddy-Windows-x64')" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Run portable startup acceptance
+        env:
+          ACCEPTANCE_PACKAGE: ${{ steps.extraction.outputs.package }}
+        run: |
+          & (Join-Path $env:ACCEPTANCE_PACKAGE 'runtime/python.exe') -I -B -X utf8 scripts/portable/validate.py --package $env:ACCEPTANCE_PACKAGE --output dist/cd-validation --repo . --smoke-only
+          if ($LASTEXITCODE -ne 0) { throw 'Portable startup acceptance failed.' }
+
+      - name: Stage verified release attachments
+        run: python -I -B scripts/portable/release.py stage
+
+      - name: Upload verified attachments for draft job
+        id: attachments
+        uses: actions/upload-artifact@v7
+        with:
+          name: portable-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/release/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Save build and acceptance logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: portable-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/ffmpeg-minimal/*/build.log
+            dist/.build/*/*.log
+            dist/cd-validation/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+
+  draft:
+    name: Create or update unpublished release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out fixed source commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download verified attachments
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist/release/
+
+      - name: Recheck version and create draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I -B scripts/portable/release.py draft

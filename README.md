@@ -133,6 +133,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 |---|---|
 | [安装与使用](docs/usage.md) | 安装、首次设置、资料处理、阅读和导出 |
 | [Windows 便携包](docs/portable.md) | 便携包使用、构建和升级 |
+| [自动打包与发布草稿](docs/cd.md) | 手动启动 CD、查看日志、试用和发布 |
 | [架构与处理流程](docs/architecture.md) | 模块职责、数据流和关键设计 |
 | [开发与测试](docs/development.md) | 开发环境、测试入口和 Git 收录范围 |
 | [接口与运行契约](docs/contracts.md) | 任务状态、来源、配置快照和处理限制 |
