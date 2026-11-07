@@ -129,13 +129,18 @@ def local_capabilities(package, output, repo, speech_source):
 
 def main(args):
     package, output, repo = args.package.resolve(), args.output.resolve(), args.repo.resolve()
-    speech_source = args.speech.resolve(strict=True)
+    speech_source = args.speech.resolve(strict=True) if not args.smoke_only else None
     output.mkdir(parents=True, exist_ok=True)
-    summary = {"status": "failed", "clean_machine": False, "real_cloud_api": False, "checks": []}
+    summary = {"status": "failed", "mode": "smoke" if args.smoke_only else "full",
+               "clean_machine": False, "real_cloud_api": False, "checks": [],
+               "skipped": ["clean-windows-10-11", "real-cloud-api"]}
+    if args.smoke_only:
+        summary["skipped"].extend(["asr", "ocr", "media-processing", "document-extraction"])
     process = duplicate = None
     busy = None
     try:
         manifest = json.loads((package / "release-manifest.json").read_text(encoding="utf-8"))
+        summary.update(source_commit=manifest["source"]["commit"], version=manifest["version"])
         for name, record in manifest["files"].items():
             assert digest(package / name) == record["sha256"], name
             assert (package / name).stat().st_size == record["size"], name
@@ -202,20 +207,39 @@ def main(args):
         assert recovered["note_style"] == "concise" and recovered["summary_prompt"] == saved["summary_prompt"]
         ctrl_c(process, package / "runtime/python.exe")
         summary["checks"].append("settings-save-and-restart-recovery")
-        summary["capabilities"] = local_capabilities(package, output, repo, speech_source)
-        summary["checks"].append("real-asr-ocr-ffmpeg-pdf-office-and-child-paths")
+        if not args.smoke_only:
+            summary["capabilities"] = local_capabilities(package, output, repo, speech_source)
+            summary["checks"].append("real-asr-ocr-ffmpeg-pdf-office-and-child-paths")
         summary["status"] = "passed"
+    except Exception as error:
+        summary["error"] = str(error)
+        raise
     finally:
-        for child in (duplicate, process):
-            if child and child.poll() is None:
-                ctrl_c(child, package / "runtime/python.exe")
-        if busy:
-            busy.close()
-        (output / "acceptance.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            for child in (duplicate, process):
+                if child and child.poll() is None:
+                    ctrl_c(child, package / "runtime/python.exe")
+        except Exception as error:
+            summary.update(status="failed", cleanup_error=str(error))
+            summary.setdefault("error", str(error))
+            raise
+        finally:
+            if busy:
+                busy.close()
+            (output / "acceptance.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser()
+    for name in ("package", "output", "repo"):
+        parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--speech", type=Path)
+    parser.add_argument("--smoke-only", action="store_true")
+    args = parser.parse_args(argv)
+    if not args.smoke_only and args.speech is None:
+        parser.error("--speech is required unless --smoke-only is set")
+    return args
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    for name in ("package", "output", "repo", "speech"):
-        parser.add_argument("--" + name, type=Path, required=True)
-    main(parser.parse_args())
+    main(parse_args())

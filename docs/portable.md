@@ -67,3 +67,5 @@ python -B -m unittest discover -s scripts/portable -p test_portable.py -v
 ```
 
 语音样本需含“学习”“三角”或“数学”之一，图片测试使用 Windows 微软雅黑。工具核对清单，检查首次准备失败与重试、重复启动、端口回退、Ctrl+C、设置恢复及本地处理。素材和 `acceptance.json` 写入 `--output` 指定的目录，验收范围为本机运行与本地处理。
+
+仅做启动验收时，用 `--smoke-only` 替代 `--speech`。该模式仍检查清单、初始化、重复启动、端口回退、设置恢复及 Ctrl+C 退出，但跳过语音、OCR、媒体与文档处理，并在报告记录未执行项目。完整模式继续要求 `--speech`。GitHub 自动打包及草稿发布见 [CD 操作说明](cd.md)。
