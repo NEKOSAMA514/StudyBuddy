@@ -95,6 +95,43 @@ for (const kind of ["video", "document"] as const) {
       }
     }
   });
+  test(`${kind}笔记保留单波浪号，双波浪号仍表示删除线`, async ({ page, request }) => {
+    const video = kind === "video";
+    const files = video ? "videos" : "documents";
+    const tasks = video ? "tasks" : "document-tasks";
+    const analyses = video ? "analyses" : "document-analyses";
+    const uploaded = await request.post(`/api/v1/${files}`, { multipart: { file: {
+      name: video ? "波浪号保留.mp4" : "波浪号保留.txt", mimeType: video ? "video/mp4" : "text/plain",
+      buffer: video ? Buffer.concat([readFileSync(join(process.env.E2E_MEDIA_DIR!, "sample-vp9.mp4")), Buffer.from(test.info().project.name)])
+        : Buffer.from(`保留引语中的语气符号。${test.info().project.name}`),
+    } } });
+    expect(uploaded.ok()).toBe(true);
+    const file = await uploaded.json();
+    const created = await (await request.post(`/api/v1/${files}/${file.id}/analyses`, { data: { note_style: "detailed" } })).json();
+    await expect.poll(async () => (await (await request.get(`/api/v1/${tasks}/${created.task_id}`)).json()).status,
+      { timeout: 30000 }).toBe("succeeded");
+    await page.route(`**/api/v1/${analyses}/${created.task_id}`, async route => {
+      const response = await route.fetch();
+      const result = await response.json();
+      result.chapters[0].markdown = [
+        "引语：“哦~你在担心我啊。哦~”。",
+        String.raw`转义：“哦\~你在担心我啊。哦\~”。`,
+        "代码：`哦~你在担心我啊。哦~`。",
+        "~~应划掉的文字~~",
+        "| 原文 |\n| --- |\n| 哦~你在担心我啊。哦~ |",
+        "```text\n哦~你在担心我啊。哦~\n```",
+      ].join("\n\n");
+      await route.fulfill({ response, json: result });
+    });
+    await page.goto(`/#summary/${file.id}`);
+    const body = page.locator(video ? "#video-notes .note-markdown" : "#document-notes .note-markdown").first();
+    await expect(body.locator("p").filter({ hasText: "引语：" })).toHaveText("引语：“哦~你在担心我啊。哦~”。");
+    await expect(body.locator("p").filter({ hasText: "转义：" })).toHaveText("转义：“哦~你在担心我啊。哦~”。");
+    await expect(body.locator("p").filter({ hasText: "代码：" })).toHaveText("代码：哦~你在担心我啊。哦~。");
+    await expect(body.locator("del")).toHaveText(["应划掉的文字"]);
+    await expect(body.locator("table td")).toHaveText("哦~你在担心我啊。哦~");
+    await expect(body.locator("pre code")).toContainText("哦~你在担心我啊。哦~");
+  });
 }
 
 test("风格默认值保存、清空补充要求保留选择，统一输入仅一个字段", async ({ page, request }) => {

@@ -51,7 +51,7 @@ export default function NoteMarkdown({ children, onTimeJump, onSourceJump, densi
   }
   return <div className="note-markdown" data-density={density}><div className="markdown-content" ref={root}>
     <HeadingAction.Provider value={headingAction}><Markdown
-    remarkPlugins={[remarkGfm, remarkMath]}
+    remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
     rehypePlugins={[[rehypeKatex, { trust: false, maxSize: 10 }], [rehypeHighlight, { detect: false }], markdownAnchors(prefix, !!headingAction)]}
     skipHtml
     disallowedElements={["img"]}
