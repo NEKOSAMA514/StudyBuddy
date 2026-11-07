@@ -35,7 +35,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Docs
 
       - name: Test portable packaging
-        run: python -I -B -m unittest discover -s scripts/portable -p 'test_*.py' -v
+        run: python -I -B -X utf8 -m unittest discover -s scripts/portable -p 'test_*.py' -v
 
       - name: Run backend tests
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tests-local.ps1 -Suite Backend
