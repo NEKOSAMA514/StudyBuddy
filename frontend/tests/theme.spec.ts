@@ -1,5 +1,5 @@
 import { settingsRead } from "./support/settings";
-import { taskResponse } from "./support/taskContract";
+import { readEmptyMindMap, taskResponse } from "./support/taskContract";
 import { modelBudgets } from "./support/modelContract";
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -29,6 +29,7 @@ const models = ["paraformer", "rapidocr"].map(id => ({ id, kind: id === "parafor
 async function mockAPI(page: Page) {
   const unexpected: string[] = [];
   await page.route("**/api/v1/**", async route => {
+    if (await readEmptyMindMap(route)) return;
     const path = new URL(route.request().url()).pathname;
     let body: unknown;
     if (path === "/api/v1/health") body = { model_configured: true, free_tier_confirmed: true,

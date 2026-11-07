@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { taskResponse } from "./support/taskContract";
+import { readEmptyMindMap, taskResponse } from "./support/taskContract";
 import { modelBudgets } from "./support/modelContract";
 import { settingsRead } from "./support/settings";
 
@@ -25,6 +25,7 @@ async function reader(page: Page, kind: "video" | "document", failures = { notes
     start_seconds: 60, end_seconds: 120, markdown: "另一章正文。" });
   const writes: string[] = [];
   await page.route("**/api/v1/**", async route => {
+    if (await readEmptyMindMap(route)) return;
     const path = new URL(route.request().url()).pathname;
     if (path === `/api/v1/videos/${id}/content`) return route.fulfill({ contentType: "video/mp4", body: readFileSync(process.env.E2E_VIDEO_PATH!) });
     if (route.request().method() !== "GET") writes.push(path);

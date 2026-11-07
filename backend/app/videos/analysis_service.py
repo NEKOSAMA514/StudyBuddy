@@ -14,7 +14,7 @@ from .serialization import public
 from ..api_schemas import NotesPublic
 from .task_rules import active_task_query
 from ..analysis.markdown import normalize_math
-from .notes import completed_notes
+from ..note_versions import note_versions
 from ..settings.model_profiles import execution_profile, for_profile, find, active_id, task_model_config
 
 
@@ -83,7 +83,7 @@ class AnalysisService:
     def versions(self, video_id: str):
         with self.sessions() as session:
             get_video(session, video_id)
-            return [public(task) for task in completed_notes(session, video_id)[:2]]
+            return [public(task) for task in note_versions(session, "video", video_id)]
 
     def stop_task(self, task_id: str):
         with self.worker.lock:

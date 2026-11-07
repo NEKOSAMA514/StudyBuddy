@@ -1,0 +1,217 @@
+import { expect, test, type APIRequestContext, type Locator } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+async function version(request: APIRequestContext, kind: "video" | "document", fileId: string, style: string) {
+  const response = await request.post(`/api/v1/${kind}s/${fileId}/analyses`, { data: { note_style: style } });
+  expect(response.status()).toBe(202);
+  const { task_id } = await response.json();
+  const endpoint = kind === "video" ? "/api/v1/tasks" : "/api/v1/document-tasks";
+  await expect.poll(async () => (await (await request.get(`${endpoint}/${task_id}`)).json()).status,
+    { timeout: 20000 }).toBe("succeeded");
+  return task_id as string;
+}
+
+async function loaded(image: Locator) {
+  await expect(image).toBeVisible({ timeout: 12000 });
+  await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(1000);
+}
+
+for (const kind of ["video", "document"] as const) {
+  test(`${kind} 笔记导图在后台生成并按版本预览和下载`, async ({ page, request }) => {
+    expect((await (await request.get("/__test__/identity")).json()).fake_services_used).toBe(true);
+    const suffix = randomUUID();
+    const model = `e2e-mind-map-held-${suffix}`;
+    const profilePath = `/__test__/mind-maps/profiles?model=${model}`;
+    const profiles = await request.post(profilePath);
+    expect(profiles.ok()).toBe(true);
+    const { active, selected, invalid } = await profiles.json();
+    const video = kind === "video";
+    let id: string | undefined;
+    try {
+      const upload = await request.post(`/api/v1/${kind}s`, { multipart: { file: video ? {
+        name: `mind-map-${suffix}.mp4`, mimeType: "video/mp4",
+        buffer: Buffer.concat([readFileSync(process.env.E2E_VIDEO_PATH!), Buffer.from(suffix)]),
+      } : { name: `mind-map-${suffix}.txt`, mimeType: "text/plain",
+        buffer: Buffer.from(`学习笔记说明关键概念和适用条件。以下是例子和应当保留的限制。${suffix}`) } } });
+      expect(upload.status()).toBe(201);
+      id = (await upload.json()).id as string;
+      const previous = await version(request, kind, id, "concise");
+      const latest = await version(request, kind, id, "detailed");
+      const root = `/api/v1/note-mind-maps/${kind}`;
+      await page.goto(`/#summary/${id}`);
+      const panel = page.locator(`#${kind}-notes`);
+      const menu = panel.getByRole("button", { name: "笔记操作" });
+      const menuActions = panel.getByRole("group", { name: "笔记操作", exact: true });
+      const generate = { name: "生成思维导图", exact: true };
+      const overviewMap = panel.locator(".overview > .summary-tags + .note-mind-map");
+      const conciseMap = panel.locator(".note-title + .note-mind-map");
+      const inlineGenerate = overviewMap.getByRole("button", generate);
+      await expect(inlineGenerate).toBeVisible();
+      await expect(menu).toHaveCount(video ? 0 : 1);
+      await inlineGenerate.click();
+      const setup = page.getByRole("dialog", generate);
+      const picker = setup.getByRole("combobox", { name: "API 配置" });
+      await expect(picker).toHaveValue(active);
+      await expect(setup.getByRole("combobox")).toHaveCount(1);
+      await picker.selectOption(selected);
+      const sent = page.waitForRequest(req => req.method() === "POST" && req.url().endsWith(`${root}/${latest}`));
+      await setup.getByRole("button", { name: "开始生成" }).click();
+      expect((await sent).postDataJSON()).toEqual({ llm_profile_id: selected, replace_existing: false });
+      await expect(setup).toBeHidden();
+      await expect(overviewMap.getByRole("status")).toHaveText("正在生成思维导图…");
+      await expect(inlineGenerate).toBeHidden();
+      await page.reload();
+      await expect(overviewMap.getByRole("status")).toHaveText("正在生成思维导图…");
+      await panel.getByRole("button", { name: "上一份笔记" }).click();
+      await expect(conciseMap.getByRole("button", generate)).toBeEnabled();
+      await expect(conciseMap.getByRole("img")).toHaveCount(0);
+      await panel.getByRole("button", { name: "最新笔记" }).click();
+      await expect(overviewMap.getByRole("status")).toHaveText("正在生成思维导图…");
+
+      expect((await request.post(`/__test__/mind-maps/release?model=${model}`)).ok()).toBe(true);
+      const thumbnail = overviewMap.getByRole("button", { name: "放大思维导图" });
+      const small = thumbnail.getByRole("img");
+      await loaded(small);
+      const src = await small.getAttribute("src");
+      expect(src).toContain(`${root}/${latest}/image?v=`);
+      await expect(inlineGenerate).toBeHidden();
+      if (video && test.info().project.name === "desktop-1280") {
+        await overviewMap.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: test.info().outputPath("mind-map-desktop.png") });
+      }
+
+      await thumbnail.click();
+      const preview = page.getByRole("dialog", { name: "思维导图", exact: true });
+      const large = preview.getByRole("img");
+      const expectFullScreen = async () => {
+        await loaded(large);
+        expect(await preview.boundingBox()).toEqual({ x: 0, y: 0, ...page.viewportSize()! });
+        await expect(large).toHaveCSS("object-fit", "contain");
+      };
+      await expectFullScreen();
+      expect(await large.evaluate(element => element.dispatchEvent(
+        new MouseEvent("contextmenu", { button: 2, bubbles: true, cancelable: true })
+      ))).toBe(true);
+      const png = await request.get((await large.getAttribute("src"))!);
+      expect(png.headers()["content-type"]).toBe("image/png");
+      expect(png.headers()["content-disposition"]).toMatch(/^inline; .*\.png$/);
+      expect((await png.body()).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      if (video && test.info().project.name === "desktop-1280") {
+        await page.screenshot({ path: test.info().outputPath("mind-map-fullscreen-desktop.png") });
+      }
+      await preview.getByRole("button", { name: "关闭思维导图" }).click();
+      await expect(preview).toBeHidden();
+
+      const replace = { name: "重新生成思维导图", exact: true };
+      if (!video) await menu.click();
+      await (video ? overviewMap : menuActions).getByRole("button", replace).click();
+      const regenerate = page.getByRole("dialog", replace);
+      await regenerate.getByRole("combobox").selectOption(invalid);
+      await regenerate.getByRole("button", { name: "开始生成" }).click();
+      const retryGenerate = overviewMap.getByRole("button", { name: "重试生成" });
+      await expect(retryGenerate).toBeVisible();
+      await expect(small).toHaveAttribute("src", src!);
+      await page.reload();
+      await expect(small).toHaveAttribute("src", src!);
+
+      await panel.getByRole("button", { name: "上一份笔记" }).click();
+      if (!video) await menu.click();
+      await (video ? conciseMap : menuActions).getByRole("button", generate).click();
+      await setup.getByRole("button", { name: "开始生成" }).click();
+      const older = conciseMap.getByRole("img");
+      await loaded(older);
+      await expect(older).toHaveAttribute("src", new RegExp(`${previous}/image`));
+      const mapTitle = panel.getByRole("heading", { name: "思维导图", exact: true });
+      const subheading = panel.locator(".note-markdown[data-density=body] h2").first();
+      const mapSection = panel.locator(":scope > .note-mind-map");
+      const body = panel.locator(":scope > .timeline");
+      const typography = (element: Element) => {
+        const style = getComputedStyle(element);
+        return [style.fontFamily, style.fontSize, style.fontWeight, style.lineHeight, style.color];
+      };
+      const viewport = page.viewportSize()!;
+      for (const width of [1920, viewport.width, 686, 375]) {
+        await page.setViewportSize({ ...viewport, width });
+        expect(await mapTitle.evaluate(typography)).toEqual(await subheading.evaluate(typography));
+        const mapBox = (await mapSection.boundingBox())!;
+        const bodyBox = (await body.boundingBox())!;
+        expect([mapBox.x, mapBox.width]).toEqual([bodyBox.x, bodyBox.width]);
+        if (width === 1920) expect(bodyBox.width).toBe(1280);
+        if (video && test.info().project.name === "desktop-1280") {
+          await mapTitle.evaluate(element => element.scrollIntoView({ block: "center" }));
+          await page.screenshot({ path: test.info().outputPath(`mind-map-heading-${width}.png`), animations: "disabled" });
+        }
+      }
+      await page.setViewportSize(viewport);
+      await panel.getByRole("button", { name: "最新笔记" }).click();
+      await expect(small).toHaveAttribute("src", src!);
+
+      await page.setViewportSize({ width: 375, height: 800 });
+      if (!video) await menu.click();
+      const view = video ? thumbnail : menuActions.getByRole("button", { name: "查看思维导图" });
+      if (!video) await expect(view).toBeInViewport();
+      await view.click();
+      await expectFullScreen();
+      await expect(preview.getByRole("button")).toHaveCount(1);
+      if (video && test.info().project.name === "desktop-1280") {
+        await page.screenshot({ path: test.info().outputPath("mind-map-mobile.png") });
+      }
+      await page.keyboard.press("Escape");
+      await expect(preview).toBeHidden();
+      if (!video) await menu.click();
+      await (video ? retryGenerate : menuActions.getByRole("button", replace)).click();
+      await expect(regenerate.getByRole("combobox")).toBeInViewport();
+      await expect(regenerate.getByRole("button", { name: "开始生成" })).toBeInViewport();
+      if (video && test.info().project.name === "desktop-1280") {
+        await page.screenshot({ path: test.info().outputPath("mind-map-setup-mobile.png") });
+      }
+      await page.keyboard.press("Escape");
+      await expect(regenerate).toBeHidden();
+
+      const revision = new URL(src!, page.url()).searchParams.get("v");
+      let status = 200;
+      let polls = 0;
+      await page.route(`**${root}/${latest}`, route => {
+        if (route.request().method() !== "GET") return route.fallback();
+        polls++;
+        return route.fulfill({ status, json: status === 200
+          ? { status: "generating", image_revision: revision, error: null }
+          : { error: { message: "读取失败", error_id: "test-mind-map-status", log_saved: true } } });
+      });
+      await page.clock.install();
+      await page.reload();
+      await expect(overviewMap.getByText("正在生成思维导图…")).toBeVisible();
+      const readError = overviewMap.getByText("思维导图状态读取失败。");
+      status = 503;
+      await page.clock.runFor(1300);
+      await expect(readError).toBeVisible();
+      await expect(small).toHaveAttribute("src", src!);
+      status = 200;
+      const recovered = page.waitForResponse(response => response.url().endsWith(`${root}/${latest}`) && response.ok());
+      await page.clock.runFor(4100);
+      await recovered;
+      await expect(readError).toBeHidden();
+      await expect(overviewMap.getByText("正在生成思维导图…")).toBeVisible();
+
+      await thumbnail.click();
+      await expect(preview).toBeVisible();
+      status = video ? 409 : 404;
+      await page.clock.runFor(1300);
+      await expect(preview).toBeHidden();
+      await expect(overviewMap.getByRole("status")).toHaveText("当前笔记版本已不可用，请切换版本或刷新页面");
+      await expect(overviewMap.getByRole("button")).toHaveCount(0);
+      await expect(menu).toHaveCount(0);
+      await expect(body).toBeVisible();
+      const stoppedAt = polls;
+      await page.clock.runFor(8200);
+      expect(polls).toBe(stoppedAt);
+      await panel.getByRole("button", { name: "上一份笔记" }).click();
+      await expect(older).toHaveAttribute("src", new RegExp(`${previous}/image`));
+    } finally {
+      await request.post(`/__test__/mind-maps/release?model=${model}`);
+      if (id) await request.delete(`/api/v1/${kind}s/${id}`);
+      await request.delete(profilePath);
+    }
+  });
+}

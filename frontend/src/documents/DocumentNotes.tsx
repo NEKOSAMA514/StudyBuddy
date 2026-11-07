@@ -6,6 +6,7 @@ import { apiUrl } from "../api";
 import type { DocumentNotesResult, DocumentTask } from "../types";
 import { ChapterNavigator } from "../notes/ChapterNavigator";
 import { NoteMarkButton, useNoteMarks } from "../notes/NoteMarks";
+import { NoteMindMap, useNoteMindMap } from "../notes/NoteMindMap";
 
 const Markdown = lazy(() => import("../notes/NoteMarkdown"));
 
@@ -20,21 +21,27 @@ export function DocumentNotes({ result, reading, versionReading, task, versions,
   const chapters = result?.chapters || [];
   const concise = result?.note_style === "concise";
   const marks = useNoteMarks("document", task?.id, !!result?.complete && task?.status === "succeeded");
+  const hasOverview = !concise && !!(result?.overview_paragraphs.length || task?.config.outline_preview);
+  const mindMap = useNoteMindMap("document", result?.complete && task?.status === "succeeded" ? task.id : undefined);
+  const mindMapView = <NoteMindMap map={mindMap} title={result?.title || ""} />;
   return <NotesPanel id="document-notes" title="文档笔记" notesRef={root} style={result?.note_style}
     navigation={!concise && chapters.length >= 2 ? <ChapterNavigator chapters={chapters.map(c => ({ ...c, source_label: c.source_labels.join("；") }))}
       notesRef={root} anchorPrefix="document-note" /> : undefined}
     downloads={result && task ? { txt: apiUrl(`/document-analyses/${task.id}/notes?format=txt`),
       md: apiUrl(`/document-analyses/${task.id}/notes?format=md`) } : undefined}
+    actions={mindMap.actions}
     versions={{ ...versionReading, visible: true, selectedId: task?.id, latestId: versions[0]?.id,
       previousId: versions[1]?.id, select, returnToGeneration }} reading={reading}>
     {result?.complete === false && <p className="notes-partial" role="status">未完成笔记 · 已完成 {result.completed_segments}/{result.total_segments} 段 · 覆盖至 {result.covered_until_unit} 的第 {result.covered_until_offset} 字符</p>}
-    {!concise && (result?.overview_paragraphs.length || task?.config.outline_preview) ? <div className="overview">
+    {hasOverview && <div className="overview">
       <span className="eyebrow">材料导览</span>
       {result?.overview_paragraphs.length ? <><h3>{result.title}</h3>{result.overview_paragraphs.map((p, i) => <p key={i}>{p}</p>)}
         <ul className="summary-tags">{result.tags.map((tag, i) => <li key={i}>#{tag}</li>)}</ul></> : <p>{task?.config.outline_preview}</p>}
-    </div> : null}
+      {mindMapView}
+    </div>}
     {!result && !reading.loading && !reading.error && <EmptyNotes />}
     {concise && <h3 className="note-title">{result.title}</h3>}
+    {!hasOverview && mindMapView}
     {marks.notice}
     <div className="timeline">{chapters.map(chapter => <article className="summary-section" id={`document-note-${chapter.chapter_id}`} tabIndex={-1} key={chapter.chapter_id}>
       <DocumentSourceLabel labels={chapter.source_labels} />

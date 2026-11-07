@@ -1,11 +1,54 @@
-import type { ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import type { NoteStyle } from "../types";
 import type { ReadState } from "./useNoteResult";
 
+type NoteAction = { label: string; disabled?: boolean; onSelect: () => void };
+
+function NoteActions({ actions }: { actions: NoteAction[] }) {
+  const id = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const place = useCallback(() => {
+    const popup = menu.current;
+    const anchor = trigger.current?.getBoundingClientRect();
+    if (!popup?.matches(":popover-open") || !anchor) return;
+    if (anchor.bottom < 0 || anchor.top > window.innerHeight) {
+      popup.hidePopover();
+      return;
+    }
+    const below = anchor.bottom + 4;
+    popup.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - popup.offsetWidth - 8))}px`;
+    popup.style.top = `${below + popup.offsetHeight <= window.innerHeight ? below : Math.max(8, anchor.top - popup.offsetHeight - 4)}px`;
+  }, []);
+  useEffect(() => {
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [place]);
+  return <>
+    <button ref={trigger} type="button" className="file-menu-trigger" aria-label="笔记操作" popoverTarget={id}>⋯</button>
+    <div id={id} ref={menu} className="file-action-menu note-action-menu" popover="auto" role="group" aria-label="笔记操作"
+      onToggle={event => {
+        if (event.newState !== "open") return;
+        place();
+        event.currentTarget.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus({ preventScroll: true });
+      }}>
+      {actions.map(action => <button key={action.label} type="button" disabled={action.disabled} onClick={() => {
+        menu.current!.hidePopover();
+        action.onSelect();
+      }}>{action.label}</button>)}
+    </div>
+  </>;
+}
+
 // 共用笔记标题、下载和版本控件，正文内容仍由视频与文档各自组织。
-export function NotesPanel({ id, title, notesRef, style, navigation, downloads, versions, reading, children }: {
+export function NotesPanel({ id, title, notesRef, style, navigation, downloads, actions, versions, reading, children }: {
   id: string; title: string; notesRef: RefObject<HTMLElement | null>; style?: NoteStyle;
   navigation?: ReactNode; downloads?: { txt: string; md: string };
+  actions?: NoteAction[];
   versions: ReadState & { visible: boolean; selectedId?: string; latestId?: string; previousId?: string;
     select: (id: string) => void; returnToGeneration: () => void };
   reading: ReadState; children: ReactNode;
@@ -13,7 +56,8 @@ export function NotesPanel({ id, title, notesRef, style, navigation, downloads, 
   return <section ref={notesRef} id={id} tabIndex={-1} data-note-style={style}
     className={`panel summary-panel${navigation ? " has-chapter-navigation" : ""}`}>
     {navigation}
-    <div className="panel-header"><h2>{title}</h2>
+    <div className="panel-header">
+      <div className="notes-heading"><h2>{title}</h2>{!!actions?.length && <NoteActions actions={actions} />}</div>
       {downloads && <div className="notes-downloads">
         <a className="secondary notes-download" href={downloads.txt} download>下载 TXT</a>
         <a className="secondary notes-download" href={downloads.md} download>下载 Markdown</a>

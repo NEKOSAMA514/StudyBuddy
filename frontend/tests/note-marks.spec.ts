@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { taskResponse } from "./support/taskContract";
+import { readEmptyMindMap, taskResponse } from "./support/taskContract";
 
 const cases: { name: string; markdown: string; count: number }[] = JSON.parse(readFileSync(resolve("../backend/tests/fixtures/note-mark-headings.json"), "utf8"));
 function gate() {
@@ -30,6 +30,7 @@ async function reader(page: Page, kind: "video" | "document", style: "concise" |
     readGate: null as ReturnType<typeof gate> | null, saveGate: null as ReturnType<typeof gate> | null,
   };
   await page.route("**/api/v1/**", async route => {
+    if (await readEmptyMindMap(route)) return;
     const path = new URL(route.request().url()).pathname.replace("/api/v1", ""), method = route.request().method();
     let json: unknown;
     if (path === "/note-marks" && method === "GET") {

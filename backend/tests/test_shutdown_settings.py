@@ -103,9 +103,15 @@ def test_worker_stop_notifies_active_task_and_waits_outside_dispatch_lock(client
 @pytest.mark.parametrize("style", ["concise", "detailed"])
 @pytest.mark.parametrize("user_stop", [False, True])
 def test_shutdown_cancels_inflight_generation_keeps_checkpoints_and_resumes(client, app, video_file, monkeypatch, kind, style, user_stop):
+    from types import SimpleNamespace
+
     assert client.put("/api/v1/settings/model", json={"token": "fake-shutdown-key"}).status_code == 200
     entered, cleaned = threading.Event(), threading.Event()
     pending, calls = [], []
+    # Advance the pipeline clock on cancellation to verify elapsed-time persistence deterministically.
+    clock = [0.0]
+    pipeline_module = "app.videos.pipeline" if kind == "video" else "app.documents.pipeline"
+    monkeypatch.setattr(f"{pipeline_module}.time", SimpleNamespace(monotonic=lambda: clock[0]))
     blocking = True
     class VideoModel(FakeModel):
         async def generate(self, operation, payload, validate):
@@ -120,6 +126,7 @@ def test_shutdown_cancels_inflight_generation_keeps_checkpoints_and_resumes(clie
                 try:
                     await future
                 finally:
+                    clock[0] += 1.25
                     self.cancelled_calls += 1
                     cleaned.set()
             if kind == "document" and operation == "outline":
@@ -170,7 +177,7 @@ def test_shutdown_cancels_inflight_generation_keeps_checkpoints_and_resumes(clie
         assert task.status == ("paused" if user_stop else "interrupted") and task.attempts == 1
         assert task.error is None if user_stop else task.error["code"] == "interrupted"
         assert "execution_stats" not in task.config
-        assert task.timings["total"] > 0
+        assert task.timings["total"] == 1.25
         assert ("concise" if style == "concise" else "summarizing") in task.timings
     with app.state.sessions.begin() as session:
         session.get(table, identifier).status = "queued"
