@@ -1,5 +1,19 @@
 # StudyBuddy
 
+## 最近更新
+
+### v1.1.1
+
+- **新增 PNG 思维导图**：以已生成的视频或文档笔记为基础，选择大模型 API 配置生成导图，支持缩略图、全屏查看、右键保存和重新生成。每个笔记版本单独保存导图，刷新后仍可查看。
+- **修复波浪号误触发删除线**：单个 `~` 按原文显示，标准的 `~~删除线~~` 写法仍然有效。已有笔记更新后即可正常显示，无需重新生成。
+
+## 使用方式
+
+- **下载便携版。** 从 [Releases](https://github.com/NEKOSAMA514/StudyBuddy/releases) 下载 Windows x64 ZIP，完整解压到固定、可写的目录，再双击 `启动.cmd`。
+- **从源码运行。** 创建 Conda 环境，安装 Python 3.12、Node.js/npm 和包含 FFmpeg 9.0.2 的 pip 依赖。[安装说明](docs/usage.md#安装并启动) · [环境清单](environment.yml) · [Python 依赖](backend/requirements.txt)
+
+## 项目介绍
+
 **将课程视频、课件和文档整理成能回看来源的学习笔记。**
 
 ![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB?style=flat-square&logo=react)
@@ -14,18 +28,6 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。它从视频、
 **Windows x64 · 本地运行 · 视频与文档 · GPLv3**
 
 [使用方式](#使用方式) · [最近更新](#最近更新) · [功能特性](#功能特性) · [开发与构建](#开发与构建) · [使用文档](#使用文档)
-
-## 使用方式
-
-- **下载便携版。** 从 [Releases](https://github.com/NEKOSAMA514/StudyBuddy/releases) 下载 Windows x64 ZIP，完整解压到固定、可写的目录，再双击 `启动.cmd`。
-- **从源码运行。** 创建 Conda 环境，安装 Python 3.12、Node.js/npm 和包含 FFmpeg 9.0.2 的 pip 依赖。[安装说明](docs/usage.md#安装并启动) · [环境清单](environment.yml) · [Python 依赖](backend/requirements.txt)
-
-## 最近更新
-
-### v1.1.1
-
-- **新增 PNG 思维导图**：以已生成的视频或文档笔记为基础，选择大模型 API 配置生成导图，支持缩略图、全屏查看、右键保存和重新生成。每个笔记版本单独保存导图，刷新后仍可查看。
-- **修复波浪号误触发删除线**：单个 `~` 按原文显示，标准的 `~~删除线~~` 写法仍然有效。已有笔记更新后即可正常显示，无需重新生成。
 
 ## 功能特性
 
