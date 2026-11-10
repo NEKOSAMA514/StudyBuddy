@@ -3,6 +3,7 @@ import { FileMenu, type FileAction } from "./files/FileActions";
 import type { LibraryFile } from "./types";
 import type { Mode, Navigate } from "./navigation";
 import { clock } from "./util/time";
+import { Icon } from "./Icon";
 
 // 共用文件列表展示侧栏导航，并把文件操作和页面切换交回应用层。
 export function Sidebar({
@@ -50,7 +51,7 @@ export function Sidebar({
         aria-label="笔记中心"
         onClick={() => navigate("notes")}
       >
-        <span>◈</span> 笔记中心
+        <Icon name="notebook-pen" /> 笔记中心
       </button>
       <div className="nav-label">总结分析模式</div>
       <button
@@ -58,7 +59,7 @@ export function Sidebar({
         aria-label="开始总结"
         onClick={() => navigate("summary")}
       >
-        <span>▤</span> 开始总结
+        <Icon name="panels-top-left" /> 开始总结
       </button>
       <div className="history-label">
         文件 <span>{library.length}</span>
@@ -78,12 +79,10 @@ export function Sidebar({
                   navigate("summary", file.id);
                 }}
               >
-                <span
+                <Icon
+                  name={file.kind === "document" ? "file-text" : "video"}
                   className={`file-glyph ${status || ""}`}
-                  aria-hidden="true"
-                >
-                  {file.kind === "document" ? "▤" : "▶"}
-                </span>
+                />
                 <span className="library-name">
                   {file.filename}
                   <small>

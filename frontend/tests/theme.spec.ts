@@ -129,7 +129,7 @@ for (const theme of ["light", "dark"] as const) {
         await expect(item.locator(".file-glyph")).toHaveCSS("color", expected[index]);
       }
       await expect(page.locator(".sidebar .file-glyph.failed")).toHaveCSS("color", expected[2]);
-      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveText("▤");
+      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveAttribute("data-icon", "file-text");
       const ratios = await page.locator(".sidebar .file-glyph").evaluateAll(elements => {
         const root = getComputedStyle(document.documentElement);
         const rgb = (color: string) => color.match(/[\d.]+/g)!.slice(0, 3).map(Number);
@@ -137,14 +137,15 @@ for (const theme of ["light", "dark"] as const) {
           .map(n => n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4)
           .reduce((sum, n, i) => sum + n * [0.2126, 0.7152, 0.0722][i], 0);
         const backgrounds = [getComputedStyle(document.querySelector(".sidebar")!).backgroundColor,
-          ...["--surface", "--surface-hover"].map(name => {
+          ...["--surface", "--surface-hover", "--primary-soft"].map(name => {
             const raw = root.getPropertyValue(name).trim().slice(1);
             const hex = raw.length === 3 ? [...raw].map(c => c + c).join("") : raw;
             return `rgb(${[0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)).join(",")})`;
           })];
         return elements.flatMap(element => {
           const style = getComputedStyle(element);
-          const color = parseFloat(style.webkitTextStrokeWidth) > 0 ? style.webkitTextStrokeColor : style.color;
+          const outline = getComputedStyle(element.querySelector(".icon-outline")!).stroke;
+          const color = outline === "none" ? style.stroke : outline;
           return backgrounds.map(background => {
             const a = luminance(color), b = luminance(background);
             return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);

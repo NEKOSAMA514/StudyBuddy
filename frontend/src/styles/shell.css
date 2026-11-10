@@ -52,9 +52,10 @@
   background: var(--surface-hover, #eaeaec);
 }
 
-.mode-link span {
-  font-size: 19px;
+.mode-link > svg {
   width: 20px;
+  height: 32px;
+  flex-shrink: 0;
 }
 
 .nav-label {
@@ -169,21 +170,21 @@
 }
 
 .file-glyph {
-  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
   color: var(--text-secondary, #777);
 }
 
 .file-glyph.queued,
 .file-glyph.running {
   color: var(--file-icon-running);
-  -webkit-text-stroke: 0.6px var(--warning);
-  paint-order: stroke fill;
+  --icon-outline: var(--warning);
 }
 
 .file-glyph.succeeded {
   color: var(--file-icon-completed);
-  -webkit-text-stroke: 0.5px var(--success);
-  paint-order: stroke fill;
+  --icon-outline: var(--success);
 }
 
 .file-glyph.stopping,
