@@ -75,7 +75,7 @@
 }
 .home-options small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary, #8e8e8e);
   margin-top: 7px;
 }
@@ -88,7 +88,7 @@
 .home-footnote {
   display: flex;
   gap: 24px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary, #a2a2a2);
   margin-top: 32px;
 }

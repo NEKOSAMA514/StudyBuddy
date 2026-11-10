@@ -60,7 +60,7 @@
 .nav-label {
   margin: 24px 12px 8px;
   color: var(--text-secondary, #8a8a8d);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .history-label {
@@ -68,7 +68,7 @@
   justify-content: space-between;
   margin: 30px 12px 10px;
   color: var(--text-secondary, #909094);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sidebar nav {
@@ -203,7 +203,7 @@
 .library-name small {
   display: block;
   color: var(--text-secondary, #929295);
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 2px;
 }
 
@@ -218,7 +218,7 @@
   padding: 20px 12px 0;
   border-top: 1px solid var(--border, #e4e4e7);
   color: var(--text-secondary, #777);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sidebar-bottom p {

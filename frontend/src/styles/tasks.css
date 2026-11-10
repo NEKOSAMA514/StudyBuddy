@@ -61,7 +61,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary, #999);
   margin-top: 12px;
 }
@@ -133,13 +133,13 @@
 
 .workflow-steps small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 2px;
   color: var(--text-secondary, #aaa);
 }
 
 .step-state {
-  font-size: 11px;
+  font-size: 12px;
   margin-left: auto;
   white-space: nowrap;
 }

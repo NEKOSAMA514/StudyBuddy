@@ -77,7 +77,7 @@
     font-size: 25px;
   }
   .home-screen > p {
-    font-size: 11px;
+    font-size: 12px;
   }
   .home-options {
     gap: 12px;
@@ -89,7 +89,7 @@
     font-size: 15px;
   }
   .home-options small {
-    font-size: 10px;
+    font-size: 12px;
   }
   .option-arrow {
     right: 14px;
@@ -97,7 +97,7 @@
   }
   .home-footnote {
     gap: 12px;
-    font-size: 9px;
+    font-size: 12px;
   }
   .heading {
     margin-top: 20px;
