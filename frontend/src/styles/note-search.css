@@ -1,7 +1,7 @@
 /* 搜索和重点列表共用内容宽度与命中排版，保留标题、摘要和来源的层级。 */
 .note-search { max-width: 960px; margin: 0 auto; min-width: 0; }
 .note-center-views { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-.note-center-views a[aria-current="page"] { background: var(--surface-hover); border-color: var(--border-strong); font-weight: 600; box-shadow: inset 0 -3px var(--border-strong); }
+.note-center-views a[aria-current="page"] { background: var(--primary-soft); border-color: var(--primary); font-weight: 600; box-shadow: inset 0 -3px var(--primary); }
 .note-center-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0; }
 .note-center-status p { flex: 1; min-width: 0; }
 .note-search-form { margin: 24px 0; }

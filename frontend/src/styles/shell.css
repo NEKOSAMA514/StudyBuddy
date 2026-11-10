@@ -353,4 +353,5 @@ main {
     border: 0;
   }
 }
-.mode-link.active, .library-item.selected { box-shadow: inset 3px 0 0 var(--border-strong); }
+.mode-link.active, .library-row.selected, .library-item.selected { background: var(--primary-soft); }
+.mode-link.active, .library-item.selected { box-shadow: inset 3px 0 0 var(--primary); }

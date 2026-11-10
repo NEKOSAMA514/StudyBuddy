@@ -42,8 +42,8 @@
 
 .transcript-tabs button[aria-selected="true"] {
   color: var(--text, #242424);
-  background: var(--surface-hover, #f4f4f5);
-  border-color: var(--border-strong);
+  background: var(--primary-soft);
+  border-color: var(--primary);
 }
 
 .transcript-tabs span {
