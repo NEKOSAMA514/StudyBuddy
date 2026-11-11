@@ -23,6 +23,12 @@ export function Sidebar({
   onAction: (file: LibraryFile, action: FileAction) => void;
   onCollapse: () => void;
 }) {
+  const pinnedFiles = library.filter((file) => file.pinned);
+  const groups = [
+    ...(pinnedFiles.length ? [{ label: "置顶文件", ariaLabel: "置顶文件", files: pinnedFiles }] : []),
+    { label: "文件列表", ariaLabel: "侧栏文件列表", files: library.filter((file) => !file.pinned) },
+  ];
+
   return (
     <aside className="sidebar" id="main-sidebar">
       <div className="sidebar-header">
@@ -61,44 +67,48 @@ export function Sidebar({
       >
         <Icon name="panels-top-left" /> 开始总结
       </button>
-      <div className="history-label">
-        文件 <span>{library.length}</span>
-      </div>
       <nav aria-label="已上传的文件">
-        {library.map((file) => {
-          const status = file.latest_task?.status;
-          return (
-            <div
-              className={`library-row ${activeFileId === file.id ? "selected" : ""}`}
-              key={file.id}
-            >
-              <button
-                disabled={busy}
-                className={`library-item ${activeFileId === file.id ? "selected" : ""}`}
-                onClick={() => {
-                  navigate("summary", file.id);
-                }}
-              >
-                <Icon
-                  name={file.kind === "document" ? "file-text" : "video"}
-                  className={`file-glyph ${status || ""}`}
-                />
-                <span className="library-name">
-                  {file.filename}
-                  <small>
-                    {file.pinned ? "置顶 · " : ""}
-                    <>{file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {status === "succeeded" ? "已总结" : status ? taskStatusLabels[status] : file.kind === "document" ? file.extracted === false ? "待处理" : "已提取" : "待分析"}</>
-                  </small>
-                </span>
-              </button>
-              <FileMenu
-                file={file}
-                disabled={busy}
-                onAction={(action) => onAction(file, action)}
-              />
-            </div>
-          );
-        })}
+        {groups.map(({ label, ariaLabel, files }) => (
+          <section aria-label={ariaLabel} key={label}>
+            <h2 className="history-label">
+              {label} <span>{files.length}</span>
+            </h2>
+            {files.map((file) => {
+              const status = file.latest_task?.status;
+              return (
+                <div
+                  className={`library-row ${activeFileId === file.id ? "selected" : ""}`}
+                  key={file.id}
+                >
+                  <button
+                    disabled={busy}
+                    className={`library-item ${activeFileId === file.id ? "selected" : ""}`}
+                    onClick={() => {
+                      navigate("summary", file.id);
+                    }}
+                  >
+                    <Icon
+                      name={file.kind === "document" ? "file-text" : "video"}
+                      className={`file-glyph ${status || ""}`}
+                    />
+                    <span className="library-name">
+                      {file.filename}
+                      <small>
+                        {file.pinned ? "置顶 · " : ""}
+                        <>{file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {status === "succeeded" ? "已总结" : status ? taskStatusLabels[status] : file.kind === "document" ? file.extracted === false ? "待处理" : "已提取" : "待分析"}</>
+                      </small>
+                    </span>
+                  </button>
+                  <FileMenu
+                    file={file}
+                    disabled={busy}
+                    onAction={(action) => onAction(file, action)}
+                  />
+                </div>
+              );
+            })}
+          </section>
+        ))}
       </nav>
       {!library.length && (
         <p className="library-empty">
