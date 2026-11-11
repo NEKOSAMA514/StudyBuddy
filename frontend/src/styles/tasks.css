@@ -160,8 +160,8 @@
 
 .workflow-steps .current .step-number {
   color: var(--primary-text, white);
-  background: var(--primary, #333);
-  border-color: var(--primary);
+  background: var(--primary-action, #333);
+  border-color: var(--primary-action);
 }
 
 .task-activity { margin: 16px 0; padding: 16px; border-radius: 12px; background: var(--surface-muted); font-size: 13px; line-height: 1.7; min-width: 0; }

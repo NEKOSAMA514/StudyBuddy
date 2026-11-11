@@ -101,7 +101,7 @@ test.afterEach(async ({ page }) => {
 });
 
 for (const theme of ["light", "dark"] as const) {
-  test(`侧栏任务图标在${theme}主题保持亮色和状态区分`, async ({ page }) => {
+  test(`侧栏任务图标在${theme}主题保持对比度和状态区分`, async ({ page }) => {
     test.skip(test.info().project.name !== "desktop-1280", "用例内部已遍历完整尺寸矩阵，只执行一次。");
     await page.addInitScript(value => localStorage.setItem("studybuddy-theme", value), theme);
     const examples = [
@@ -121,7 +121,7 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto("/");
       if (width === 375) await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
       const expected = theme === "light"
-        ? ["rgb(242, 196, 13)", "rgb(40, 189, 100)", "rgb(226, 54, 54)"]
+        ? ["rgb(115, 80, 22)", "rgb(36, 98, 61)", "rgb(226, 54, 54)"]
         : ["rgb(232, 201, 138)", "rgb(169, 216, 191)", "rgb(255, 180, 180)"];
       for (const [index, file] of examples.entries()) {
         const item = page.locator(".sidebar .library-item").filter({ hasText: file.filename });
@@ -143,9 +143,7 @@ for (const theme of ["light", "dark"] as const) {
             return `rgb(${[0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)).join(",")})`;
           })];
         return elements.flatMap(element => {
-          const style = getComputedStyle(element);
-          const outline = getComputedStyle(element.querySelector(".icon-outline")!).stroke;
-          const color = outline === "none" ? style.stroke : outline;
+          const color = getComputedStyle(element).stroke;
           return backgrounds.map(background => {
             const a = luminance(color), b = luminance(background);
             return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);

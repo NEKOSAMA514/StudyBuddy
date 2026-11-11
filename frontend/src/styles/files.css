@@ -5,7 +5,7 @@
 }
 
 .file-upload {
-  border: 1px dashed var(--border-strong, #cfcfcf);
+  border: 1px dashed var(--primary);
   border-radius: 18px;
   background: var(--surface-muted, #fafafa);
   overflow: hidden;
@@ -14,8 +14,7 @@
 }
 
 .file-upload.dragging {
-  border-color: var(--border-strong, #555);
-  background: var(--surface-hover, #eeeeef);
+  background: var(--primary-soft);
 }
 
 .file-upload-button {
@@ -45,7 +44,7 @@
   font-size: 54px;
   font-weight: 300;
   line-height: 1;
-  color: var(--text-secondary, #777);
+  color: var(--primary);
 }
 
 .file-upload-button strong {

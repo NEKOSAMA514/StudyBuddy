@@ -29,6 +29,10 @@
   letter-spacing: -0.5px;
 }
 
+.brand span {
+  color: var(--primary-active-text);
+}
+
 .sidebar-header .desktop-sidebar-toggle {
   background: transparent;
   border-color: transparent;
@@ -178,13 +182,11 @@
 
 .file-glyph.queued,
 .file-glyph.running {
-  color: var(--file-icon-running);
-  --icon-outline: var(--warning);
+  color: var(--warning);
 }
 
 .file-glyph.succeeded {
-  color: var(--file-icon-completed);
-  --icon-outline: var(--success);
+  color: var(--success);
 }
 
 .file-glyph.stopping,
@@ -356,3 +358,4 @@ main {
 }
 .mode-link.active, .library-row.selected, .library-item.selected { background: var(--primary-soft); }
 .mode-link.active, .library-item.selected { box-shadow: inset 3px 0 0 var(--primary); }
+.mode-link.active { color: var(--primary-active-text); }

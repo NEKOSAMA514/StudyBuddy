@@ -27,7 +27,7 @@ export function Sidebar({
     <aside className="sidebar" id="main-sidebar">
       <div className="sidebar-header">
         <a className="brand" href="/">
-          StudyBuddy
+          Study<span>Buddy</span>
         </a>
         <button
           className="desktop-sidebar-toggle"

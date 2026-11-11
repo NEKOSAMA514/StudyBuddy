@@ -54,20 +54,12 @@ export function Icon({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.6"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
     >
-      {/* 亮色任务图标沿用深色描边，保持小尺寸下的对比度。 */}
-      <g
-        className="icon-outline"
-        stroke="var(--icon-outline, none)"
-        strokeWidth="3.2"
-      >
-        {icons[name]}
-      </g>
       {icons[name]}
     </svg>
   );

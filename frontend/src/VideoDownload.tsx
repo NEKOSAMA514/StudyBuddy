@@ -31,7 +31,7 @@ export function VideoDownload({ onGenerateNotes, disabled }: {
       <div className="video-link-controls">
         <input id="video-link" type="text" required placeholder="粘贴视频链接、B站分享文案或 BV 号" value={url} disabled={busy || running}
           onChange={event => changeUrl(event.target.value)} />
-        <button type="submit" className="secondary" disabled={busy || running || !url.trim()}>{busy && !task ? "正在解析…" : "解析链接"}</button>
+        <button type="submit" className={metadataReady ? "secondary" : "primary"} disabled={busy || running || !url.trim()}>{busy && !task ? "正在解析…" : "解析链接"}</button>
       </div>
     </form>
     {bilibiliLink && (bilibiliSession?.state === "logged_out" || bilibiliSession?.state === "expired") && <div className="bilibili-session" role="status">
