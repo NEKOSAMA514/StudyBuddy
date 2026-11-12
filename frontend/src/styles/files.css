@@ -126,7 +126,8 @@
   background: transparent;
   text-align: left;
   color: var(--text, #333);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -139,6 +140,7 @@
 .file-pin {
   color: var(--text-secondary, #999);
   font-size: 12px;
+  font-weight: 400;
   margin-right: 7px;
 }
 

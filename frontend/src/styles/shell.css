@@ -203,14 +203,39 @@
 }
 
 .library-name {
+  min-width: 0;
+}
+
+.library-filename,
+.library-name small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+}
+
+.library-filename {
+  color: var(--text, #242424);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.library-item:focus-visible {
+  outline-offset: -2px;
+}
+
+.library-item:focus-visible .library-filename {
+  white-space: normal;
+}
+
+@media (hover: hover) {
+  .library-item:hover .library-filename {
+    white-space: normal;
+  }
 }
 
 .library-name small {
-  display: block;
   color: var(--text-secondary, #929295);
   font-size: 12px;
   margin-top: 2px;

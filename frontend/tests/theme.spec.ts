@@ -161,6 +161,53 @@ for (const theme of ["light", "dark"] as const) {
       });
     }
   });
+
+  test(`长文件名在${theme}主题下可用鼠标和键盘展开`, async ({ page }) => {
+    test.skip(test.info().project.name !== "desktop-1280", "用例内部已遍历完整尺寸矩阵，只执行一次。");
+    await page.addInitScript(value => localStorage.setItem("studybuddy-theme", value), theme);
+    const prefix = "机器学习课程｜梯度下降、损失函数与学习率调度练习";
+    const names = [`${prefix}（2026 复习版）.mp4`, `${prefix}（2025 原版）.mp4`];
+    await page.route("**/api/v1/videos", route => route.fulfill({ json: names.map((filename, index) => ({
+      ...video, id: `long-${index}`, filename, created_at: `2026-10-${23 - index}T00:00:00Z`, latest_task: null,
+    })) }));
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 871 });
+      await page.goto("/#summary");
+      if (width === 375) await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
+      const sidebar = page.locator(".sidebar");
+      const first = sidebar.locator(".library-item").filter({ hasText: names[0] });
+      const second = sidebar.locator(".library-item").filter({ hasText: names[1] });
+      const firstTitle = first.locator(".library-filename");
+      const secondTitle = second.locator(".library-filename");
+      const tableTitle = page.locator(".file-name").filter({ hasText: names[0] });
+      await expect(firstTitle).toHaveCSS("font-size", "13px");
+      await expect(firstTitle).toHaveCSS("font-weight", "500");
+      await expect(first.locator("small")).toHaveCSS("font-size", "12px");
+      await expect(tableTitle).toHaveCSS("font-size", "14px");
+      await expect(tableTitle).toHaveCSS("font-weight", "500");
+      const sidebarWidth = await sidebar.evaluate(element => element.clientWidth);
+      const singleLineHeight = await firstTitle.evaluate(element => element.clientHeight);
+      expect(await firstTitle.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+
+      await first.hover();
+      await expect(firstTitle).toHaveCSS("white-space", "normal");
+      expect(await firstTitle.evaluate(element => element.clientHeight)).toBeGreaterThan(singleLineHeight);
+      await sidebar.locator(".brand").hover();
+      await expect(firstTitle).toHaveCSS("white-space", "nowrap");
+
+      await sidebar.getByRole("button", { name: `管理文件：${names[0]}`, exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(second).toBeFocused();
+      await expect(secondTitle).toHaveCSS("white-space", "normal");
+      expect(await secondTitle.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await secondTitle.evaluate(element => element.clientHeight)).toBeGreaterThan(singleLineHeight);
+      expect(await sidebar.evaluate(element => element.clientWidth)).toBe(sidebarWidth);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: test.info().outputPath(`sidebar-filename-${theme}-${width}.png`), animations: "disabled" });
+      await page.keyboard.press("Tab");
+      await expect(secondTitle).toHaveCSS("white-space", "nowrap");
+    }
+  });
 }
 
 for (const current of [false, true]) {

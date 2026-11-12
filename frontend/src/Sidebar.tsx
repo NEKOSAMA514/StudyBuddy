@@ -92,7 +92,7 @@ export function Sidebar({
                       className={`file-glyph ${status || ""}`}
                     />
                     <span className="library-name">
-                      {file.filename}
+                      <span className="library-filename">{file.filename}</span>
                       <small>
                         {file.pinned ? "置顶 · " : ""}
                         {file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {fileStatusLabel(file)}
