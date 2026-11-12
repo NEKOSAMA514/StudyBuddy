@@ -77,12 +77,6 @@
   border-radius: 9px;
 }
 
-:root:not([data-theme="dark"]) .video-link-controls > .primary {
-  --primary-action: var(--primary);
-  --primary-hover: var(--primary-active-text);
-  --primary-text: #fff;
-}
-
 .video-link-controls input,
 .video-quality-controls select {
   padding: 10px 12px;

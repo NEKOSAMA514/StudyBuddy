@@ -81,6 +81,12 @@
   white-space: nowrap;
 }
 
+:root:not([data-theme="dark"]) .primary:not(.app-settings-dialog *) {
+  --primary-action: var(--primary);
+  --primary-hover: var(--primary-active-text);
+  --primary-text: #fff;
+}
+
 .primary:hover:not(:disabled) {
   background: var(--primary-hover, #444);
 }
