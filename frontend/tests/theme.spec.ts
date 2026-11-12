@@ -101,12 +101,12 @@ test.afterEach(async ({ page }) => {
 });
 
 for (const theme of ["light", "dark"] as const) {
-  test(`侧栏任务图标在${theme}主题保持亮色和状态区分`, async ({ page }) => {
+  test(`侧栏任务图标在${theme}主题保持对比度和状态区分`, async ({ page }) => {
     test.skip(test.info().project.name !== "desktop-1280", "用例内部已遍历完整尺寸矩阵，只执行一次。");
     await page.addInitScript(value => localStorage.setItem("studybuddy-theme", value), theme);
     const examples = [
       { id: "running", filename: "正在生成.mp4", status: "running", label: "处理中" },
-      { id: "completed", filename: "完成笔记.mp4", status: "succeeded", label: "已总结" },
+      { id: "completed", filename: "完成笔记.mp4", status: "succeeded", label: "笔记已生成" },
       { id: "stopped", filename: "停止任务.mp4", status: "paused", label: "已停止" },
     ];
     await page.route("**/api/v1/videos", route => route.fulfill({ json: examples.map(file => ({
@@ -114,22 +114,28 @@ for (const theme of ["light", "dark"] as const) {
       latest_task: taskResponse({ ...task, id: file.id, video_id: file.id, status: file.status, notes_state: "none", notes_revision: 0 }),
     })) }));
     await page.route("**/api/v1/documents", route => route.fulfill({ json: [{ id: "failed-document", kind: "document", filename: "失败文档.pdf",
-      format: "pdf", size_bytes: 100, unit_count: 1, character_count: 100, warnings: [],
+      format: "pdf", size_bytes: 100, unit_count: 1, character_count: 100, warnings: [], created_at: "2026-10-23T00:00:00Z",
       latest_task: { ...task, id: "document-task", document_id: "failed-document", status: "failed" } }] }));
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 871 });
-      await page.goto("/");
+      await page.goto("/#summary");
       if (width === 375) await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
-      const expected = theme === "light"
-        ? ["rgb(242, 196, 13)", "rgb(40, 189, 100)", "rgb(226, 54, 54)"]
+      const [warning, success, failure] = theme === "light"
+        ? ["rgb(123, 75, 0)", "rgb(0, 100, 55)", "rgb(178, 32, 37)"]
         : ["rgb(232, 201, 138)", "rgb(169, 216, 191)", "rgb(255, 180, 180)"];
-      for (const [index, file] of examples.entries()) {
+      const pausedBadge = theme === "light" ? "rgb(115, 80, 22)" : warning;
+      for (const file of examples) {
         const item = page.locator(".sidebar .library-item").filter({ hasText: file.filename });
+        const status = page.locator(".file-list tr").filter({ hasText: file.filename }).locator(".status-pill");
         await expect(item).toContainText(file.label);
-        await expect(item.locator(".file-glyph")).toHaveCSS("color", expected[index]);
+        await expect(status).toHaveText(file.label);
+        await expect(item.locator(".file-glyph")).toHaveCSS("color", file.status === "succeeded" ? success : warning);
+        if (file.status === "paused") await expect(status).toHaveCSS("color", pausedBadge);
       }
-      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveCSS("color", expected[2]);
-      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveText("▤");
+      await expect(page.locator(".sidebar .library-item").filter({ hasText: "失败文档.pdf" })).toContainText("处理失败");
+      await expect(page.locator(".file-list tr").filter({ hasText: "失败文档.pdf" }).locator(".status-pill")).toHaveText("处理失败");
+      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveCSS("color", failure);
+      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveAttribute("data-icon", "file-text");
       const ratios = await page.locator(".sidebar .file-glyph").evaluateAll(elements => {
         const root = getComputedStyle(document.documentElement);
         const rgb = (color: string) => color.match(/[\d.]+/g)!.slice(0, 3).map(Number);
@@ -137,24 +143,70 @@ for (const theme of ["light", "dark"] as const) {
           .map(n => n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4)
           .reduce((sum, n, i) => sum + n * [0.2126, 0.7152, 0.0722][i], 0);
         const backgrounds = [getComputedStyle(document.querySelector(".sidebar")!).backgroundColor,
-          ...["--surface", "--surface-hover"].map(name => {
+          ...["--surface", "--surface-hover", "--primary-soft"].map(name => {
             const raw = root.getPropertyValue(name).trim().slice(1);
             const hex = raw.length === 3 ? [...raw].map(c => c + c).join("") : raw;
             return `rgb(${[0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)).join(",")})`;
           })];
         return elements.flatMap(element => {
-          const style = getComputedStyle(element);
-          const color = parseFloat(style.webkitTextStrokeWidth) > 0 ? style.webkitTextStrokeColor : style.color;
+          const color = getComputedStyle(element).stroke;
           return backgrounds.map(background => {
             const a = luminance(color), b = luminance(background);
             return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
           });
         });
       });
-      expect(Math.min(...ratios)).toBeGreaterThanOrEqual(3);
+      expect(Math.min(...ratios)).toBeGreaterThanOrEqual(theme === "light" ? 5 : 3);
       if (test.info().project.name === "desktop-1280") await page.screenshot({
         path: test.info().outputPath(`sidebar-status-${theme}-${width}.png`), animations: "disabled",
       });
+    }
+  });
+
+  test(`长文件名在${theme}主题下可用鼠标和键盘展开`, async ({ page }) => {
+    test.skip(test.info().project.name !== "desktop-1280", "用例内部已遍历完整尺寸矩阵，只执行一次。");
+    await page.addInitScript(value => localStorage.setItem("studybuddy-theme", value), theme);
+    const prefix = "机器学习课程｜梯度下降、损失函数与学习率调度练习";
+    const names = [`${prefix}（2026 复习版）.mp4`, `${prefix}（2025 原版）.mp4`];
+    await page.route("**/api/v1/videos", route => route.fulfill({ json: names.map((filename, index) => ({
+      ...video, id: `long-${index}`, filename, created_at: `2026-10-${23 - index}T00:00:00Z`, latest_task: null,
+    })) }));
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 871 });
+      await page.goto("/#summary");
+      if (width === 375) await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
+      const sidebar = page.locator(".sidebar");
+      const first = sidebar.locator(".library-item").filter({ hasText: names[0] });
+      const second = sidebar.locator(".library-item").filter({ hasText: names[1] });
+      const firstTitle = first.locator(".library-filename");
+      const secondTitle = second.locator(".library-filename");
+      const tableTitle = page.locator(".file-name").filter({ hasText: names[0] });
+      await expect(firstTitle).toHaveCSS("font-size", "13px");
+      await expect(firstTitle).toHaveCSS("font-weight", "500");
+      await expect(first.locator("small")).toHaveCSS("font-size", "12px");
+      await expect(tableTitle).toHaveCSS("font-size", "14px");
+      await expect(tableTitle).toHaveCSS("font-weight", "500");
+      const sidebarWidth = await sidebar.evaluate(element => element.clientWidth);
+      const singleLineHeight = await firstTitle.evaluate(element => element.clientHeight);
+      expect(await firstTitle.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+
+      await first.hover();
+      await expect(firstTitle).toHaveCSS("white-space", "normal");
+      expect(await firstTitle.evaluate(element => element.clientHeight)).toBeGreaterThan(singleLineHeight);
+      await sidebar.locator(".brand").hover();
+      await expect(firstTitle).toHaveCSS("white-space", "nowrap");
+
+      await sidebar.getByRole("button", { name: `管理文件：${names[0]}`, exact: true }).focus();
+      await page.keyboard.press("Tab");
+      await expect(second).toBeFocused();
+      await expect(secondTitle).toHaveCSS("white-space", "normal");
+      expect(await secondTitle.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await secondTitle.evaluate(element => element.clientHeight)).toBeGreaterThan(singleLineHeight);
+      expect(await sidebar.evaluate(element => element.clientWidth)).toBe(sidebarWidth);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: test.info().outputPath(`sidebar-filename-${theme}-${width}.png`), animations: "disabled" });
+      await page.keyboard.press("Tab");
+      await expect(secondTitle).toHaveCSS("white-space", "nowrap");
     }
   });
 }
@@ -220,7 +272,7 @@ test("切换后刷新、导航与重新打开保留选择", async ({ page, conte
   expect(await page.evaluate(() => localStorage.getItem("studybuddy-theme"))).toBe("dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.locator(".sidebar").getByRole("button", { name: "笔记中心", exact: true }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "资料管理", exact: true }).click();
   await expect(page).toHaveURL(/#notes/);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const reopened = await context.newPage();

@@ -6,10 +6,12 @@ import { apiProviders } from "./apiProviders";
 // 展示多组连接及当前草稿，把保存、启用、模型读取与测试交给专用 Hook。
 export function APISettings({ onSaved }: { onSaved: (close: boolean) => void }) {
   const { saved, editing, update, providerId, changeProvider, token, changeToken, models, manualModel, setManualModel, busy, message, failed,
-    select, create, save, readModels, test, activate, remove, original, hasCredential } = useAPISettings(onSaved);
+    select, create, save, readModels, test, activate, remove, original, hasCredential, canReuseSavedToken } = useAPISettings(onSaved);
   if (!saved || !editing) return <p>{failed ? "无法读取 API 配置，请刷新设置后重试。" : "正在读取 API 配置…"}</p>;
   const provider = apiProviders.find(p => p.id === providerId);
   const needsEndpoint = providerId === "custom" || !provider?.baseURL;
+  const keyHelp = canReuseSavedToken ? "密钥已保存。留空保留，保存新值会替换。"
+    : original?.has_token ? "API 地址已变更。请填写此地址对应的密钥。" : "这组连接还未保存密钥。";
   return <>
     <div className="api-profile-heading"><h2>LLM API 连接</h2>
       <button type="button" disabled={busy} onClick={create}>添加配置</button>
@@ -37,9 +39,9 @@ export function APISettings({ onSaved }: { onSaved: (close: boolean) => void }) 
           placeholder={provider?.endpointPlaceholder ?? "https://你的服务地址/v1"} onChange={e => update({ base_url: e.target.value })} /></label>
         <small>支持 Chat Completions 兼容接口。填写基础地址，程序会追加 /chat/completions；远程使用 HTTPS，本机可用 HTTP。</small></>}
         <label>API 密钥<input type="password" autoComplete="new-password" maxLength={4096} value={token}
-          placeholder={hasCredential && !token ? "已保存；留空保留，输入新值替换" : "填写这组连接的密钥"}
+          aria-describedby="api-key-help"
           onChange={e => changeToken(e.target.value)} /></label>
-        <small>{hasCredential ? "密钥已填写或已保存" : "尚未填写这组连接的密钥"}；切换服务商或修改 API 地址时需重新填写。</small>
+        <small className="settings-help" id="api-key-help">{keyHelp}</small>
         <label>模型 ID{models.length > 0 && !manualModel ? <select aria-label="模型 ID" required
           value={editing.model} onChange={e => update({ model: e.target.value })}>
           <option value="" disabled>请选择模型（共 {models.length} 个）</option>

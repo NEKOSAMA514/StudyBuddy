@@ -184,7 +184,7 @@ test("提取完成的迟到响应不抢占用户已经切换的页面", async ({
   await dialog(page).getByRole("button", { name: "开始生成", exact: true }).click();
   await sent;
   await page.evaluate(() => { location.hash = "#summary"; });
-  await expect(page.getByRole("heading", { name: "总结分析", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "资料管理", exact: true })).toBeVisible();
   release();
   await expect.poll(async () => (await (await request.get("/api/v1/documents")).json())
     .find((doc: { filename: string; extracted: boolean }) => doc.filename === filename && doc.extracted)?.latest_task?.status).toBe("succeeded");

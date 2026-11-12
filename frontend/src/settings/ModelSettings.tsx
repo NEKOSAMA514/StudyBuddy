@@ -42,7 +42,7 @@ export function ModelSettingsDialog({
   return (
     <dialog
       ref={dialog}
-      className="settings-dialog"
+      className="settings-dialog app-settings-dialog"
       aria-labelledby="settings-title"
       onCancel={onClose}
       onClick={(event) => {

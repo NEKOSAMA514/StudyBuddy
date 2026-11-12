@@ -16,18 +16,17 @@ export function NoteStyleSettings({ onSaved }: { onSaved: () => void }) {
     <NoteStyleSelect label="默认笔记风格" value={config.note_style} disabled={busy}
       onChange={note_style => setConfig({ ...config, note_style })} />
     <div className="prompt-heading">
-      <h3>笔记补充要求</h3>
+      <label htmlFor="summary-prompt">笔记补充要求（选填）</label>
       <button type="button" className="text-button" disabled={busy}
         onClick={() => setConfig({ ...config, summary_prompt: "" })}>清空补充要求</button>
     </div>
-    <p>可留空，直接使用系统规则。需要时填写你希望笔记怎样组织、重点解释什么或采用什么表达方式，例如“先比较各概念，再解释操作步骤”。</p>
-    <label htmlFor="summary-prompt">笔记补充要求（选填）</label>
-    <textarea id="summary-prompt" maxLength={10000} rows={6} disabled={busy}
-      placeholder="留空使用系统规则；例如：突出概念之间的区别，用简单例子解释关键步骤。"
+    <textarea id="summary-prompt" maxLength={10000} rows={6} disabled={busy} aria-describedby="summary-prompt-help"
+      placeholder="例如：用一个例子解释关键步骤。"
       value={config.summary_prompt} onChange={(event) => setConfig({ ...config, summary_prompt: event.target.value })} />
-    <small>只有填写并保存后才加入模型请求。固定系统规则负责事实、证据和输出格式；补充要求用于组织、解释和呈现。修改或清空后都需要保存，再点击“重新生成笔记”应用到已有视频；识别原文和截图继续复用。</small>
+    <small className="settings-help" id="summary-prompt-help">留空使用默认规则。补充要求可调整笔记的组织和讲解方式。</small>
     <div className="settings-actions">
-      <button className="primary" type="submit" disabled={busy}>{busy ? "正在保存…" : "保存笔记风格"}</button>
+      <button className="primary" type="submit" disabled={busy} aria-describedby="note-style-save-help">{busy ? "正在保存…" : "保存笔记风格"}</button>
     </div>
+    <small className="settings-help" id="note-style-save-help">保存后用于新任务。已有资料需重新生成笔记才会应用。</small>
   </form>;
 }

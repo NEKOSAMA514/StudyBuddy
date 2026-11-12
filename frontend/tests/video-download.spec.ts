@@ -398,7 +398,7 @@ test("创建分析失败保留已导入文件，再次确认复用文件且可�
   await dialog.getByRole("button", { name: "开始处理", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("所选模型无法使用");
   await expect(page.getByRole("region", { name: "文件列表", exact: true })).toContainText("1 个文件");
-  await expect(page.getByRole("region", { name: "文件列表", exact: true })).toContainText("未处理");
+  await expect(page.getByRole("region", { name: "文件列表", exact: true })).toContainText("未生成笔记");
   await expect(dialog).toBeVisible();
   state.failAnalysis = false;
   await dialog.getByRole("button", { name: "开始处理", exact: true }).click();

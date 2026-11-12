@@ -1,6 +1,7 @@
 import { createContext, useContext, useId, useRef, type ComponentPropsWithoutRef, type ReactNode, type MouseEvent } from "react";
 import Markdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
@@ -51,7 +52,7 @@ export default function NoteMarkdown({ children, onTimeJump, onSourceJump, densi
   }
   return <div className="note-markdown" data-density={density}><div className="markdown-content" ref={root}>
     <HeadingAction.Provider value={headingAction}><Markdown
-    remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+    remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, remarkMath]}
     rehypePlugins={[[rehypeKatex, { trust: false, maxSize: 10 }], [rehypeHighlight, { detect: false }], markdownAnchors(prefix, !!headingAction)]}
     skipHtml
     disallowedElements={["img"]}

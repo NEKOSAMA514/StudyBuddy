@@ -64,20 +64,15 @@
 }
 
 .note-version-actions button[aria-pressed="true"] {
-  border-color: var(--border-strong);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-  background: var(--surface-hover, #eaeaec);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+  background: var(--primary-soft);
   color: var(--text, #242424);
 }
 
-:root:not([data-theme="dark"]) .note-version-actions button[aria-pressed="true"] {
-  background: var(--surface-muted);
-}
-
-/* 笔记内使用共用组件的文字也增加2px，不影响页面其他区域。 */
+/* 笔记内的共用说明和操作文字沿用阅读区字号。 */
 .summary-panel .eyebrow { font-size: 15px; }
 .summary-panel :is(.time-button, .cite-button, .text-button) { font-size: 13px; }
-.summary-panel .evidence-type { font-size: 11px; }
 
 /* 章节锚点导航；横条位于正文右侧留白，预览不占用文档布局。 */
 .chapter-navigator {
@@ -130,7 +125,7 @@
 .chapter-mark[aria-current]::before,
 .chapter-mark:focus-visible::before {
   width: 22px;
-  background: var(--text, #242424);
+  background: var(--primary);
 }
 
 .chapter-mark:focus-visible { outline: 2px solid var(--focus, #516ac8); outline-offset: -2px; border-radius: 3px; }

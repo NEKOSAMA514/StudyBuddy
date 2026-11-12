@@ -29,6 +29,10 @@
   letter-spacing: -0.5px;
 }
 
+.brand span {
+  color: var(--primary-active-text);
+}
+
 .sidebar-header .desktop-sidebar-toggle {
   background: transparent;
   border-color: transparent;
@@ -52,28 +56,29 @@
   background: var(--surface-hover, #eaeaec);
 }
 
-.mode-link span {
-  font-size: 19px;
+.mode-link > svg {
   width: 20px;
-}
-
-.nav-label {
-  margin: 24px 12px 8px;
-  color: var(--text-secondary, #8a8a8d);
-  font-size: 11px;
+  height: 32px;
+  flex-shrink: 0;
 }
 
 .history-label {
   display: flex;
   justify-content: space-between;
-  margin: 30px 12px 10px;
+  margin: 0 12px 10px;
   color: var(--text-secondary, #909094);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .sidebar nav {
+  margin-top: 30px;
   overflow: auto;
   min-height: 50px;
+}
+
+.sidebar nav > section + section {
+  margin-top: 24px;
 }
 
 .library-item {
@@ -169,41 +174,64 @@
 }
 
 .file-glyph {
-  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
   color: var(--text-secondary, #777);
 }
 
 .file-glyph.queued,
-.file-glyph.running {
-  color: var(--file-icon-running);
-  -webkit-text-stroke: 0.6px var(--warning);
-  paint-order: stroke fill;
+.file-glyph.running,
+.file-glyph.stopping,
+.file-glyph.paused {
+  color: var(--file-icon-warning);
 }
 
 .file-glyph.succeeded {
-  color: var(--file-icon-completed);
-  -webkit-text-stroke: 0.5px var(--success);
-  paint-order: stroke fill;
+  color: var(--file-icon-success);
 }
 
-.file-glyph.stopping,
-.file-glyph.paused,
 .file-glyph.interrupted,
 .file-glyph.failed {
-  color: var(--file-icon-stopped);
+  color: var(--file-icon-danger);
 }
 
 .library-name {
+  min-width: 0;
+}
+
+.library-filename,
+.library-name small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+}
+
+.library-filename {
+  color: var(--text, #242424);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.library-item:focus-visible {
+  outline-offset: -2px;
+}
+
+.library-item:focus-visible .library-filename {
+  white-space: normal;
+}
+
+@media (hover: hover) {
+  .library-item:hover .library-filename {
+    white-space: normal;
+  }
 }
 
 .library-name small {
-  display: block;
   color: var(--text-secondary, #929295);
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 2px;
 }
 
@@ -218,7 +246,7 @@
   padding: 20px 12px 0;
   border-top: 1px solid var(--border, #e4e4e7);
   color: var(--text-secondary, #777);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sidebar-bottom p {
@@ -353,4 +381,6 @@ main {
     border: 0;
   }
 }
-.mode-link.active, .library-item.selected { box-shadow: inset 3px 0 0 var(--border-strong); }
+.mode-link.active, .library-row.selected, .library-item.selected { background: var(--primary-soft); }
+.mode-link.active, .library-item.selected { box-shadow: inset 3px 0 0 var(--primary); }
+.mode-link.active { color: var(--primary-active-text); }

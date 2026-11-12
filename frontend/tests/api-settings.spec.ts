@@ -97,14 +97,17 @@ test("多组连接保存、启用、刷新、编辑、清空密钥和删除相�
   await page.getByRole("button", { name: "添加配置", exact: true }).click();
   await page.getByLabel("配置名称").fill("测试网关");
   await page.getByLabel("服务商", { exact: true }).selectOption("custom");
-  await page.getByLabel("API 地址", { exact: true }).fill("https://gateway.invalid/v1");
-  await page.getByLabel("API 密钥", { exact: true }).fill("fake-browser-gateway");
+  const address = page.getByLabel("API 地址", { exact: true });
+  const key = page.getByLabel("API 密钥", { exact: true });
+  await address.fill("https://gateway.invalid/v1");
+  await expect(key).toHaveAccessibleDescription("这组连接还未保存密钥。");
+  await key.fill("fake-browser-gateway");
   await page.getByLabel("模型 ID", { exact: true }).fill("gateway-model");
   await expect(page.getByRole("checkbox", { name: /我已了解/ })).toHaveCount(0);
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
   await expect(page.locator(".notice[role='status']")).toContainText("配置已保存");
   expect((await (await request.get("/api/v1/settings/model")).json()).model).toBe(previous.model);
-  await expect(page.getByLabel("API 密钥", { exact: true })).toHaveValue("");
+  await expect(key).toHaveValue("");
   expect(await (await request.get(root)).text()).not.toContain("fake-browser-gateway");
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("fake-browser-gateway");
   await page.getByRole("button", { name: "启用此配置", exact: true }).click();
@@ -112,15 +115,26 @@ test("多组连接保存、启用、刷新、编辑、清空密钥和删除相�
   expect((await (await request.get("/api/v1/settings/model")).json()).model).toBe("gateway-model");
   await page.reload();
   await expect(page.getByLabel("配置名称")).toHaveValue("测试网关");
-  await expect(page.getByLabel("API 密钥", { exact: true })).toHaveValue("");
+  await expect(key).toHaveValue("");
+  const savedKeyHelp = "密钥已保存。留空保留，保存新值会替换。";
+  await expect(key).toHaveAccessibleDescription(savedKeyHelp);
+  await key.fill("fake-unsaved-replacement");
+  await expect(key).toHaveAccessibleDescription(savedKeyHelp);
+  await key.clear();
+  await address.fill("https://another-gateway.invalid/v1");
+  await expect(key).toHaveAccessibleDescription("API 地址已变更。请填写此地址对应的密钥。");
+  await expect(page.getByRole("button", { name: "读取可用模型", exact: true })).toBeDisabled();
+  await address.fill("https://gateway.invalid/v1/");
+  await expect(key).toHaveAccessibleDescription(savedKeyHelp);
   await expect(page.getByRole("button", { name: "删除配置", exact: true })).toBeDisabled();
   await page.getByLabel("模型 ID", { exact: true }).fill("edited-model");
   await page.getByRole("button", { name: "保存配置", exact: true }).click();
   await expect(page.locator(".notice[role='status']")).toContainText("配置已保存");
-  expect((await (await request.get("/api/v1/settings/model")).json()).model).toBe("edited-model");
+  expect(await (await request.get("/api/v1/settings/model")).json()).toMatchObject({ model: "edited-model", has_token: true });
   await page.getByRole("button", { name: "删除已保存密钥", exact: true }).click();
   await expect(page.locator(".notice[role='status']")).toContainText("已删除这组配置的密钥");
   expect((await (await request.get("/api/v1/settings/model")).json()).has_token).toBe(false);
+  await expect(key).toHaveAccessibleDescription("这组连接还未保存密钥。");
   await page.getByRole("button", { name: new RegExp("魔搭") }).click();
   await page.getByRole("button", { name: "启用此配置", exact: true }).click();
   await expect(page.locator(".notice[role='status']")).toContainText("已启用");
@@ -267,7 +281,7 @@ test("已有模型 ID 不过滤读取的 36 个模型，选择与手填均可保
 });
 
 test("窄屏明暗主题下配置选中清晰且与启用状态分离，表单无横向溢出", async ({ page, request }) => {
-  const created = await request.post(root, { data: { name: "备用网关", base_url: "https://gateway.invalid/v1", model: "gateway-model" } });
+  const created = await request.post(root, { data: { name: "备用网关", base_url: "https://gateway.invalid/v1", model: "gateway-model", token: "fake-layout-key" } });
   expect(created.ok()).toBe(true);
   await page.goto("/#settings");
   const active = page.locator(".api-profile").filter({ hasText: "当前使用" });
@@ -296,6 +310,12 @@ test("窄屏明暗主题下配置选中清晰且与启用状态分离，表单�
       expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
       await dialog.evaluate(el => { el.scrollTop = 0; });
       await page.screenshot({ path: test.info().outputPath(`api-${theme}-${width}.png`) });
+      const help = dialog.locator("#api-key-help");
+      await expect(help).toHaveCSS("font-size", "13px");
+      if (width !== 598) {
+        await help.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: test.info().outputPath(`api-key-help-${theme}-${width}.png`) });
+      }
       await page.getByText("高级设置", { exact: true }).click();
     }
   }

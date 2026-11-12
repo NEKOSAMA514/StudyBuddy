@@ -46,7 +46,10 @@ export function MinerUSettings({ onSaved }: { onSaved: () => void }) {
     <a href={mineruTokenURL} target="_blank" rel="noopener noreferrer">免费申请 MinerU API Token ↗</a>
     {saved ? <>
       <label>MinerU API Token<input type="password" autoComplete="off" disabled={busy} value={token}
-        placeholder={saved.has_token ? "已保存；留空保留，输入新值替换" : "填写 MinerU Token"} onChange={event => setToken(event.target.value)} /></label>
+        aria-describedby="mineru-token-help" onChange={event => setToken(event.target.value)} /></label>
+      <small className="settings-help" id="mineru-token-help">
+        {saved.has_token ? "Token 已保存。留空保留，保存新值会替换。" : "尚未保存 MinerU Token。"}
+      </small>
       <div className="settings-actions"><button disabled={busy}>保存 MinerU 设置</button>
         <button type="button" disabled={busy || !saved.has_token} onClick={() => void save(true)}>清除 MinerU Token</button></div>
     </> : message ? <div className="settings-read-error"><button type="button" className="secondary" onClick={() => { setMessage(""); setFailed(false); setAttempt(value => value + 1); }}>重新读取 MinerU 设置</button></div> : <p role="status">正在读取 MinerU 设置…</p>}

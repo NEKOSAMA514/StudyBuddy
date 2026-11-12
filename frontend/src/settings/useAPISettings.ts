@@ -138,8 +138,9 @@ export function useAPISettings(onSaved: (close: boolean) => void) {
     });
   }
   const original = saved?.profiles.find(p => p.id === editing?.id);
-  const hasCredential = !!token || !!(original?.has_token && original.base_url === editing?.base_url.replace(/\/+$/, ""));
+  const canReuseSavedToken = !!(original?.has_token && original.base_url === editing?.base_url.replace(/\/+$/, ""));
+  const hasCredential = !!token || canReuseSavedToken;
   return { saved, editing, update, providerId, changeProvider, token, changeToken, models, manualModel, setManualModel, busy, message, failed,
     select, create: () => select({ ...empty, name: apiProviders[0].name, base_url: apiProviders[0].baseURL }),
-    save, readModels, test, activate, remove, original, hasCredential };
+    save, readModels, test, activate, remove, original, hasCredential, canReuseSavedToken };
 }

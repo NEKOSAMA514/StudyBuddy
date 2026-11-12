@@ -1,8 +1,9 @@
-import { taskStatusLabels } from "./shared/taskStatus";
 import { FileMenu, type FileAction } from "./files/FileActions";
+import { fileStatusLabel } from "./files/fileStatus";
 import type { LibraryFile } from "./types";
 import type { Mode, Navigate } from "./navigation";
 import { clock } from "./util/time";
+import { Icon } from "./Icon";
 
 // 共用文件列表展示侧栏导航，并把文件操作和页面切换交回应用层。
 export function Sidebar({
@@ -22,11 +23,17 @@ export function Sidebar({
   onAction: (file: LibraryFile, action: FileAction) => void;
   onCollapse: () => void;
 }) {
+  const pinnedFiles = library.filter((file) => file.pinned);
+  const groups = [
+    ...(pinnedFiles.length ? [{ label: "置顶文件", ariaLabel: "置顶文件", files: pinnedFiles }] : []),
+    { label: "文件列表", ariaLabel: "侧栏文件列表", files: library.filter((file) => !file.pinned) },
+  ];
+
   return (
     <aside className="sidebar" id="main-sidebar">
       <div className="sidebar-header">
         <a className="brand" href="/">
-          StudyBuddy
+          Study<span>Buddy</span>
         </a>
         <button
           className="desktop-sidebar-toggle"
@@ -44,62 +51,61 @@ export function Sidebar({
       <a href="#" className={`mode-link ${mode === "home" ? "active" : ""}`}>
         ＋ 新的开始
       </a>
-      <div className="nav-label">笔记中心</div>
       <button
         className={`mode-link ${mode === "notes" ? "active" : ""}`}
-        aria-label="笔记中心"
+        aria-label="资料管理"
         onClick={() => navigate("notes")}
       >
-        <span>◈</span> 笔记中心
+        <Icon name="panels-top-left" /> 资料管理
       </button>
-      <div className="nav-label">总结分析模式</div>
       <button
         className={`mode-link ${mode === "summary" ? "active" : ""}`}
-        aria-label="开始总结"
+        aria-label="笔记中心"
         onClick={() => navigate("summary")}
       >
-        <span>▤</span> 开始总结
+        <Icon name="notebook-pen" /> 笔记中心
       </button>
-      <div className="history-label">
-        文件 <span>{library.length}</span>
-      </div>
       <nav aria-label="已上传的文件">
-        {library.map((file) => {
-          const status = file.latest_task?.status;
-          return (
-            <div
-              className={`library-row ${activeFileId === file.id ? "selected" : ""}`}
-              key={file.id}
-            >
-              <button
-                disabled={busy}
-                className={`library-item ${activeFileId === file.id ? "selected" : ""}`}
-                onClick={() => {
-                  navigate("summary", file.id);
-                }}
-              >
-                <span
-                  className={`file-glyph ${status || ""}`}
-                  aria-hidden="true"
+        {groups.map(({ label, ariaLabel, files }) => (
+          <section aria-label={ariaLabel} key={label}>
+            <h2 className="history-label">
+              {label} <span>{files.length}</span>
+            </h2>
+            {files.map((file) => {
+              const status = file.latest_task?.status;
+              return (
+                <div
+                  className={`library-row ${activeFileId === file.id ? "selected" : ""}`}
+                  key={file.id}
                 >
-                  {file.kind === "document" ? "▤" : "▶"}
-                </span>
-                <span className="library-name">
-                  {file.filename}
-                  <small>
-                    {file.pinned ? "置顶 · " : ""}
-                    <>{file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {status === "succeeded" ? "已总结" : status ? taskStatusLabels[status] : file.kind === "document" ? file.extracted === false ? "待处理" : "已提取" : "待分析"}</>
-                  </small>
-                </span>
-              </button>
-              <FileMenu
-                file={file}
-                disabled={busy}
-                onAction={(action) => onAction(file, action)}
-              />
-            </div>
-          );
-        })}
+                  <button
+                    disabled={busy}
+                    className={`library-item ${activeFileId === file.id ? "selected" : ""}`}
+                    onClick={() => {
+                      navigate("summary", file.id);
+                    }}
+                  >
+                    <Icon
+                      name={file.kind === "document" ? "file-text" : "video"}
+                      className={`file-glyph ${status || ""}`}
+                    />
+                    <span className="library-name">
+                      <span className="library-filename">{file.filename}</span>
+                      <small>
+                        {file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {fileStatusLabel(file)}
+                      </small>
+                    </span>
+                  </button>
+                  <FileMenu
+                    file={file}
+                    disabled={busy}
+                    onAction={(action) => onAction(file, action)}
+                  />
+                </div>
+              );
+            })}
+          </section>
+        ))}
       </nav>
       {!library.length && (
         <p className="library-empty">

@@ -78,7 +78,7 @@ function SearchResults({ query, page }: { query: string; page: number }) {
       : result && <>
         <p role="status">{result.total ? `找到 ${result.total} 处相关内容` : "没有找到相关内容，试试更短的关键词。"}</p>
         {[...groups].map(([id, hits]) => <section className="panel note-search-group" key={id}>
-          <header><span className="eyebrow">{hits[0].kind === "video" ? "视频" : "文档"}</span>
+          <header className="note-search-source"><span className="eyebrow">{hits[0].kind === "video" ? "视频" : "文档"}</span>
             <h2><Highlight text={hits[0].filename} ranges={hits[0].filename_highlights} /></h2></header>
           {hits.map(hit => {
             return <article className="note-search-hit" key={`${hit.task_id}/${hit.chapter_id || "overview"}`}>

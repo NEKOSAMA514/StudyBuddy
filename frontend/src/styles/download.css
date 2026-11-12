@@ -73,6 +73,10 @@
   min-width: 0;
 }
 
+.video-link-controls button {
+  border-radius: 9px;
+}
+
 .video-link-controls input,
 .video-quality-controls select {
   padding: 10px 12px;

@@ -231,7 +231,15 @@ test("资料已删除可返回搜索，结果中的HTML始终按文字显示", a
 });
 
 test("搜索页按需资源、窄屏和主题，进入正文确实加载渲染资源", async ({ page }) => {
-  await mockSearch(page);
+  const state = await mockSearch(page);
+  const source = { filename: "酶催化与抑制机理｜实验设计、对照分组与数据解读（生物化学公开课第 06 讲）.mp4", filename_highlights: [[0, 1]] };
+  const items = [
+    { ...state.hit("video"), ...source },
+    { ...state.hit("video", "C3"), ...source, title: "第3章抑制类型",
+      snippet: "酶活性在不同抑制条件下的变化可以用于判断抑制类型。", snippet_highlights: [[0, 1]] },
+    state.hit("document"),
+  ];
+  await page.route("**/api/v1/notes/search?*", route => route.fulfill({ json: { items, total: items.length, page: 1, page_size: 20 } }));
   const manifest = JSON.parse(readFileSync(resolve(process.env.STATIC_DIR!, ".vite/manifest.json"), "utf8"));
   const entry = Object.keys(manifest).find(key => key.endsWith("/notes/NoteMarkdown.tsx"))!;
   expect(entry).toBeTruthy();
@@ -248,7 +256,17 @@ test("搜索页按需资源、窄屏和主题，进入正文确实加载渲染�
   page.on("request", request => resources.push(request.url()));
   const isHeavy = (url: string) => [...heavy].some(file => url.endsWith("/" + file));
   await page.goto("/#notes?q=酶&page=1");
-  await expect(page.locator(".note-search-hit")).toHaveCount(2);
+  await expect(page.locator(".note-search-group")).toHaveCount(2);
+  const videoGroup = page.locator(".note-search-group").first();
+  const filename = videoGroup.locator(".note-search-source h2");
+  const titles = videoGroup.locator(".note-search-hit h3");
+  await expect(filename).toHaveText(source.filename);
+  await expect(filename.locator("mark")).toHaveText("酶");
+  await expect(filename).toHaveCSS("font-size", "14px");
+  await expect(filename).toHaveCSS("font-weight", "500");
+  await expect(titles).toHaveText(["第2章催化作用", "第3章抑制类型"]);
+  await expect(titles.first()).toHaveCSS("font-size", "18px");
+  await expect(titles.first()).toHaveCSS("font-weight", "700");
   for (const width of [1280, 375]) for (const theme of ["light", "dark"]) {
     await page.setViewportSize({ width, height: 871 });
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -266,6 +284,7 @@ test("搜索页按需资源、窄屏和主题，进入正文确实加载渲染�
           .toBe(expanded ? 0 : -260);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await filename.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
       await expect(page.getByRole("searchbox")).toBeAttached();
       const ratio = await page.locator(".note-search mark").first().evaluate(node => {
         const style = getComputedStyle(node);

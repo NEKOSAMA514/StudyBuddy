@@ -700,13 +700,26 @@ test("损坏的视频显示明确错误，不生成总结", async ({ page }) => 
 
 test("桌面首页两个入口与笔记中心", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".home-options").getByRole("button", { name: "笔记中心" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "开始总结？" })).toBeVisible();
+  const home = page.locator(".home-options");
+  const sidebar = page.locator(".sidebar");
+  const notes = home.getByRole("button", { name: /^笔记中心/ });
+  const library = home.getByRole("button", { name: /^资料管理/ });
+  const sidebarNotes = sidebar.getByRole("button", { name: "笔记中心", exact: true });
+  const sidebarLibrary = sidebar.getByRole("button", { name: "资料管理", exact: true });
+  await expect(home.locator("button > strong")).toHaveText(["资料管理", "笔记中心"]);
+  await expect(sidebar.locator("button.mode-link")).toHaveText(["资料管理", "笔记中心"]);
+  await expect(library.locator("svg")).toHaveAttribute("data-icon", "panels-top-left");
+  await expect(notes.locator("svg")).toHaveAttribute("data-icon", "notebook-pen");
+  await expect(sidebarLibrary.locator("svg")).toHaveAttribute("data-icon", "panels-top-left");
+  await expect(sidebarNotes.locator("svg")).toHaveAttribute("data-icon", "notebook-pen");
+  await expect(library).toContainText("搜索笔记，集中回看重点");
+  await expect(notes).toContainText("上传视频或文档，生成带来源的笔记");
   await page.screenshot({
     path: test.info().outputPath("home-desktop.png"),
     fullPage: true,
   });
-  await page.locator(".home-options").getByRole("button", { name: "笔记中心" }).click();
+  await library.click();
+  await expect(page).toHaveURL(/#notes(?:\?|$)/);
   await expect(
     page.getByRole("heading", { name: "笔记中心", exact: true }),
   ).toBeVisible();
@@ -714,8 +727,16 @@ test("桌面首页两个入口与笔记中心", async ({ page }) => {
     page.getByRole("searchbox", { name: "搜索笔记" }),
   ).toBeVisible();
   await page.getByRole("link", { name: "新的开始", exact: false }).click();
-  await page.getByRole("button", { name: "开始总结？" }).click();
+  await notes.click();
+  await expect(page).toHaveURL(/#summary$/);
+  await expect(page.getByRole("heading", { name: "资料管理", exact: true })).toBeVisible();
   await expect(page.getByLabel("选择本地文件")).toBeAttached();
+  await sidebarLibrary.click();
+  await expect(page).toHaveURL(/#notes(?:\?|$)/);
+  await expect(sidebarLibrary).toHaveClass(/\bactive\b/);
+  await sidebarNotes.click();
+  await expect(page).toHaveURL(/#summary$/);
+  await expect(sidebarNotes).toHaveClass(/\bactive\b/);
 });
 
 test("笔记补充要求可留空、编辑保存并清空", async ({ page, request }) => {
@@ -976,7 +997,7 @@ test("上传后手动确认模型，取消不分析，确认后只覆盖本次�
   await expect(page.getByText("有据可查", { exact: true })).toHaveCount(0);
 });
 
-test("侧栏后台任务等待和运行时黄色，成功变绿，停止或失败变红", async ({ page }) => {
+test("侧栏后台任务区分排队、生成、停止与失败", async ({ page }) => {
   let status = "queued";
   await page.route("**/api/v1/videos", (route) => route.fulfill({ json: [
     { id: "idle-video", filename: "待分析.mp4", duration: 30, size_bytes: 100, latest_task: null },
@@ -986,22 +1007,26 @@ test("侧栏后台任务等待和运行时黄色，成功变绿，停止或失�
   await page.route("**/api/v1/videos/*/evidence*", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
   const item = page.locator(".library-item").filter({ hasText: "后台处理.mp4" });
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(242, 196, 13)");
+  const warning = "rgb(123, 75, 0)";
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", warning);
   await expect(item).toContainText("排队中");
   status = "running";
   await expect(item.locator(".file-glyph")).toHaveClass(/running/);
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(242, 196, 13)");
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", warning);
   status = "succeeded";
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(40, 189, 100)");
-  await expect(item).toContainText("已总结");
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(0, 100, 55)");
+  await expect(item).toContainText("笔记已生成");
   for (const [next, label] of [["stopping", "正在停止"], ["paused", "已停止"], ["interrupted", "已中断"], ["failed", "处理失败"]]) {
     status = next;
     await page.reload();
     await expect(item.locator(".file-glyph")).toHaveClass(new RegExp(next));
-    await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(226, 54, 54)");
+    const color = next === "stopping" || next === "paused" ? warning : "rgb(178, 32, 37)";
+    await expect(item.locator(".file-glyph")).toHaveCSS("color", color);
     await expect(item).toContainText(label);
   }
-  await expect(page.getByRole("button", { name: /待分析.mp4/ }).locator(".file-glyph")).toHaveCSS("color", "rgb(98, 98, 98)");
+  const idle = page.locator(".sidebar .library-item").filter({ hasText: "待分析.mp4" });
+  await expect(idle).toContainText("未生成笔记");
+  await expect(idle.locator(".file-glyph")).toHaveCSS("color", "rgb(98, 98, 98)");
 });
 
 test("停止处理后刷新保持停止，继续完成同一任务", async ({ page }) => {
@@ -1028,32 +1053,53 @@ test("侧栏菜单重命名置顶持久化，删除取消和确认", async ({ pa
   const buffer = Buffer.concat([readFileSync(samplePath), Buffer.from(`edit-${Date.now()}`)]);
   const video = await (await page.request.post("/api/v1/videos", { multipart: { file: { name: "视频菜单测试.mp4", mimeType: "video/mp4", buffer } } })).json();
   await page.goto("/#summary");
-  const manage = (name: string) => page.locator(".sidebar").getByRole("button", { name: `管理文件：${name}`, exact: true });
+  const sidebar = page.getByRole("navigation", { name: "已上传的文件", exact: true });
+  const pinned = sidebar.getByRole("region", { name: "置顶文件", exact: true });
+  const regular = sidebar.getByRole("region", { name: "侧栏文件列表", exact: true });
+  const manage = (name: string) => sidebar.getByRole("button", { name: `管理文件：${name}`, exact: true });
+  const filename = "课程笔记测试.mp4";
+  const renamedMenu = { name: `管理文件：${filename}`, exact: true };
   await manage(video.filename).click();
   await page.getByRole("button", { name: "重命名", exact: true }).click();
   const rename = page.getByRole("dialog", { name: "重命名文件" });
-  await rename.getByLabel("文件名称").fill("课程笔记测试.mp4");
+  await rename.getByLabel("文件名称").fill(filename);
   await rename.getByRole("button", { name: "保存名称" }).click();
   await expect(rename).not.toBeVisible();
-  await manage("课程笔记测试.mp4").click();
+  await regular.getByRole("button", renamedMenu).click();
+  const pinnedCount = await pinned.locator(".library-row").count();
+  const regularCount = await regular.locator(".library-row").count();
   await page.getByRole("button", { name: "置顶", exact: true }).click();
-  await expect(page.locator(".library-row").first()).toContainText("课程笔记测试.mp4");
-  await expect(page.locator(".library-row").first()).toContainText("置顶");
+  await expect(sidebar.getByRole("region").first()).toHaveAccessibleName("置顶文件");
+  await expect(pinned.getByRole("heading")).toHaveText(`置顶文件 ${pinnedCount + 1}`);
+  await expect(pinned.getByRole("button", renamedMenu)).toBeVisible();
+  await expect(pinned.locator(".library-item").filter({ hasText: filename }).locator("small")).not.toContainText("置顶");
+  await expect(regular.getByRole("heading")).toHaveText(`文件列表 ${regularCount - 1}`);
+  await expect(regular.getByRole("button", renamedMenu)).toHaveCount(0);
   await page.reload();
-  await expect(page.locator(".library-row").first()).toContainText("课程笔记测试.mp4");
-  await manage("课程笔记测试.mp4").click();
+  await pinned.locator(".library-item").filter({ hasText: filename }).click();
+  const detailURL = new RegExp(`#summary/${video.id}$`);
+  await expect(page).toHaveURL(detailURL);
+  await expect(pinned.locator(".library-row.selected")).toContainText(filename);
+  await pinned.getByRole("button", renamedMenu).click();
   await expect(page.getByRole("button", { name: "取消置顶", exact: true })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("video-menu-desktop.png") });
   await page.keyboard.press("Escape");
-  await manage("课程笔记测试.mp4").click();
+  await pinned.getByRole("button", renamedMenu).click();
+  await page.getByRole("button", { name: "取消置顶", exact: true }).click();
+  await expect(regular.locator(".library-row.selected")).toContainText(filename);
+  await expect(regular.getByRole("heading")).toHaveText(`文件列表 ${regularCount}`);
+  await expect(pinned.getByRole("button", renamedMenu)).toHaveCount(0);
+  if (pinnedCount === 0) await expect(pinned).toHaveCount(0);
+  await expect(page).toHaveURL(detailURL);
+  await regular.getByRole("button", renamedMenu).click();
   await page.getByRole("button", { name: "删除", exact: true }).click();
   const remove = page.getByRole("dialog", { name: "删除文件？" });
   await remove.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(manage("课程笔记测试.mp4")).toBeVisible();
-  await manage("课程笔记测试.mp4").click();
+  await expect(manage(filename)).toBeVisible();
+  await manage(filename).click();
   await page.getByRole("button", { name: "删除", exact: true }).click();
   await remove.getByRole("button", { name: "确认删除", exact: true }).click();
-  await expect(manage("课程笔记测试.mp4")).toHaveCount(0);
+  await expect(manage(filename)).toHaveCount(0);
   await expect(remove).not.toBeVisible();
   expect((await page.request.get(`/api/v1/videos/${video.id}/content`)).status()).toBe(404);
 });

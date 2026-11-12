@@ -9,9 +9,12 @@
   --border: #dedede;
   --control-border: #858585;
   --border-strong: #555;
-  --primary: #292929;
-  --primary-hover: #444;
-  --primary-text: #fff;
+  --primary: #147fa2;
+  --primary-action: #2fb5d4;
+  --primary-hover: #62dbee;
+  --primary-text: #002f6b;
+  --primary-soft: #ebffff;
+  --primary-active-text: #085588;
   --danger: #973333;
   --danger-bg: #fff1f1;
   --danger-border: #b24949;
@@ -23,13 +26,12 @@
   --success-hover: #24623d12;
   --warning: #735016;
   --warning-bg: #fff5d6;
-  /* 侧栏状态图标使用亮色填充；文字仍使用原有高对比度语义色。 */
-  --file-icon-running: #f2c40d;
-  --file-icon-completed: #28bd64;
-  --file-icon-stopped: #e23636;
+  --file-icon-warning: #7b4b00;
+  --file-icon-success: #006437;
+  --file-icon-danger: #b22025;
   --info: #145978;
   --info-bg: #e8f4fa;
-  --focus: #3658b8;
+  --focus: var(--primary);
   --overlay: #0005;
   --shadow: #0002;
   color-scheme: light;
@@ -53,9 +55,11 @@
   --border: #3b3b43;
   --control-border: #9999a0;
   --border-strong: #9b9ba7;
-  --primary: #ededf0;
-  --primary-hover: #d7d7df;
-  --primary-text: #18181b;
+  --primary: #9ef8ff;
+  --primary-action: #62dbee;
+  --primary-hover: #9ef8ff;
+  --primary-soft: #03417b;
+  --primary-active-text: var(--primary);
   --danger: #ffb4b4;
   --danger-bg: #3b2327;
   --danger-border: #74464c;
@@ -67,12 +71,12 @@
   --success-hover: #a9d8bf12;
   --warning: #e8c98a;
   --warning-bg: #372f20;
-  --file-icon-running: var(--warning);
-  --file-icon-completed: var(--success);
-  --file-icon-stopped: var(--danger);
+  --file-icon-warning: var(--warning);
+  --file-icon-success: var(--success);
+  --file-icon-danger: var(--danger);
   --info: #a8ddef;
   --info-bg: #20343e;
-  --focus: #b7c8ff;
+  --focus: var(--primary);
   --overlay: #0009;
   --shadow: #0006;
 }
