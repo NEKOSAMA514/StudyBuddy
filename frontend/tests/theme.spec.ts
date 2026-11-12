@@ -121,15 +121,16 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto("/#summary");
       if (width === 375) await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
       const [warning, success, failure] = theme === "light"
-        ? ["rgb(115, 80, 22)", "rgb(36, 98, 61)", "rgb(226, 54, 54)"]
+        ? ["rgb(123, 75, 0)", "rgb(0, 100, 55)", "rgb(178, 32, 37)"]
         : ["rgb(232, 201, 138)", "rgb(169, 216, 191)", "rgb(255, 180, 180)"];
+      const pausedBadge = theme === "light" ? "rgb(115, 80, 22)" : warning;
       for (const file of examples) {
         const item = page.locator(".sidebar .library-item").filter({ hasText: file.filename });
         const status = page.locator(".file-list tr").filter({ hasText: file.filename }).locator(".status-pill");
         await expect(item).toContainText(file.label);
         await expect(status).toHaveText(file.label);
         await expect(item.locator(".file-glyph")).toHaveCSS("color", file.status === "succeeded" ? success : warning);
-        if (file.status === "paused") await expect(status).toHaveCSS("color", warning);
+        if (file.status === "paused") await expect(status).toHaveCSS("color", pausedBadge);
       }
       await expect(page.locator(".sidebar .library-item").filter({ hasText: "失败文档.pdf" })).toContainText("处理失败");
       await expect(page.locator(".file-list tr").filter({ hasText: "失败文档.pdf" }).locator(".status-pill")).toHaveText("处理失败");
@@ -155,7 +156,7 @@ for (const theme of ["light", "dark"] as const) {
           });
         });
       });
-      expect(Math.min(...ratios)).toBeGreaterThanOrEqual(3);
+      expect(Math.min(...ratios)).toBeGreaterThanOrEqual(theme === "light" ? 5 : 3);
       if (test.info().project.name === "desktop-1280") await page.screenshot({
         path: test.info().outputPath(`sidebar-status-${theme}-${width}.png`), animations: "disabled",
       });
@@ -271,7 +272,7 @@ test("切换后刷新、导航与重新打开保留选择", async ({ page, conte
   expect(await page.evaluate(() => localStorage.getItem("studybuddy-theme"))).toBe("dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.locator(".sidebar").getByRole("button", { name: "笔记中心", exact: true }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "资料管理", exact: true }).click();
   await expect(page).toHaveURL(/#notes/);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const reopened = await context.newPage();

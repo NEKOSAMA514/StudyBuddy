@@ -26,7 +26,9 @@
   --success-hover: #24623d12;
   --warning: #735016;
   --warning-bg: #fff5d6;
-  --file-icon-stopped: #e23636;
+  --file-icon-warning: #7b4b00;
+  --file-icon-success: #006437;
+  --file-icon-danger: #b22025;
   --info: #145978;
   --info-bg: #e8f4fa;
   --focus: var(--primary);
@@ -69,7 +71,9 @@
   --success-hover: #a9d8bf12;
   --warning: #e8c98a;
   --warning-bg: #372f20;
-  --file-icon-stopped: var(--danger);
+  --file-icon-warning: var(--warning);
+  --file-icon-success: var(--success);
+  --file-icon-danger: var(--danger);
   --info: #a8ddef;
   --info-bg: #20343e;
   --focus: var(--primary);

@@ -126,7 +126,7 @@ for (const failure of ["network", "format"] as const) {
     await page.route("**/api/v1/videos", route => route.request().method() !== "POST" ? route.fallback()
       : failure === "network" ? route.abort() : route.fulfill({ contentType: "text/html", body: "broken upload response" }));
     await page.getByRole("button", { name: "关闭设置" }).click();
-    await page.locator(".home-options").getByRole("button", { name: /^资料库/ }).click();
+    await page.locator(".home-options").getByRole("button", { name: /^笔记中心/ }).click();
     await page.getByLabel("选择本地文件", { exact: true }).setInputFiles({ name: "sample.mp4", mimeType: "video/mp4", buffer: Buffer.from("fake") });
     await expect(page.locator(".error-notification")).toBeVisible();
     expect(mock.reports).toHaveLength(1);
@@ -322,7 +322,7 @@ test("悬停恢复完全不透明并停止消失，重复错误保持悬停，�
 test("同一上传校验错误只显示弹窗，消失后再次选择仍弹出", async ({ page }) => {
   await mockAPI(page);
   await page.getByRole("button", { name: "关闭设置" }).click();
-  await page.locator(".home-options").getByRole("button", { name: /^资料库/ }).click();
+  await page.locator(".home-options").getByRole("button", { name: /^笔记中心/ }).click();
   const input = page.getByLabel("选择本地文件", { exact: true });
   const invalid = { name: "不支持.exe", mimeType: "application/octet-stream", buffer: Buffer.from("invalid") };
   await input.setInputFiles(invalid);
@@ -351,7 +351,7 @@ async function mockFileList(page: Page) {
     created_at: "2026-10-12T00:00:00Z", latest_task: { id: "busy-task", status: "running" } }];
   await page.goto("/#summary");
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "资料库", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "资料管理", exact: true })).toBeVisible();
   return mock;
 }
 

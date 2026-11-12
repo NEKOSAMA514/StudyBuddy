@@ -12,14 +12,14 @@ export function Home({ navigate }: { navigate: Navigate }) {
       <p>查找已有笔记，或把资料整理成清晰的笔记。</p>
       <div className="home-options">
         <button onClick={() => navigate("notes")}>
-          <span className="option-icon"><Icon name="notebook-pen" /></span>
-          <strong>笔记中心</strong>
+          <span className="option-icon"><Icon name="panels-top-left" /></span>
+          <strong>资料管理</strong>
           <small>搜索笔记，集中回看重点</small>
           <span className="option-arrow">↗</span>
         </button>
         <button onClick={() => navigate("summary")}>
-          <span className="option-icon"><Icon name="panels-top-left" /></span>
-          <strong>资料库</strong>
+          <span className="option-icon"><Icon name="notebook-pen" /></span>
+          <strong>笔记中心</strong>
           <small>上传视频或文档，生成带来源的笔记</small>
           <span className="option-arrow">↗</span>
         </button>

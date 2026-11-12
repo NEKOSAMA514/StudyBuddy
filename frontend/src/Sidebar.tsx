@@ -53,17 +53,17 @@ export function Sidebar({
       </a>
       <button
         className={`mode-link ${mode === "notes" ? "active" : ""}`}
-        aria-label="笔记中心"
+        aria-label="资料管理"
         onClick={() => navigate("notes")}
       >
-        <Icon name="notebook-pen" /> 笔记中心
+        <Icon name="panels-top-left" /> 资料管理
       </button>
       <button
         className={`mode-link ${mode === "summary" ? "active" : ""}`}
-        aria-label="资料库"
+        aria-label="笔记中心"
         onClick={() => navigate("summary")}
       >
-        <Icon name="panels-top-left" /> 资料库
+        <Icon name="notebook-pen" /> 笔记中心
       </button>
       <nav aria-label="已上传的文件">
         {groups.map(({ label, ariaLabel, files }) => (

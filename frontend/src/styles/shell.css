@@ -184,16 +184,16 @@
 .file-glyph.running,
 .file-glyph.stopping,
 .file-glyph.paused {
-  color: var(--warning);
+  color: var(--file-icon-warning);
 }
 
 .file-glyph.succeeded {
-  color: var(--success);
+  color: var(--file-icon-success);
 }
 
 .file-glyph.interrupted,
 .file-glyph.failed {
-  color: var(--file-icon-stopped);
+  color: var(--file-icon-danger);
 }
 
 .library-name {

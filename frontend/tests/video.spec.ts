@@ -701,14 +701,25 @@ test("损坏的视频显示明确错误，不生成总结", async ({ page }) => 
 test("桌面首页两个入口与笔记中心", async ({ page }) => {
   await page.goto("/");
   const home = page.locator(".home-options");
-  const library = home.getByRole("button", { name: /^资料库/ });
-  await expect(home.getByRole("button", { name: "笔记中心" })).toBeVisible();
-  await expect(library).toContainText("上传视频或文档，生成带来源的笔记");
+  const sidebar = page.locator(".sidebar");
+  const notes = home.getByRole("button", { name: /^笔记中心/ });
+  const library = home.getByRole("button", { name: /^资料管理/ });
+  const sidebarNotes = sidebar.getByRole("button", { name: "笔记中心", exact: true });
+  const sidebarLibrary = sidebar.getByRole("button", { name: "资料管理", exact: true });
+  await expect(home.locator("button > strong")).toHaveText(["资料管理", "笔记中心"]);
+  await expect(sidebar.locator("button.mode-link")).toHaveText(["资料管理", "笔记中心"]);
+  await expect(library.locator("svg")).toHaveAttribute("data-icon", "panels-top-left");
+  await expect(notes.locator("svg")).toHaveAttribute("data-icon", "notebook-pen");
+  await expect(sidebarLibrary.locator("svg")).toHaveAttribute("data-icon", "panels-top-left");
+  await expect(sidebarNotes.locator("svg")).toHaveAttribute("data-icon", "notebook-pen");
+  await expect(library).toContainText("搜索笔记，集中回看重点");
+  await expect(notes).toContainText("上传视频或文档，生成带来源的笔记");
   await page.screenshot({
     path: test.info().outputPath("home-desktop.png"),
     fullPage: true,
   });
-  await page.locator(".home-options").getByRole("button", { name: "笔记中心" }).click();
+  await library.click();
+  await expect(page).toHaveURL(/#notes(?:\?|$)/);
   await expect(
     page.getByRole("heading", { name: "笔记中心", exact: true }),
   ).toBeVisible();
@@ -716,8 +727,16 @@ test("桌面首页两个入口与笔记中心", async ({ page }) => {
     page.getByRole("searchbox", { name: "搜索笔记" }),
   ).toBeVisible();
   await page.getByRole("link", { name: "新的开始", exact: false }).click();
-  await library.click();
+  await notes.click();
+  await expect(page).toHaveURL(/#summary$/);
+  await expect(page.getByRole("heading", { name: "资料管理", exact: true })).toBeVisible();
   await expect(page.getByLabel("选择本地文件")).toBeAttached();
+  await sidebarLibrary.click();
+  await expect(page).toHaveURL(/#notes(?:\?|$)/);
+  await expect(sidebarLibrary).toHaveClass(/\bactive\b/);
+  await sidebarNotes.click();
+  await expect(page).toHaveURL(/#summary$/);
+  await expect(sidebarNotes).toHaveClass(/\bactive\b/);
 });
 
 test("笔记补充要求可留空、编辑保存并清空", async ({ page, request }) => {
@@ -988,20 +1007,20 @@ test("侧栏后台任务区分排队、生成、停止与失败", async ({ page 
   await page.route("**/api/v1/videos/*/evidence*", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
   const item = page.locator(".library-item").filter({ hasText: "后台处理.mp4" });
-  const warning = "rgb(115, 80, 22)";
+  const warning = "rgb(123, 75, 0)";
   await expect(item.locator(".file-glyph")).toHaveCSS("color", warning);
   await expect(item).toContainText("排队中");
   status = "running";
   await expect(item.locator(".file-glyph")).toHaveClass(/running/);
   await expect(item.locator(".file-glyph")).toHaveCSS("color", warning);
   status = "succeeded";
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(36, 98, 61)");
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(0, 100, 55)");
   await expect(item).toContainText("笔记已生成");
   for (const [next, label] of [["stopping", "正在停止"], ["paused", "已停止"], ["interrupted", "已中断"], ["failed", "处理失败"]]) {
     status = next;
     await page.reload();
     await expect(item.locator(".file-glyph")).toHaveClass(new RegExp(next));
-    const color = next === "stopping" || next === "paused" ? warning : "rgb(226, 54, 54)";
+    const color = next === "stopping" || next === "paused" ? warning : "rgb(178, 32, 37)";
     await expect(item.locator(".file-glyph")).toHaveCSS("color", color);
     await expect(item).toContainText(label);
   }
