@@ -339,7 +339,7 @@ test("无笔记页面不加载 Markdown 和公式渲染资源", async ({ page })
   const resources: string[] = [];
   page.on("request", request => { resources.push(request.url()); });
   await page.goto("/#summary");
-  await expect(page.getByRole("heading", { name: "总结分析", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "资料库", exact: true })).toBeVisible();
   const manifest = JSON.parse(readFileSync(resolve(process.env.STATIC_DIR!, ".vite/manifest.json"), "utf8"));
   const entry = Object.keys(manifest).find(key => key.endsWith("/notes/NoteMarkdown.tsx"))!;
   expect(entry).toBeTruthy();

@@ -62,12 +62,6 @@
   flex-shrink: 0;
 }
 
-.nav-label {
-  margin: 24px 12px 8px;
-  color: var(--text-secondary, #8a8a8d);
-  font-size: 12px;
-}
-
 .history-label {
   display: flex;
   justify-content: space-between;

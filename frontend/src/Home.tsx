@@ -19,8 +19,8 @@ export function Home({ navigate }: { navigate: Navigate }) {
         </button>
         <button onClick={() => navigate("summary")}>
           <span className="option-icon"><Icon name="panels-top-left" /></span>
-          <strong>开始总结？</strong>
-          <small>上传视频，整理有依据的笔记</small>
+          <strong>资料库</strong>
+          <small>上传视频或文档，生成带来源的笔记</small>
           <span className="option-arrow">↗</span>
         </button>
       </div>

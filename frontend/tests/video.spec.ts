@@ -700,8 +700,10 @@ test("损坏的视频显示明确错误，不生成总结", async ({ page }) => 
 
 test("桌面首页两个入口与笔记中心", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".home-options").getByRole("button", { name: "笔记中心" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "开始总结？" })).toBeVisible();
+  const home = page.locator(".home-options");
+  const library = home.getByRole("button", { name: /^资料库/ });
+  await expect(home.getByRole("button", { name: "笔记中心" })).toBeVisible();
+  await expect(library).toContainText("上传视频或文档，生成带来源的笔记");
   await page.screenshot({
     path: test.info().outputPath("home-desktop.png"),
     fullPage: true,
@@ -714,7 +716,7 @@ test("桌面首页两个入口与笔记中心", async ({ page }) => {
     page.getByRole("searchbox", { name: "搜索笔记" }),
   ).toBeVisible();
   await page.getByRole("link", { name: "新的开始", exact: false }).click();
-  await page.getByRole("button", { name: "开始总结？" }).click();
+  await library.click();
   await expect(page.getByLabel("选择本地文件")).toBeAttached();
 });
 
@@ -1051,6 +1053,7 @@ test("侧栏菜单重命名置顶持久化，删除取消和确认", async ({ pa
   await expect(sidebar.getByRole("region").first()).toHaveAccessibleName("置顶文件");
   await expect(pinned.getByRole("heading")).toHaveText(`置顶文件 ${pinnedCount + 1}`);
   await expect(pinned.getByRole("button", renamedMenu)).toBeVisible();
+  await expect(pinned.locator(".library-item").filter({ hasText: filename }).locator("small")).not.toContainText("置顶");
   await expect(regular.getByRole("heading")).toHaveText(`文件列表 ${regularCount - 1}`);
   await expect(regular.getByRole("button", renamedMenu)).toHaveCount(0);
   await page.reload();

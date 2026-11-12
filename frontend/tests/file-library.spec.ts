@@ -47,15 +47,16 @@ test("主页及侧栏入口显示上传和文件列表，不恢复上次文件",
   const video = await save(request, "历史文件.mp4");
   await page.addInitScript(id => localStorage.setItem("studybuddy-video", id), video.id);
   await page.goto("/#");
-  await page.getByRole("button", { name: /开始总结？/ }).click();
+  await page.locator(".home-options").getByRole("button", { name: /^资料库/ }).click();
   await expect(page).toHaveURL(/#summary$/);
+  await expect(page.getByRole("heading", { name: "资料库", exact: true })).toBeVisible();
   const list = page.getByRole("region", { name: "文件列表", exact: true });
   await expect(list.getByText(video.filename, { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "文件上传", exact: true })).toBeVisible();
   await expect(page.locator(".player-panel")).toHaveCount(0);
   await list.getByRole("button", { name: video.filename, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`#summary/${video.id}$`));
-  await page.getByRole("button", { name: "开始总结", exact: true }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "资料库", exact: true }).click();
   await expect(list).toBeVisible();
   await expect(page.locator(".player-panel")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("file-library.png"), fullPage: true });

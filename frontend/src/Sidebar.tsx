@@ -51,7 +51,6 @@ export function Sidebar({
       <a href="#" className={`mode-link ${mode === "home" ? "active" : ""}`}>
         ＋ 新的开始
       </a>
-      <div className="nav-label">笔记中心</div>
       <button
         className={`mode-link ${mode === "notes" ? "active" : ""}`}
         aria-label="笔记中心"
@@ -59,13 +58,12 @@ export function Sidebar({
       >
         <Icon name="notebook-pen" /> 笔记中心
       </button>
-      <div className="nav-label">总结分析模式</div>
       <button
         className={`mode-link ${mode === "summary" ? "active" : ""}`}
-        aria-label="开始总结"
+        aria-label="资料库"
         onClick={() => navigate("summary")}
       >
-        <Icon name="panels-top-left" /> 开始总结
+        <Icon name="panels-top-left" /> 资料库
       </button>
       <nav aria-label="已上传的文件">
         {groups.map(({ label, ariaLabel, files }) => (
@@ -94,7 +92,6 @@ export function Sidebar({
                     <span className="library-name">
                       <span className="library-filename">{file.filename}</span>
                       <small>
-                        {file.pinned ? "置顶 · " : ""}
                         {file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {fileStatusLabel(file)}
                       </small>
                     </span>

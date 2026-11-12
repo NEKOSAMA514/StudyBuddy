@@ -29,7 +29,7 @@ export function FileLibrary({ files, busy, loading, loadError, retryRead, upload
   return (
     <div className="file-library">
       <div className="heading">
-        <div><h1>总结分析</h1><p>上传资料，也可以继续查看已有文件。</p></div>
+        <div><h1>资料库</h1><p>上传资料，也可以继续查看已有文件。</p></div>
       </div>
       <VideoDownload onGenerateNotes={onGenerateNotes} disabled={busy} />
       <section className={`file-upload ${dragging ? "dragging" : ""}`} aria-label="文件上传"
