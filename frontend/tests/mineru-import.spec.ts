@@ -56,8 +56,19 @@ test("MinerU Token独立保存清除，配置后PDF默认精准且可选本地",
     return ["font-size", "font-weight", "margin-top"].every(property =>
       getComputedStyle(node).getPropertyValue(property) === getComputedStyle(other).getPropertyValue(property));
   })).toBe(true);
-  await settings.getByLabel("MinerU API Token").fill("fake-mineru-secret");
-  await settings.getByRole("button", { name: "保存 MinerU 设置", exact: true }).click();
+  const token = settings.getByLabel("MinerU API Token");
+  const save = settings.getByRole("button", { name: "保存 MinerU 设置", exact: true });
+  await expect(token).toHaveAccessibleDescription("尚未保存 MinerU Token。");
+  await token.fill("fake-mineru-secret");
+  await save.click();
+  await expect(settings.getByText("MinerU 设置已保存。", { exact: true })).toBeVisible();
+  expect(await (await request.get("/api/v1/settings/mineru")).json()).toEqual({ has_token: true });
+  await expect(settings.locator("#mineru-token-help")).toHaveCSS("font-size", "13px");
+  const savedTokenHelp = "Token 已保存。留空保留，保存新值会替换。";
+  await token.fill("fake-mineru-replacement");
+  await expect(token).toHaveAccessibleDescription(savedTokenHelp);
+  await token.clear();
+  await save.click();
   await expect(settings.getByText("MinerU 设置已保存。", { exact: true })).toBeVisible();
   expect(await (await request.get("/api/v1/settings/mineru")).json()).toEqual({ has_token: true });
   await settings.getByRole("button", { name: "关闭设置", exact: true }).click();
@@ -72,6 +83,7 @@ test("MinerU Token独立保存清除，配置后PDF默认精准且可选本地",
   await page.goto("/#settings");
   await settings.getByRole("button", { name: "清除 MinerU Token", exact: true }).click();
   await expect(settings.getByText("MinerU Token 已清除。", { exact: true })).toBeVisible();
+  await expect(token).toHaveAccessibleDescription("尚未保存 MinerU Token。");
 });
 
 test("没有模型密钥时仍可切换本地提取，补齐密钥后生成笔记", async ({ page, request }) => {

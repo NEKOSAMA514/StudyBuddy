@@ -152,6 +152,11 @@
   font-size: 12px;
   line-height: 1.9;
 }
+.settings-card .settings-help {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+}
 .setting-check {
   display: flex;
   gap: 10px;
@@ -169,9 +174,8 @@
   justify-content: space-between;
   gap: 10px;
 }
-.prompt-heading h3 {
+.prompt-heading label {
   font-size: 15px;
-  margin: 0;
   font-weight: 550;
 }
 .prompt-heading .text-button {
