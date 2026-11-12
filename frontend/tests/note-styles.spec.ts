@@ -95,7 +95,7 @@ for (const kind of ["video", "document"] as const) {
       }
     }
   });
-  test(`${kind}笔记保留单波浪号，双波浪号仍表示删除线`, async ({ page, request }) => {
+  test(`${kind}笔记解析中文加粗并保留 Markdown 符号`, async ({ page, request }) => {
     const video = kind === "video";
     const files = video ? "videos" : "documents";
     const tasks = video ? "tasks" : "document-tasks";
@@ -110,27 +110,43 @@ for (const kind of ["video", "document"] as const) {
     const created = await (await request.post(`/api/v1/${files}/${file.id}/analyses`, { data: { note_style: "detailed" } })).json();
     await expect.poll(async () => (await (await request.get(`/api/v1/${tasks}/${created.task_id}`)).json()).status,
       { timeout: 30000 }).toBe("succeeded");
+    const emphasisCases = [
+      { name: "饭团（DeepSeek）", suffix: "以生活条件劝退。" },
+      { name: "橙子（KIMI）", suffix: "用三个现实问题引导。" },
+      { name: "Claude（橙子）", suffix: "指出“你要拍的内容是让你妈上班，然后你拿去赚钱”" },
+      { name: "GPT", suffix: "以现实问题引导。" },
+    ];
     await page.route(`**/api/v1/${analyses}/${created.task_id}`, async route => {
       const response = await route.fetch();
       const result = await response.json();
       result.chapters[0].markdown = [
+        ...emphasisCases.map(({ name, suffix }) => `**${name}**${suffix}`),
+        String.raw`转义星号：\*\*Claude（橙子）\*\*指出。`,
+        "行内星号：`**Claude（橙子）**指出`。",
+        "公式：$x^2$。",
         "引语：“哦~你在担心我啊。哦~”。",
         String.raw`转义：“哦\~你在担心我啊。哦\~”。`,
         "代码：`哦~你在担心我啊。哦~`。",
         "~~应划掉的文字~~",
         "| 原文 |\n| --- |\n| 哦~你在担心我啊。哦~ |",
-        "```text\n哦~你在担心我啊。哦~\n```",
+        "```text\n哦~你在担心我啊。哦~\n**Claude（橙子）**指出\n```",
       ].join("\n\n");
       await route.fulfill({ response, json: result });
     });
     await page.goto(`/#summary/${file.id}`);
     const body = page.locator(video ? "#video-notes .note-markdown" : "#document-notes .note-markdown").first();
+    await expect(body.locator("strong")).toHaveText(emphasisCases.map(({ name }) => name));
+    await expect(body.locator("p:has(> strong)")).toHaveText(emphasisCases.map(({ name, suffix }) => name + suffix));
+    await expect(body.getByText("转义星号：**Claude（橙子）**指出。", { exact: true })).toBeVisible();
+    await expect(body.locator("p code")).toHaveText(["**Claude（橙子）**指出", "哦~你在担心我啊。哦~"]);
+    await expect(body.locator(".katex annotation")).toHaveText("x^2");
     await expect(body.locator("p").filter({ hasText: "引语：" })).toHaveText("引语：“哦~你在担心我啊。哦~”。");
     await expect(body.locator("p").filter({ hasText: "转义：" })).toHaveText("转义：“哦~你在担心我啊。哦~”。");
     await expect(body.locator("p").filter({ hasText: "代码：" })).toHaveText("代码：哦~你在担心我啊。哦~。");
     await expect(body.locator("del")).toHaveText(["应划掉的文字"]);
     await expect(body.locator("table td")).toHaveText("哦~你在担心我啊。哦~");
     await expect(body.locator("pre code")).toContainText("哦~你在担心我啊。哦~");
+    await expect(body.locator("pre code")).toContainText("**Claude（橙子）**指出");
   });
 }
 
