@@ -1,5 +1,5 @@
-import { taskStatusLabels } from "./shared/taskStatus";
 import { FileMenu, type FileAction } from "./files/FileActions";
+import { fileStatusLabel } from "./files/fileStatus";
 import type { LibraryFile } from "./types";
 import type { Mode, Navigate } from "./navigation";
 import { clock } from "./util/time";
@@ -95,7 +95,7 @@ export function Sidebar({
                       {file.filename}
                       <small>
                         {file.pinned ? "置顶 · " : ""}
-                        <>{file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {status === "succeeded" ? "已总结" : status ? taskStatusLabels[status] : file.kind === "document" ? file.extracted === false ? "待处理" : "已提取" : "待分析"}</>
+                        {file.kind === "document" ? file.format.toUpperCase() : clock(file.duration)} · {fileStatusLabel(file)}
                       </small>
                     </span>
                   </button>

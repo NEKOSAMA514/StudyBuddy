@@ -106,7 +106,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.addInitScript(value => localStorage.setItem("studybuddy-theme", value), theme);
     const examples = [
       { id: "running", filename: "正在生成.mp4", status: "running", label: "处理中" },
-      { id: "completed", filename: "完成笔记.mp4", status: "succeeded", label: "已总结" },
+      { id: "completed", filename: "完成笔记.mp4", status: "succeeded", label: "笔记已生成" },
       { id: "stopped", filename: "停止任务.mp4", status: "paused", label: "已停止" },
     ];
     await page.route("**/api/v1/videos", route => route.fulfill({ json: examples.map(file => ({
@@ -114,21 +114,26 @@ for (const theme of ["light", "dark"] as const) {
       latest_task: taskResponse({ ...task, id: file.id, video_id: file.id, status: file.status, notes_state: "none", notes_revision: 0 }),
     })) }));
     await page.route("**/api/v1/documents", route => route.fulfill({ json: [{ id: "failed-document", kind: "document", filename: "失败文档.pdf",
-      format: "pdf", size_bytes: 100, unit_count: 1, character_count: 100, warnings: [],
+      format: "pdf", size_bytes: 100, unit_count: 1, character_count: 100, warnings: [], created_at: "2026-10-23T00:00:00Z",
       latest_task: { ...task, id: "document-task", document_id: "failed-document", status: "failed" } }] }));
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 871 });
-      await page.goto("/");
+      await page.goto("/#summary");
       if (width === 375) await page.getByRole("button", { name: "展开侧边栏", exact: true }).click();
-      const expected = theme === "light"
+      const [warning, success, failure] = theme === "light"
         ? ["rgb(115, 80, 22)", "rgb(36, 98, 61)", "rgb(226, 54, 54)"]
         : ["rgb(232, 201, 138)", "rgb(169, 216, 191)", "rgb(255, 180, 180)"];
-      for (const [index, file] of examples.entries()) {
+      for (const file of examples) {
         const item = page.locator(".sidebar .library-item").filter({ hasText: file.filename });
+        const status = page.locator(".file-list tr").filter({ hasText: file.filename }).locator(".status-pill");
         await expect(item).toContainText(file.label);
-        await expect(item.locator(".file-glyph")).toHaveCSS("color", expected[index]);
+        await expect(status).toHaveText(file.label);
+        await expect(item.locator(".file-glyph")).toHaveCSS("color", file.status === "succeeded" ? success : warning);
+        if (file.status === "paused") await expect(status).toHaveCSS("color", warning);
       }
-      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveCSS("color", expected[2]);
+      await expect(page.locator(".sidebar .library-item").filter({ hasText: "失败文档.pdf" })).toContainText("处理失败");
+      await expect(page.locator(".file-list tr").filter({ hasText: "失败文档.pdf" }).locator(".status-pill")).toHaveText("处理失败");
+      await expect(page.locator(".sidebar .file-glyph.failed")).toHaveCSS("color", failure);
       await expect(page.locator(".sidebar .file-glyph.failed")).toHaveAttribute("data-icon", "file-text");
       const ratios = await page.locator(".sidebar .file-glyph").evaluateAll(elements => {
         const root = getComputedStyle(document.documentElement);

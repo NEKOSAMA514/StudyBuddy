@@ -1,6 +1,6 @@
-import { taskStatusLabels } from "./shared/taskStatus";
 import { useRef, useState } from "react";
 import { FileMenu, type FileAction } from "./files/FileActions";
+import { fileStatusLabel } from "./files/fileStatus";
 import { VideoDownload } from "./VideoDownload";
 
 import type { LibraryFile } from "./types";
@@ -79,7 +79,7 @@ export function FileLibrary({ files, busy, loading, loadError, retryRead, upload
                 <td>{file.kind === "document" ? `文档 · ${file.format.toUpperCase()}` : `视频 · ${file.media_info?.container?.toUpperCase() || "MP4"}`}</td>
                 <td>{file.size_bytes >= 1048576 ? `${(file.size_bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size_bytes / 1024))} KB`}</td>
                 <td>{new Date(file.created_at).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</td>
-                <td><span className={`status-pill ${file.latest_task?.status || ""}`}>{(file.latest_task && taskStatusLabels[file.latest_task.status]) || (file.kind === "document" ? file.extracted === false ? "待处理" : "已提取" : "未处理")}</span></td>
+                <td><span className={`status-pill ${file.latest_task?.status || ""}`}>{fileStatusLabel(file)}</span></td>
                 <td><FileMenu file={file} disabled={busy} onAction={action => onAction(file.id, action)} /></td>
               </tr>
             ))}</tbody>

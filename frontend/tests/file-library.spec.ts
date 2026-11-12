@@ -88,7 +88,7 @@ test("键盘选择上传只保存文件，手动确认模型才创建任务", as
   await expect(page.getByLabel("任务动态记录", { exact: true }).getByText("视频已保存，等待开始处理", { exact: true })).toBeVisible();
   expect(analyses).toHaveLength(0);
   await page.locator(".detail-back").click();
-  await expect(page.getByRole("region", { name: "文件列表", exact: true }).getByText("未处理", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "文件列表", exact: true }).getByText("未生成笔记", { exact: true })).toBeVisible();
   await page.getByRole("region", { name: "文件列表", exact: true }).getByRole("button", { name: video.filename, exact: true }).click();
   await page.getByRole("button", { name: "开始处理", exact: true }).click();
   await dialog.getByRole("button", { name: "开始处理", exact: true }).click();
@@ -97,7 +97,7 @@ test("键盘选择上传只保存文件，手动确认模型才创建任务", as
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: test.info().outputPath("file-detail.png"), fullPage: true });
   await page.locator(".detail-back").click();
-  await expect(page.getByRole("region", { name: "文件列表", exact: true }).getByText("已完成", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "文件列表", exact: true }).getByText("笔记已生成", { exact: true })).toBeVisible();
 });
 
 test("拖拽上传进入待开始详情，刷新和前进后退不串文件", async ({ page, request }) => {
@@ -256,7 +256,7 @@ test("返回列表保持后台处理，并自动刷新完成状态", async ({ pa
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.locator(".detail-back").click();
   const row = page.getByRole("region", { name: "文件列表", exact: true }).getByRole("row").filter({ hasText: video.filename });
-  await expect(row.getByText("已完成", { exact: true })).toBeVisible({ timeout: 45000 });
+  await expect(row.getByText("笔记已生成", { exact: true })).toBeVisible({ timeout: 45000 });
   expect(stops).toHaveLength(0);
 });
 
@@ -264,12 +264,20 @@ test("文件列表展示超过 100 条及各种状态，行菜单不进入详情
   const states = [null, "queued", "running", "succeeded", "failed", "paused", "interrupted", "stopping"];
   const files = Array.from({ length: 105 }, (_, index) => ({ id: `item-${index}`, filename: `资料-${index}.mp4`, size_bytes: 2000,
     created_at: "2026-10-11T00:00:00+00:00", latest_task: states[index % states.length] ? { status: states[index % states.length] } : null }));
+  const documents = [true, false].map(extracted => ({ id: `document-${extracted}`, kind: "document", format: "pdf", extracted,
+    filename: extracted ? "提取完成.pdf" : "等待提取.pdf", size_bytes: 2000, created_at: "2026-10-11T00:00:00+00:00" }));
   await page.route("**/api/v1/videos", route => route.request().method() === "GET" ? route.fulfill({ json: files }) : route.continue());
+  await page.route("**/api/v1/documents", route => route.fulfill({ json: documents }));
   await page.goto("/#summary");
   const list = page.getByRole("region", { name: "文件列表", exact: true });
-  await expect(list.getByRole("row")).toHaveCount(106);
-  for (const status of ["未处理", "排队中", "处理中", "已完成", "处理失败", "已停止", "已中断", "正在停止"])
+  await expect(list.getByRole("row")).toHaveCount(files.length + documents.length + 1);
+  for (const status of ["未生成笔记", "排队中", "处理中", "笔记已生成", "处理失败", "已停止", "已中断", "正在停止"])
     await expect(list.getByText(status, { exact: true }).first()).toBeVisible();
+  for (const { filename, extracted } of documents) {
+    const status = extracted ? "已提取" : "待处理";
+    await expect(list.getByRole("row").filter({ hasText: filename }).locator(".status-pill")).toHaveText(status);
+    await expect(page.locator(".sidebar .library-item").filter({ hasText: filename }).locator("small")).toHaveText(`PDF · ${status}`);
+  }
   await list.getByRole("button", { name: "管理文件：资料-0.mp4", exact: true }).click();
   await expect(page.getByRole("button", { name: "重命名", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#summary$/);

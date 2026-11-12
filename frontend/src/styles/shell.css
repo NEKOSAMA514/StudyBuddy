@@ -187,7 +187,9 @@
 }
 
 .file-glyph.queued,
-.file-glyph.running {
+.file-glyph.running,
+.file-glyph.stopping,
+.file-glyph.paused {
   color: var(--warning);
 }
 
@@ -195,8 +197,6 @@
   color: var(--success);
 }
 
-.file-glyph.stopping,
-.file-glyph.paused,
 .file-glyph.interrupted,
 .file-glyph.failed {
   color: var(--file-icon-stopped);

@@ -976,7 +976,7 @@ test("上传后手动确认模型，取消不分析，确认后只覆盖本次�
   await expect(page.getByText("有据可查", { exact: true })).toHaveCount(0);
 });
 
-test("侧栏后台任务等待和运行时黄色，成功变绿，停止或失败变红", async ({ page }) => {
+test("侧栏后台任务区分排队、生成、停止与失败", async ({ page }) => {
   let status = "queued";
   await page.route("**/api/v1/videos", (route) => route.fulfill({ json: [
     { id: "idle-video", filename: "待分析.mp4", duration: 30, size_bytes: 100, latest_task: null },
@@ -986,22 +986,26 @@ test("侧栏后台任务等待和运行时黄色，成功变绿，停止或失�
   await page.route("**/api/v1/videos/*/evidence*", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
   const item = page.locator(".library-item").filter({ hasText: "后台处理.mp4" });
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(242, 196, 13)");
+  const warning = "rgb(115, 80, 22)";
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", warning);
   await expect(item).toContainText("排队中");
   status = "running";
   await expect(item.locator(".file-glyph")).toHaveClass(/running/);
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(242, 196, 13)");
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", warning);
   status = "succeeded";
-  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(40, 189, 100)");
-  await expect(item).toContainText("已总结");
+  await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(36, 98, 61)");
+  await expect(item).toContainText("笔记已生成");
   for (const [next, label] of [["stopping", "正在停止"], ["paused", "已停止"], ["interrupted", "已中断"], ["failed", "处理失败"]]) {
     status = next;
     await page.reload();
     await expect(item.locator(".file-glyph")).toHaveClass(new RegExp(next));
-    await expect(item.locator(".file-glyph")).toHaveCSS("color", "rgb(226, 54, 54)");
+    const color = next === "stopping" || next === "paused" ? warning : "rgb(226, 54, 54)";
+    await expect(item.locator(".file-glyph")).toHaveCSS("color", color);
     await expect(item).toContainText(label);
   }
-  await expect(page.getByRole("button", { name: /待分析.mp4/ }).locator(".file-glyph")).toHaveCSS("color", "rgb(98, 98, 98)");
+  const idle = page.locator(".sidebar .library-item").filter({ hasText: "待分析.mp4" });
+  await expect(idle).toContainText("未生成笔记");
+  await expect(idle.locator(".file-glyph")).toHaveCSS("color", "rgb(98, 98, 98)");
 });
 
 test("停止处理后刷新保持停止，继续完成同一任务", async ({ page }) => {

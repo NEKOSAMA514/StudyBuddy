@@ -368,7 +368,7 @@ for (const backgroundKind of ["video", "document"] as const) {
       await expect(row).toContainText("处理中");
       await expect.poll(() => [reads.videos, reads.documents]).toEqual([2, 2]);
       background.latest_task.status = "succeeded";
-      await expect(row).toContainText("已总结", { timeout: 16000 });
+      await expect(row).toContainText("笔记已生成", { timeout: 16000 });
       expect(reads.extraction).toBeGreaterThanOrEqual(2);
       expect(reads.completed).toBeGreaterThanOrEqual(3);
       expect(reads.maxActive).toBe(1);
