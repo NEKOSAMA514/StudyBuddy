@@ -14,6 +14,20 @@
 .note-search-group { margin: 20px 0; }
 .note-search-group header { padding: 20px; border-bottom: 1px solid var(--border); }
 .note-search-group h2 { margin: 4px 0 0; font-size: 18px; overflow-wrap: anywhere; }
+.note-search-group .note-search-source {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 20px;
+}
+.note-search-source .eyebrow { flex: none; }
+.note-search-source h2 {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
 .note-search-hit { padding: 20px; }
 .note-search-hit + .note-search-hit { border-top: 1px solid var(--border); }
 .note-search-hit h3 { margin: 4px 0 12px; font-size: 18px; overflow-wrap: anywhere; }
