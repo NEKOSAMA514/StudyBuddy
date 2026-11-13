@@ -4,7 +4,7 @@ from ..analysis.llm import ModelClient as BaseModelClient
 from ..analysis.concise_prompt import concise_messages
 from .prompts import SYSTEM_SUMMARY_PROMPT, VIDEO_INSTRUCTIONS, CONCISE_VIDEO_RULES, CONCISE_VIDEO_INSTRUCTION
 from .schemas import SCHEMAS
-from .model_input import deduplicate_ocr
+from .model_input import deduplicate_ocr, nearby_speech_ids
 
 
 class ModelClient(BaseModelClient):
@@ -12,18 +12,28 @@ class ModelClient(BaseModelClient):
     missing_key_message = "本地识别已保留。请打开「模型设置」填写当前 API 的密钥，再重试任务。"
 
     def messages(self, operation, payload):
-        if operation in {"chapters", "extract"}:
-            # 仅精简发送副本；本地时间仍用于缓存、证据分配和引用定位。
+        payload = deduplicate_ocr(payload)
+        if operation in {"chapters", "extract", "concise"}:
+            # 根据完整时间关联同期语音，发送副本只带来源编号。
             def compact(chapter):
-                return {**{key: value for key, value in chapter.items() if key not in {"start_seconds", "end_seconds"}}, **{
-                    key: [{field: value for field, value in item.items() if field not in {"start_seconds", "end_seconds"}}
-                          for item in chapter[key]]
-                    for key in ("primary", "context") if key in chapter}}
+                sent = {key: value for key, value in chapter.items() if key not in {"start_seconds", "end_seconds"}}
+                links = nearby_speech_ids(chapter.get("primary", []), chapter.get("context", []))
+                for key in ("primary", "context"):
+                    if key not in chapter:
+                        continue
+                    sent[key] = []
+                    for item in chapter[key]:
+                        record = {field: value for field, value in item.items() if field not in {"start_seconds", "end_seconds"}}
+                        if key == "primary" and item["id"] in links:
+                            record["nearby_speech_id"] = links[item["id"]]
+                        sent[key].append(record)
+                return sent
             if operation == "chapters" and "chapters" in payload:
                 payload = {**payload, "chapters": [compact(chapter) for chapter in payload["chapters"]]}
             elif operation == "extract" and "chapter" in payload:
                 payload = {**payload, "chapter": compact(payload["chapter"])}
-        payload = deduplicate_ocr(payload)
+            elif operation == "concise":
+                payload = compact(payload)
         if operation == "concise":
             return concise_messages(payload, self.settings.summary_prompt, CONCISE_VIDEO_RULES,
                                     instruction=CONCISE_VIDEO_INSTRUCTION)

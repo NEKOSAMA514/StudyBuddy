@@ -62,8 +62,8 @@ def test_segment_trigger_boundaries(seconds, characters, segmented):
 def test_repeated_ocr_does_not_split_short_video_or_discard_chemical_changes(tmp_path):
     repeated = "酸性条件下以铁铵矾为指示剂，使用标准溶液进行滴定。\n" * 25
     changes = ["AgCl；Fe2+；0.1mL", "AgC1；Fe3+；0.01mL", "SCN−；温度20℃", "SCN+；温度30℃"]
-    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i * 15,
-                 "end_seconds": i * 15, "text": repeated + text} for i, text in enumerate(changes)]
+    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i,
+                 "end_seconds": i, "text": repeated + text} for i, text in enumerate(changes)]
     evidence = [{**item, "text": item["text"] * 12} for item in evidence]
     original = deepcopy(evidence)
     assert sum(len(item["text"]) for item in evidence) > DEFAULT_INPUT_TEXT_LIMIT
@@ -91,8 +91,8 @@ def test_unique_ocr_still_counts_towards_segment_budget():
 
 
 def test_each_segment_counts_its_own_shared_ocr_and_reserves_context(small_outline_budget):
-    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i * 15,
-                 "end_seconds": i * 15, "text": text * count}
+    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i,
+                 "end_seconds": i, "text": text * count}
                 for i, (text, count) in enumerate((("甲", 8000), ("甲", 8000),
                                                   ("乙", 8000), ("乙", 8000), ("丙", 6000)))]
     segmented, parts = split_segments(evidence, 650)

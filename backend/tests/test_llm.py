@@ -177,7 +177,7 @@ def test_writing_evidence_is_compact_without_changing_local_material(operation, 
         else:
             assert sent_chapter["primary"] == [
                 {"id": "E1", "kind": "speech", "text": "原始知识"},
-                {"id": "E7", "kind": "frame", "text": "画面原文"}]
+                {"id": "E7", "kind": "frame", "text": "画面原文", "nearby_speech_id": "E1"}]
         assert sent_chapter["context"] == ([] if not extracted or sent_chapter["chapter_id"] == "C2" else [
             {"id": "E7", "kind": "frame", "text": "画面原文"}])
         assert {key: sent_chapter[key] for key in ("title", "core_question", "topics", "start_anchor_id")} == {
@@ -298,7 +298,11 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
             value = outline()
         elif "chapters" in payload:
             items = payload["chapters"][0]["primary"]
-            assert all(set(item) == {"id", "kind", "text"} for item in items)
+            expected = [{"id": item["id"], "kind": item["kind"], "text": item["text"]}
+                        for item in coordinator.evidence]
+            if kinds == ("speech", "frame"):
+                expected[1]["nearby_speech_id"] = expected[0]["id"]
+            assert items == expected
             value = {"chapters": [{'chapter_id': 'C1', 'summary': '章节摘要', "markdown": "\n\n".join([item['text'] for item in items]), "issues": []}]}
         else:
             value = {"title": "视频知识", "tags": [], "overview_paragraphs": ["主题导览"]}

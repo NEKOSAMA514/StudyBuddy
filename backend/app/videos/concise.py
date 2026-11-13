@@ -18,7 +18,8 @@ def payload_for(title, primary, context):
     aliases = {identifier: f"E{index + 1}" for index, identifier in
                enumerate(dict.fromkeys(item["id"] for item in [*primary, *context]))}
     def compact(items):
-        return [{"id": aliases[item["id"]], "kind": item["kind"], "text": item["text"]} for item in items]
+        return [{"id": aliases[item["id"]], **{key: item[key] for key in
+                ("kind", "text", "start_seconds", "end_seconds") if key in item}} for item in items]
     return {"video_title": title, "primary": compact(primary), "context": compact(context)}
 
 
@@ -77,7 +78,7 @@ class ConciseVideoGeneration:
         self.duration, self.timings, self.publish, self.title = duration, timings, publish, video_title
         self.build = lambda primary, context: payload_for(video_title, primary, context)
         self.key = digest({"source": self.sources, "title": video_title, "style": "concise", "prompt": PROMPT_VERSION,
-            "input_format": "id-kind-text-v1",
+            "input_format": "id-kind-text-nearby-speech-v2",
             "model": settings.llm_model, "base": settings.llm_base_url, "profile": settings.llm_profile_id,
             "provider": settings.llm_provider, "stream": settings.llm_stream, "json": settings.llm_json_mode,
             "summary_prompt": settings.summary_prompt, "input_limit": settings.llm_input_text_limit,

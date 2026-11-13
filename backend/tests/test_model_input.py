@@ -11,6 +11,7 @@ import pytest
 from app.videos.detailed import DetailedVideoGeneration
 from app.videos.model import ModelClient
 from app.videos.model_input import deduplicate_ocr
+from app.videos.concise import payload_for
 from app.config import Settings
 from app.errors import AppError
 from .fakes import run_model, model_content
@@ -26,7 +27,7 @@ def materials():
 @pytest.mark.parametrize("operation", ["outline", "chapters", "extract"])
 def test_deduplication_preserves_speech_differences_and_independent_chapter_material(operation):
     evidence = materials()
-    speech = {"id": "S1", "kind": "speech", "start_seconds": 1, "end_seconds": 2,
+    speech = {"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 0,
               "text": evidence[0]["text"]}
     chapter = {"chapter_id": "C1", "primary": [evidence[0], speech, *evidence[1:3]], "context": evidence[3:]}
     if operation == "chapters":
@@ -34,13 +35,13 @@ def test_deduplication_preserves_speech_differences_and_independent_chapter_mate
     elif operation == "extract":
         payload = {"chapter": chapter}
     else:
-        payload = {"anchors": [{"id": "E1", "start_seconds": 0}, {"id": "S1", "start_seconds": 1}],
+        payload = {"anchors": [{"id": "E1", "start_seconds": 0}, {"id": "S1", "start_seconds": 0}],
                    "evidence": [*evidence, speech]}
     before = deepcopy(payload)
     compact = deduplicate_ocr(payload)
     if operation == "outline":
         records = compact["evidence"]
-        assert compact["anchors"] == [{"id": "S1", "start_seconds": 1}]
+        assert compact["anchors"] == [{"id": "S1", "start_seconds": 0}]
     else:
         chapters = compact["chapters"] if operation == "chapters" else [compact["chapter"]]
         for chapter in chapters:
@@ -48,21 +49,25 @@ def test_deduplication_preserves_speech_differences_and_independent_chapter_mate
         records = chapters[0]["primary"] + chapters[0]["context"]
     assert next(item for item in records if item["id"] == "S1") == speech
     assert {item["id"]: item["text"] for item in records if item["kind"] == "frame"} == {
-        item["id"]: item["text"].splitlines()[-1] for item in evidence[1:]}
+        "E2": evidence[1]["text"].rstrip(),
+        "E3": evidence[2]["text"].splitlines()[-1],
+        "E4": evidence[3]["text"].rstrip() if operation != "outline" else evidence[3]["text"].splitlines()[-1],
+    }
     assert payload == before and deduplicate_ocr(payload) == compact
     assert len(json.dumps(compact, ensure_ascii=False).encode()) < len(json.dumps(payload, ensure_ascii=False).encode())
 
 
 def test_identical_frames_are_removed_but_repeated_matrix_rows_in_one_frame_remain():
     text = "矩阵计算过程如下\n1 0 0\n1 0 0\n0 1 0"
-    evidence = [{"id": f"E{i}", "kind": "frame", "text": text} for i in range(2)]
+    evidence = [{"id": f"E{i}", "kind": "frame", "text": text, "start_seconds": i, "end_seconds": i}
+                for i in range(2)]
     assert deduplicate_ocr({"evidence": evidence}) == {"evidence": evidence[:1]}
-    unique = [evidence[0], {"id": "E3", "kind": "frame", "text": "矩阵计算的新步骤\n1 0 0\n0 0 1"}]
+    unique = [evidence[0], {**evidence[1], "text": "矩阵计算的新步骤\n1 0 0\n0 0 1"}]
     assert deduplicate_ocr({"evidence": unique}) == {"evidence": unique}
 
 
 def test_context_speech_cannot_remove_primary_ocr():
-    frame = {"id": "E1", "kind": "frame", "text": "这里是完整的主要画面材料"}
+    frame = {"id": "E1", "kind": "frame", "text": "这里是完整的主要画面材料", "start_seconds": 0, "end_seconds": 0}
     payload = {"primary": [frame], "context": [{**frame, "id": "S1", "kind": "speech"}]}
     assert deduplicate_ocr(payload) == payload
 
@@ -75,6 +80,77 @@ def subtitle_materials():
         {"id": "F1", "kind": "frame", "start_seconds": 5, "end_seconds": 5,
          "text": "积分表：A 14；B 12\n" + subtitle + "\n注意 Fe3+ 与 0.01mL。AgCl / AgC1。"},
     ]
+
+
+@pytest.mark.parametrize("operation", ["chapters", "extract", "concise"])
+def test_reappearing_screen_label_is_sent_with_nearby_speech(operation):
+    def item(identifier, kind, start, end, text):
+        return {"id": identifier, "kind": kind, "start_seconds": start, "end_seconds": end, "text": text}
+
+    evidence = [
+        item("E1", "speech", 0, 2, "开场提到了 DeepSeek"),
+        item("E2", "frame", 20, 20, "DeepSeek"),
+        item("E3", "frame", 20.4, 20.4, "DeepSeek"),
+        item("E4", "frame", 125.567, 125.567, "DeepSeek"),
+        item("E5", "speech", 126, 128.04, "我那不是打个比方嘛"),
+    ]
+    chapter = {"primary": evidence, "context": []}
+    payload = ({"chapters": [chapter]} if operation == "chapters" else
+               {"chapter": chapter} if operation == "extract" else payload_for("视频", evidence, []))
+    model = ModelClient(Settings())
+    messages = model.messages(operation, payload)
+    sent = json.loads(messages[-1]["content"])
+    records = (sent["chapters"][0] if operation == "chapters" else sent.get("chapter", sent))["primary"]
+
+    assert [row["id"] for row in records] == ["E1", "E2", "E4", "E5"]
+    assert records[1] == {"id": "E2", "kind": "frame", "text": "DeepSeek"}
+    assert records[2] == {"id": "E4", "kind": "frame", "text": "DeepSeek", "nearby_speech_id": "E5"}
+    assert records[3]["text"] == evidence[-1]["text"]
+    assert model.input_characters(operation, payload) == message_characters(messages)
+
+
+def test_screen_text_reappearing_after_a_different_frame_is_kept():
+    evidence = [{"id": f"E{i}", "kind": "frame", "text": text, "start_seconds": i * 0.5,
+                 "end_seconds": i * 0.5}
+                for i, text in enumerate(("DeepSeek", "Claude", "DeepSeek"))]
+    assert deduplicate_ocr({"evidence": evidence}) == {"evidence": evidence}
+
+
+def test_repeated_slide_body_is_compacted_while_labels_and_new_values_are_kept():
+    repeated = "本节介绍不同情况下如何选择合适的实验条件。\n这里整理了实验之前需要确认的所有准备工作。"
+    first = {"id": "E1", "kind": "frame", "start_seconds": 0, "end_seconds": 0,
+             "text": f"DeepSeek\n{repeated}\n试剂用量是0.1毫升"}
+    later = {**first, "id": "E2", "start_seconds": 10, "end_seconds": 10,
+             "text": f"DeepSeek\n{repeated}\n试剂用量是0.01毫升"}
+    assert deduplicate_ocr({"evidence": [first, later]})["evidence"] == [
+        first, {**later, "text": "DeepSeek\n试剂用量是0.01毫升"}]
+
+
+def test_ocr_filtered_as_speech_can_reappear_outside_that_speech():
+    text = "这里介绍新版本与旧版本的主要差异"
+    spoken = {"id": "S1", "kind": "speech", "text": text, "start_seconds": 0, "end_seconds": 2}
+    frame = {"id": "E1", "kind": "frame", "text": text, "start_seconds": 1.5, "end_seconds": 1.5}
+    later = {**frame, "id": "E2", "start_seconds": 2.5, "end_seconds": 2.5}
+    assert deduplicate_ocr({"evidence": [spoken, frame, later]}) == {"evidence": [spoken, later]}
+
+
+def test_short_screen_label_is_kept_when_the_same_name_is_spoken():
+    evidence = [
+        {"id": "S1", "kind": "speech", "text": "这个问题刚才也问过 DeepSeek", "start_seconds": 0, "end_seconds": 2},
+        {"id": "E1", "kind": "frame", "text": "DeepSeek", "start_seconds": 1, "end_seconds": 1},
+    ]
+    assert deduplicate_ocr({"evidence": evidence}) == {"evidence": evidence}
+
+
+def test_nearby_speech_can_be_a_long_segment_overlapping_a_shorter_segment():
+    evidence = [
+        {"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 15, "text": "较长的语音"},
+        {"id": "S2", "kind": "speech", "start_seconds": 3, "end_seconds": 4, "text": "较短的语音"},
+        {"id": "E1", "kind": "frame", "start_seconds": 9, "end_seconds": 9, "text": "仅画面可见"},
+    ]
+    payload = {"chapter": {"primary": evidence[2:], "context": evidence[:2]}}
+    sent = json.loads(ModelClient(Settings()).messages("extract", payload)[-1]["content"])
+    assert sent["chapter"]["primary"][-1]["nearby_speech_id"] == "S1"
 
 
 @pytest.mark.parametrize("operation", ["outline", "chapters", "extract"])
@@ -127,8 +203,9 @@ def test_similar_subtitles_are_not_deleted_and_speech_is_unchanged_without_ocr()
 
 def test_caption_punctuation_is_ignored_but_formula_and_decimal_differences_remain():
     speech = "第十回合地图中间刷出星星往后每二十回合刷一批。实验结果 Fe2+ 与 0.1mL。"
-    evidence = [{"id": "S1", "kind": "speech", "text": speech},
-                {"id": "E1", "kind": "frame", "text": "第十回合，地图中间刷出星星，往后每二十回合刷一批\n实验结果 Fe3+ 与 0.01mL。"}]
+    evidence = [{"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 2, "text": speech},
+                {"id": "E1", "kind": "frame", "start_seconds": 1, "end_seconds": 1,
+                 "text": "第十回合，地图中间刷出星星，往后每二十回合刷一批\n实验结果 Fe3+ 与 0.01mL。"}]
     assert deduplicate_ocr({"evidence": evidence})["evidence"] == [
         evidence[0], {**evidence[1], "text": "实验结果 Fe3+ 与 0.01mL。"}]
 
@@ -156,12 +233,11 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
     if operation != "chapters":
         assert requests[1][-2] == {"role": "assistant", "content": model_content({})}
     sent = json.loads(requests[0][-1]["content"])
-    expected = {**chapter, "primary": [{k: v for k, v in item.items() if k not in {"start_seconds", "end_seconds"}}
-                                     for item in chapter["primary"]],
-                "context": [{k: v for k, v in item.items() if k not in {"start_seconds", "end_seconds"}}
-                            for item in chapter["context"]]}
-    assert sent == deduplicate_ocr({"chapters": [expected]} if operation == "chapters" else {"chapter": expected})
     sent_chapter = sent["chapters"][0] if operation == "chapters" else sent["chapter"]
+    expected = deduplicate_ocr(chapter)
+    assert sent_chapter == {**expected, **{
+        key: [{field: item[field] for field in ("id", "kind", "text")} for item in expected[key]]
+        for key in ("primary", "context")}}
     assert model.input_characters(operation, payload) == message_characters(requests[0])
     assert payload == before and coordinator.path(operation, payload) == path
 
@@ -177,7 +253,7 @@ def test_input_budget_uses_only_deduplicated_material(tmp_path, monkeypatch):
     payload = {"video_summary": "当前片段主题", "chapters": [{"chapter_id": "C1", "primary": coordinator.evidence, "context": []}]}
     compressed_size = model.input_characters("chapters", payload)
     with monkeypatch.context() as patch:
-        patch.setattr("app.videos.model_input.deduplicate_ocr", lambda value: value)
+        patch.setattr("app.videos.model.deduplicate_ocr", lambda value: value)
         full_size = model.input_characters("chapters", payload)
     assert compressed_size < full_size
     model.settings.llm_input_text_limit = compressed_size
