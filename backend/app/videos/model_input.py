@@ -1,30 +1,59 @@
 """只精简模型发送副本；重复 OCR 直接省略，原始识别和依据保留。"""
 import re
 from bisect import bisect_left, bisect_right
-from collections import Counter
+from collections import Counter, defaultdict
 from itertools import accumulate
 
 
 OCR_REPEAT_SECONDS = 2
 SLIDE_REPEAT_SECONDS = 30
 SPEECH_LINK_SECONDS = 1
+SPEECH_BLOCK_SECONDS = 60
+
+
+def _start_order(item):
+    start = item.get("start_seconds")
+    return (start is None, start)
+
+
+def _overlap_lookup(records):
+    timed = sorted((item for item in records if item.get("start_seconds") is not None and
+                    item.get("end_seconds") is not None), key=_start_order)
+    starts = [item["start_seconds"] for item in timed]
+    # 即使短片段落在长片段内，也保留仍有时间交集的长片段。
+    ends = list(accumulate((item["end_seconds"] for item in timed), max))
+
+    def overlapping(start, end):
+        left, right = bisect_left(ends, start), bisect_right(starts, end)
+        return [item for item in timed[left:right] if item["end_seconds"] >= start]
+
+    return overlapping
 
 
 def _speech_at_frames(frames, records, tolerance):
-    speech = sorted((item for item in records if item["kind"] == "speech" and
-                    "start_seconds" in item and "end_seconds" in item),
-                    key=lambda item: item["start_seconds"])
-    starts = [item["start_seconds"] for item in speech]
-    # 保留跨过较短语音片段的长片段，同时限制每帧要比较的时间范围。
-    ends = list(accumulate((item["end_seconds"] for item in speech), max))
+    overlapping = _overlap_lookup(item for item in records if item["kind"] == "speech")
     for frame in frames:
         t = frame["start_seconds"]
-        left, right = bisect_left(ends, t - tolerance), bisect_right(starts, t + tolerance)
-        yield frame, [item for item in speech[left:right] if item["end_seconds"] >= t - tolerance]
+        yield frame, overlapping(t - tolerance, t + tolerance)
 
 
 def _normalized(text):
     return re.sub(r'[\s，,。；;：:、！？!?“”"‘’]', "", text)
+
+
+def _requires_literal_match(text):
+    return any(char.isdigit() for char in text) or re.search(r'[+\-−=<>%\\^_{}\[\]()/]', text)
+
+
+def _without_repeated_lines(lines, current, previous, gap, *, preserve_details=False):
+    minimum = 6 if gap <= OCR_REPEAT_SECONDS and not preserve_details else 12
+    repeats = {line for line, count in current.items()
+               if previous[line] == count and len(_normalized(line)) >= minimum
+               and not (preserve_details and _requires_literal_match(line))}
+    if gap <= OCR_REPEAT_SECONDS or (len(repeats) >= 2 and
+            2 * sum(map(len, repeats)) >= sum(map(len, current))):
+        return [line for line in lines if line.strip() not in repeats]
+    return lines
 
 
 # 只折叠短时间连续画面中的重复行，以及同一时刻已经出现在转录中的字幕。
@@ -62,7 +91,7 @@ def deduplicate_ocr(payload):
                 text = line.strip()
                 if spoken and len(plain := _normalized(text)) >= 6:
                     # 数字和公式只作原文匹配，保留符号与小数点。
-                    literal = any(char.isdigit() for char in text) or re.search(r'[+\-−=<>%\\^_{}\[\]()/]', text)
+                    literal = _requires_literal_match(text)
                     candidate, voices = (text, spoken) if literal else (plain, normalized_speech)
                     # 短标签碰巧出现在同期口播时，仍保留对应画面。
                     repeated = (candidate in voices if len(plain) < 12 else
@@ -78,12 +107,7 @@ def deduplicate_ocr(payload):
             elif 0 <= gap <= SLIDE_REPEAT_SECONDS:
                 # 同一帧内的重复行成组处理，保留出现次数变化的表格与矩阵行。
                 # 稀疏采样时，多行长文字相同才视为同一页的持续画面。
-                minimum = 6 if gap <= OCR_REPEAT_SECONDS else 12
-                repeats = {line for line, count in current.items()
-                           if previous_lines[line] == count and len(_normalized(line)) >= minimum}
-                if gap <= OCR_REPEAT_SECONDS or (len(repeats) >= 2 and
-                        2 * sum(map(len, repeats)) >= sum(map(len, current))):
-                    text = "".join(line for line in visible if line.strip() not in repeats).strip("\r\n")
+                text = "".join(_without_repeated_lines(visible, current, previous_lines, gap)).strip("\r\n")
             previous_time, previous_text, previous_lines = start, visible_text, current
             if text.strip():
                 retained.append({**item, "text": text})
@@ -107,6 +131,115 @@ def nearby_speech_ids(primary, context):
                                                abs(item["start_seconds"] - t)))
         links[frame["id"]] = closest["id"]
     return links
+
+
+def _speech_blocks(speech):
+    blocks = []
+    for item in speech:
+        start, end = item.get("start_seconds"), item.get("end_seconds")
+        block = blocks[-1] if blocks else None
+        if (block and start is not None and end is not None and
+                block["start_seconds"] is not None and block["end_seconds"] is not None and
+                max(end, block["end_seconds"]) - block["start_seconds"] <= SPEECH_BLOCK_SECONDS):
+            block["fragments"].append(item)
+            block["end_seconds"] = max(end, block["end_seconds"])
+        else:
+            blocks.append({"start_seconds": start, "end_seconds": end, "fragments": [item]})
+    return blocks
+
+
+def _without_spoken_lines(text, speech):
+    runs, last_end = [], float("-inf")
+    for item in speech:
+        if item["start_seconds"] - last_end > SPEECH_LINK_SECONDS:
+            runs.append([])
+        runs[-1].append(item["text"].strip())
+        last_end = max(last_end, item["end_seconds"])
+    spoken = [" ".join(run) for run in runs]
+    normalized_speech = [_normalized(phrase) for phrase in spoken]
+    retained = []
+    for line in text.splitlines(keepends=True):
+        raw, plain = line.strip(), _normalized(line)
+        if len(plain) >= 12:
+            candidate, phrases = (raw, spoken) if _requires_literal_match(raw) else (plain, normalized_speech)
+            if any(candidate in phrase for phrase in phrases):
+                continue
+        retained.append(line)
+    return "".join(retained).strip("\r\n")
+
+
+def _closest_fragment(block, seconds, *, ending=False):
+    # 等距时，开始使用较早的原句，结束使用较晚的原句。
+    fragments = reversed(block["fragments"]) if ending else block["fragments"]
+    return min(fragments, key=lambda cue: round(max(cue["start_seconds"] - seconds, seconds - cue["end_seconds"], 0), 9))
+
+
+def _pack_chapter_group(records, sources, counts, seen_frames):
+    items = sorted(records, key=_start_order)
+    speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
+    blocks = _speech_blocks(speech)
+    for block in blocks:
+        counts["speech"] += 1
+        block["id"] = f'New_S{counts["speech"]}'
+        sources[block["id"]] = block["fragments"]
+
+    speech_at = _overlap_lookup(speech)
+    blocks_at = _overlap_lookup(blocks)
+    appearances, disappearances = defaultdict(list), defaultdict(list)
+    before_block, ordered = defaultdict(list), []
+    previous_end, previous_lines = None, Counter()
+    for item in items:
+        if item["kind"] != "frame" or item["id"] in seen_frames:
+            continue
+        seen_frames.add(item["id"])
+        start, end = item.get("start_seconds"), item.get("end_seconds")
+        timed = start is not None and end is not None
+        text = _without_spoken_lines(item["text"], speech_at(start, end)) if timed else item["text"]
+        if not text.strip():
+            continue
+        lines = text.splitlines(keepends=True)
+        current = Counter(line.strip() for line in lines)
+        if timed and previous_end is not None:
+            gap = max(0, start - previous_end)
+            if gap <= OCR_REPEAT_SECONDS and current != previous_lines:
+                # 连续画面只压缩共同的长段文字，每次出现仍保留自己的原始时段。
+                remaining = _without_repeated_lines(lines, current, previous_lines, gap, preserve_details=True)
+                text = "".join(remaining).strip("\r\n") or text
+        previous_end, previous_lines = end if timed else None, current
+        counts["frame"] += 1
+        identifier = f'F{counts["frame"]}'
+        frame = {"id": identifier, "text": text}
+        sources[identifier] = [item]
+        overlapping = blocks_at(start, end) if timed else []
+        if overlapping:
+            first, last = overlapping[0], overlapping[-1]
+            begin = _closest_fragment(first, start)
+            finish = _closest_fragment(last, end, ending=True)
+            appearances[begin["id"]].append(f"（{identifier}出现处）")
+            disappearances[finish["id"]].append((end, f"（{identifier}消失处）"))
+            before_block[first["id"]].append(frame)
+        else:
+            ordered.append((_start_order(item), [frame]))
+
+    for block in blocks:
+        fragments = []
+        for cue in block["fragments"]:
+            start_markers = "".join(appearances[cue["id"]])
+            end_markers = "".join(label for _, label in sorted(disappearances[cue["id"]], key=lambda event: event[0]))
+            fragments.append(start_markers + cue["text"].strip() + end_markers)
+        speech_block = {"id": block["id"], "text": " ".join(fragments)}
+        ordered.append((_start_order(block), [*before_block[block["id"]], speech_block]))
+    return [record for _, group in sorted(ordered, key=lambda entry: entry[0]) for record in group]
+
+
+def pack_chapter_material(chapter):
+    """组装正文发送副本，按章返回短编号与原始依据的映射。"""
+    sent = {key: value for key, value in chapter.items() if key not in {"start_seconds", "end_seconds"}}
+    sources, counts, seen_frames = {}, Counter(), set()
+    for key in ("primary", "context"):
+        if key in chapter:
+            sent[key] = _pack_chapter_group(chapter[key], sources, counts, seen_frames)
+    return sent, sources
 
 
 def outline_text_length(payload):

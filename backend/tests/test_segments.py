@@ -146,6 +146,8 @@ def test_minute_context_keeps_raw_asr_and_ocr_and_excludes_future_and_silence():
 
 
 def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anchors(tmp_path):
+    from app.videos.model_input import pack_chapter_material
+
     times = [0, 59, 60, 119, 120, 179, 180, 239, 240]
     evidence = [{"id": f"s{i}", "kind": "speech" if i % 2 == 0 else "frame",
                  "start_seconds": seconds, "end_seconds": seconds, "text": f"原文{i}"}
@@ -160,8 +162,10 @@ def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anch
         assert chapter["previous_chapter_outline"] == ({key: plans[index - 1][key] for key in ("title", "core_question", "topics")} if index else {})
         sent = json.loads(model.messages("chapters", {"chapters": [chapter]})[-1]["content"])["chapters"][0]
         assert "start_seconds" not in json.dumps(sent)
-        assert [item["id"] for item in sent["primary"]] == [item["id"] for item in chapter["primary"]]
-        assert [item["id"] for item in sent["context"]] == [item["id"] for item in chapter["context"]]
+        _, sources = pack_chapter_material(chapter)
+        for scope in ("primary", "context"):
+            assert sorted(original["id"] for item in sent[scope] for original in sources[item["id"]]) == sorted(
+                item["id"] for item in chapter[scope])
     assert [item for c in chapters for item in c["primary"]] == coordinator.evidence
 
 

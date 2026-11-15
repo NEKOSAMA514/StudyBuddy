@@ -10,7 +10,7 @@ import pytest
 
 from app.videos.detailed import DetailedVideoGeneration
 from app.videos.model import ModelClient
-from app.videos.model_input import deduplicate_ocr
+from app.videos.model_input import deduplicate_ocr, pack_chapter_material
 from app.videos.concise import payload_for
 from app.config import Settings
 from app.errors import AppError
@@ -82,7 +82,7 @@ def subtitle_materials():
     ]
 
 
-@pytest.mark.parametrize("operation", ["chapters", "extract", "concise"])
+@pytest.mark.parametrize("operation", ["extract", "concise"])
 def test_reappearing_screen_label_is_sent_with_nearby_speech(operation):
     def item(identifier, kind, start, end, text):
         return {"id": identifier, "kind": kind, "start_seconds": start, "end_seconds": end, "text": text}
@@ -95,12 +95,11 @@ def test_reappearing_screen_label_is_sent_with_nearby_speech(operation):
         item("E5", "speech", 126, 128.04, "我那不是打个比方嘛"),
     ]
     chapter = {"primary": evidence, "context": []}
-    payload = ({"chapters": [chapter]} if operation == "chapters" else
-               {"chapter": chapter} if operation == "extract" else payload_for("视频", evidence, []))
+    payload = {"chapter": chapter} if operation == "extract" else payload_for("视频", evidence, [])
     model = ModelClient(Settings())
     messages = model.messages(operation, payload)
     sent = json.loads(messages[-1]["content"])
-    records = (sent["chapters"][0] if operation == "chapters" else sent.get("chapter", sent))["primary"]
+    records = sent.get("chapter", sent)["primary"]
 
     assert [row["id"] for row in records] == ["E1", "E2", "E4", "E5"]
     assert records[1] == {"id": "E2", "kind": "frame", "text": "DeepSeek"}
@@ -164,8 +163,14 @@ def test_duplicate_subtitle_is_removed_instead_of_encoded(operation):
     assert "ocr_texts" not in sent
     records = sent["evidence"] if operation == "outline" else (
         sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
-    assert records[0]["text"] == evidence[0]["text"]
-    assert records[1]["text"] == "积分表：A 14；B 12\n注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
+    if operation == "chapters":
+        frame, speech = records
+        assert speech == {"id": "New_S1", "text": f'（F1出现处）{evidence[0]["text"]}（F1消失处）'}
+        assert frame["id"] == "F1"
+    else:
+        speech, frame = records
+        assert speech["text"] == evidence[0]["text"]
+    assert frame["text"] == "积分表：A 14；B 12\n注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
     assert payload == before
 
 
@@ -184,8 +189,13 @@ def test_sent_plain_text_matches_actual_request_budget(operation):
     records = sent["evidence"] if operation == "outline" else (
         sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
     assert all(isinstance(item["text"], str) for item in records)
-    assert [(item["id"], item["text"]) for item in records] == [
-        (item["id"], item["text"]) for item in deduplicate_ocr({"evidence": evidence})["evidence"]]
+    if operation == "chapters":
+        assert [item["id"] for item in records] == ["F1", "New_S1"]
+        assert message_characters(messages[-1:]) == sum(len(item["text"]) for item in records)
+        assert records[-1]["text"].endswith("（F1消失处）")
+    else:
+        assert [(item["id"], item["text"]) for item in records] == [
+            (item["id"], item["text"]) for item in deduplicate_ocr({"evidence": evidence})["evidence"]]
     assert "start_seconds" not in json.dumps(sent) and "end_seconds" not in json.dumps(sent)
     assert payload == before
     assert model.input_characters(operation, payload) == message_characters(messages)
@@ -234,10 +244,18 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
         assert requests[1][-2] == {"role": "assistant", "content": model_content({})}
     sent = json.loads(requests[0][-1]["content"])
     sent_chapter = sent["chapters"][0] if operation == "chapters" else sent["chapter"]
-    expected = deduplicate_ocr(chapter)
-    assert sent_chapter == {**expected, **{
-        key: [{field: item[field] for field in ("id", "kind", "text")} for item in expected[key]]
-        for key in ("primary", "context")}}
+    if operation == "chapters":
+        assert sent_chapter == {
+            "chapter_id": "C1",
+            "primary": [{"id": f"F{index + 1}", "text": row["text"].rstrip("\r\n")}
+                        for index, row in enumerate(coordinator.evidence[:3])],
+            "context": [{"id": "F4", "text": coordinator.evidence[3]["text"].rstrip("\r\n")}],
+        }
+    else:
+        expected = deduplicate_ocr(chapter)
+        assert sent_chapter == {**expected, **{
+            key: [{field: item[field] for field in ("id", "kind", "text")} for item in expected[key]]
+            for key in ("primary", "context")}}
     assert model.input_characters(operation, payload) == message_characters(requests[0])
     assert payload == before and coordinator.path(operation, payload) == path
 
@@ -248,18 +266,146 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
 
 def test_input_budget_uses_only_deduplicated_material(tmp_path, monkeypatch):
     model = ModelClient(Settings())
-    coordinator = DetailedVideoGeneration("budget", model, model.settings, tmp_path, materials(), 10,
+    coordinator = DetailedVideoGeneration("budget", model, model.settings, tmp_path, subtitle_materials(), 10,
                                  asyncio.Event(), lambda: None, lambda stage: None, {})
     payload = {"video_summary": "当前片段主题", "chapters": [{"chapter_id": "C1", "primary": coordinator.evidence, "context": []}]}
     compressed_size = model.input_characters("chapters", payload)
     with monkeypatch.context() as patch:
-        patch.setattr("app.videos.model.deduplicate_ocr", lambda value: value)
+        patch.setattr("app.videos.model_input._without_spoken_lines", lambda text, speech: text)
         full_size = model.input_characters("chapters", payload)
     assert compressed_size < full_size
     model.settings.llm_input_text_limit = compressed_size
     assert coordinator.fits("chapters", payload)
     model.settings.llm_input_text_limit -= 1
     assert not coordinator.fits("chapters", payload)
+
+
+def timed_record(identifier, kind, start, end, text):
+    return {"id": identifier, "kind": kind, "start_seconds": start, "end_seconds": end, "text": text}
+
+
+def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_in_order():
+    primary = [
+        timed_record("E1", "speech", 0, 10, "  开场原话  "),
+        timed_record("E2", "frame", 9, 65, "Claude"),
+        timed_record("E3", "speech", 20, 25, "第一条说明"),
+        timed_record("E4", "frame", 55, 55, "短时标牌"),
+        timed_record("E5", "speech", 55, 60, "第一块末句"),
+        timed_record("E6", "speech", 61, 65, "第二块原话"),
+        timed_record("E7", "frame", 80, 90, "独立画面"),
+        timed_record("E8", "speech", 100, 165, "超过一分钟的单条语音"),
+        timed_record("E9", "speech", 160, 162, "仍从新块开始"),
+        timed_record("E10", "frame", 161, 162, "Claude"),
+    ]
+    context = [timed_record("E11", "speech", 0, 10, "本章前文"), primary[1]]
+    chapter = {"primary": primary, "context": context}
+    before = deepcopy(chapter)
+    sent, sources = pack_chapter_material(chapter)
+    assert sent == {
+        "primary": [
+            {"id": "F1", "text": "Claude"},
+            {"id": "F2", "text": "短时标牌"},
+            {"id": "New_S1", "text": "（F1出现处）开场原话 第一条说明 （F2出现处）第一块末句（F2消失处）"},
+            {"id": "New_S2", "text": "第二块原话（F1消失处）"},
+            {"id": "F3", "text": "独立画面"},
+            {"id": "F4", "text": "Claude"},
+            {"id": "New_S3", "text": "（F4出现处）超过一分钟的单条语音"},
+            {"id": "New_S4", "text": "仍从新块开始（F4消失处）"},
+        ],
+        "context": [{"id": "New_S5", "text": "本章前文"}],
+    }
+    assert [item["id"] for item in sources["New_S1"]] == ["E1", "E3", "E5"]
+    assert sources["F1"] == [primary[1]] and sources["F4"] == [primary[-1]]
+    assert chapter == before
+
+
+def test_chapter_material_uses_nearest_fragments_on_either_side_of_a_speech_gap():
+    records = [
+        timed_record("E1", "speech", 10, 12, "停顿前的话"),
+        timed_record("E2", "frame", 15, 15, "过渡画面"),
+        timed_record("E3", "speech", 18, 20, "停顿后的话"),
+    ]
+    sent, _ = pack_chapter_material({"primary": records})
+    assert sent["primary"] == [
+        {"id": "F1", "text": "过渡画面"},
+        {"id": "New_S1", "text": "（F1出现处）停顿前的话 停顿后的话（F1消失处）"},
+    ]
+
+
+def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
+    first, second = "这一段已经完整讲过", "后面的条件和限制"
+    number = "实验要求体积精确保持在 0.01mL"
+    frame_text = f"{first}，{second}\nClaude\n{number}\n{number.replace('0.01', '0.1')}\n条件变化时保持 Fe3+ 而非 Fe2+"
+    primary = [
+        timed_record("E1", "frame", 0, 10, frame_text),
+        timed_record("E2", "speech", 2, 3, first),
+        timed_record("E3", "speech", 3, 4, second),
+        timed_record("E4", "speech", 4, 5, "Claude"),
+        timed_record("E5", "speech", 5, 6, number),
+        timed_record("E6", "frame", 8, 10, "仅在章前口播中出现的完整条件说明"),
+    ]
+    context = [timed_record("E7", "speech", 8, 9, primary[-1]["text"])]
+    sent, _ = pack_chapter_material({"primary": primary, "context": context})
+    assert sent["primary"][0] == {
+        "id": "F1", "text": f"Claude\n{number.replace('0.01', '0.1')}\n条件变化时保持 Fe3+ 而非 Fe2+"}
+    assert "（F1出现处）" in sent["primary"][1]["text"]
+    assert sent["primary"][-1] == {"id": "F2", "text": primary[-1]["text"]}
+    assert sent["context"] == [{"id": "New_S2", "text": context[0]["text"]}]
+
+
+def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_repair(tmp_path, monkeypatch):
+    model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
+    evidence = [
+        timed_record("first", "speech", 0, 2, "甲先解释第一问"),
+        timed_record("first-label", "frame", 1, 2, "甲的名牌"),
+        timed_record("second", "speech", 4, 6, "甲再解释第二问"),
+        timed_record("third", "speech", 100, 102, "乙先解释第三问"),
+        timed_record("second-label", "frame", 101, 102, "乙的名牌"),
+    ]
+    coordinator = DetailedVideoGeneration("aliases", model, model.settings, tmp_path, evidence, 120,
+                                          asyncio.Event(), lambda: None, lambda stage: None, {})
+    chapters = [{"chapter_id": "C1", "primary": coordinator.evidence[:3], "context": []},
+                {"chapter_id": "C2", "primary": coordinator.evidence[3:], "context": []}]
+    payload = {"chapters": chapters}
+    sent, snapshots = [], []
+
+    def issue(alias, quote):
+        return {"kind": "source_issue", "quote": quote, "evidence_ids": [alias],
+                "reason": "等待核对", "critical": True}
+
+    async def post(self, url, **kwargs):
+        messages = kwargs["json"]["messages"]
+        request = json.loads(next(message["content"] for message in reversed(messages)
+                                  if message["role"] == "user" and message["content"].startswith("{")))
+        if "repairs" in request:
+            assert request["repairs"][0]["evidence_ids"] == ["E1", "E3"]
+            value = {"repairs": [{"chapter_id": "C1", "block_index": 1, "quote": "甲再解释第二问"}]}
+        else:
+            sent.append(request["chapters"])
+            first = len(sent) == 1
+            if not first:
+                snapshots.append(json.loads(coordinator.body_path(chapters[0]).read_text(encoding="utf-8")))
+            issues = [issue("New_S1", "甲再解释第二问"), issue("New_S1", "甲先解释第一问 甲再解释第二问"),
+                      issue("F1", "甲的名牌")] if first else [issue("F1", "乙的名牌")]
+            value = {"chapters": [{"chapter_id": "C1" if first else "C2", "summary": "摘要",
+                                   "markdown": "正文", "issues": issues}]}
+        return httpx.Response(200, json={"choices": [{"message": {"content": model_content(value)}}]},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    async def run():
+        async with model:
+            result = await coordinator.pool([("chapters", payload)])
+            assert await coordinator.pool([("chapters", payload)]) == result
+            return await coordinator.source_issues(chapters, result[0]["chapters"])
+
+    issues = asyncio.run(run())
+    assert len(sent) == 2 and sent[1] == sent[0][1:]
+    assert [[row["id"] for row in chapter["primary"]] for chapter in sent[0]] == [["F1", "New_S1"]] * 2
+    assert [item["evidence_ids"] for item in snapshots[0]["issues"]] == [["E3"], ["E1", "E3"], ["E2"]]
+    assert [item["evidence_ids"] for item in issues] == [["second"], ["first", "second"], ["first-label"], ["second-label"]]
+    assert issues[1]["quote"] == "甲再解释第二问"
 
 
 @pytest.mark.parametrize("operation", ["chapters", "extract"])
@@ -356,8 +502,8 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
             value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": "滴定", "core_question": "如何操作", "topics": ["反应与条件"],
                                    "start_anchor_id": "E1"}], "video_summary": "介绍滴定。"}
         elif "chapters" in sent:
-            assert sent["chapters"][0]["primary"][3]["text"] == evidence[3]["text"].splitlines()[-1]
-            value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': 'AgCl / AgC1', 'reason': '字母不清', 'evidence_ids': ['E4']}]}]}
+            assert sent["chapters"][0]["primary"][3] == {"id": "F4", "text": evidence[3]["text"].rstrip("\r\n")}
+            value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': 'AgCl / AgC1', 'reason': '字母不清', 'evidence_ids': ['F4']}]}]}
         else:
             value = {"title": "滴定", "tags": [], "overview_paragraphs": ["实验内容。"]}
         return httpx.Response(200, json={"choices": [{"message": {"content": model_content(value)}}]},

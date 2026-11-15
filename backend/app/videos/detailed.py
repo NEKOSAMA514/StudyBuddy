@@ -13,7 +13,7 @@ from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
 from ..analysis.budgets import OUTPUT_TOKENS, OUTPUT_BUDGET_RATIO, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import outline_text_length, deduplicate_ocr
+from .model_input import outline_text_length, deduplicate_ocr, pack_chapter_material
 from .segments import FLOW_VERSION, split_segments, preceding_context, outline_measure
 from ..errors import AppError, TaskPaused
 
@@ -132,8 +132,21 @@ class DetailedVideoGeneration:
             expected = [item["chapter_id"] for item in payload["chapters"]]
             if [item["chapter_id"] for item in value["chapters"]] != expected:
                 raise ValueError("chapter_ids_must_match_request_order")
-            for chapter in value["chapters"]:
+            for request, chapter in zip(payload["chapters"], value["chapters"]):
                 validate_markdown(chapter["markdown"])
+                if chapter["issues"]:
+                    _, sources = pack_chapter_material(request)
+                    for issue in chapter["issues"]:
+                        identifiers = []
+                        quote = issue["quote"]
+                        for identifier in issue["evidence_ids"]:
+                            originals = sources.get(identifier)
+                            if originals is None:
+                                identifiers.append(identifier)
+                                continue
+                            matches = [item["id"] for item in originals if quote and quote in item["text"]]
+                            identifiers.extend(matches or (item["id"] for item in originals))
+                        issue["evidence_ids"] = list(dict.fromkeys(identifiers))
         elif operation == "issue_quotes":
             expected = payload["repairs"]
             repairs = value["repairs"]

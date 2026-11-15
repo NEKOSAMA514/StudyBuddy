@@ -175,11 +175,20 @@ def test_writing_evidence_is_compact_without_changing_local_material(operation, 
             assert "primary" not in sent_chapter
             assert sent_chapter["facts"] == data["facts"] and sent_chapter["issues"] == data["issues"]
         else:
-            assert sent_chapter["primary"] == [
-                {"id": "E1", "kind": "speech", "text": "原始知识"},
-                {"id": "E7", "kind": "frame", "text": "画面原文", "nearby_speech_id": "E1"}]
-        assert sent_chapter["context"] == ([] if not extracted or sent_chapter["chapter_id"] == "C2" else [
-            {"id": "E7", "kind": "frame", "text": "画面原文"}])
+            if operation == "chapters":
+                assert sent_chapter["primary"] == [
+                    {"id": "F1", "text": "画面原文"},
+                    {"id": "New_S1", "text": "（F1出现处）原始知识（F1消失处）"}]
+            else:
+                assert sent_chapter["primary"] == [
+                    {"id": "E1", "kind": "speech", "text": "原始知识"},
+                    {"id": "E7", "kind": "frame", "text": "画面原文", "nearby_speech_id": "E1"}]
+        if extracted and sent_chapter["chapter_id"] == "C1":
+            expected_context = ([{"id": "F1", "text": "画面原文"}] if operation == "chapters" else
+                                [{"id": "E7", "kind": "frame", "text": "画面原文"}])
+            assert sent_chapter["context"] == expected_context
+        else:
+            assert sent_chapter["context"] == []
         assert {key: sent_chapter[key] for key in ("title", "core_question", "topics", "start_anchor_id")} == {
             key: data[key] for key in ("title", "core_question", "topics", "start_anchor_id")}
     assert json.dumps(payload, ensure_ascii=False) == before and coordinator.path(operation, payload) == cache
@@ -298,12 +307,13 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
             value = outline()
         elif "chapters" in payload:
             items = payload["chapters"][0]["primary"]
-            expected = [{"id": item["id"], "kind": item["kind"], "text": item["text"]}
-                        for item in coordinator.evidence]
-            if kinds == ("speech", "frame"):
-                expected[1]["nearby_speech_id"] = expected[0]["id"]
+            expected = (
+                [{"id": "F1", "text": "frame原始文字"}, {"id": "New_S1", "text": "（F1出现处）speech原始文字（F1消失处）"}]
+                if kinds == ("speech", "frame") else
+                [{"id": "New_S1" if kinds[0] == "speech" else "F1", "text": evidence[0]["text"]}]
+            )
             assert items == expected
-            value = {"chapters": [{'chapter_id': 'C1', 'summary': '章节摘要', "markdown": "\n\n".join([item['text'] for item in items]), "issues": []}]}
+            value = {"chapters": [{'chapter_id': 'C1', 'summary': '章节摘要', "markdown": "\n\n".join(item["text"] for item in evidence), "issues": []}]}
         else:
             value = {"title": "视频知识", "tags": [], "overview_paragraphs": ["主题导览"]}
         return httpx.Response(200, json={"choices": [{"message": {"content": model_content(value)}}]},
