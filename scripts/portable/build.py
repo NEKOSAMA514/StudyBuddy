@@ -50,7 +50,8 @@ def tracked_inputs(root):
     frontend = []
     for name in files:
         path = PurePosixPath(name)
-        if name.startswith("backend/app/") and path.suffix == ".py" and "__pycache__" not in path.parts:
+        if name.startswith("backend/app/") and (path.suffix == ".py" or
+                path.parent.as_posix() == "backend/app/recognition/weights") and "__pycache__" not in path.parts:
             backend.append(name)
         elif (name.startswith(("frontend/src/", "frontend/public/")) or name in {
             "frontend/index.html", "frontend/package.json", "frontend/package-lock.json",

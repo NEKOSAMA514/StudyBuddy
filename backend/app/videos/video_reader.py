@@ -129,18 +129,39 @@ class UniformFrameReader:
         self.video, self.media = video, media_info or {}
         self.container = None
 
-    def save(self, output, seconds, cancel=None):
+    def _open(self):
         import av
-        from PIL import Image
-        check_cancel(cancel)
         if self.container is None:
             self.container = av.open(str(self.video), options={"protocol_whitelist": "file,pipe"})
             index = self.media.get("video", {}).get("index")
             self.stream = next(s for s in self.container.streams.video if (index is None or s.index == index)
                                and not s.disposition & s.disposition.attached_pic)
             self.stream.thread_type = "AUTO"
-        default_origin = self.container.start_time / av.time_base if self.container.start_time is not None else 0
-        origin = self.media.get("start_time", default_origin)
+            default_origin = self.container.start_time / av.time_base if self.container.start_time is not None else 0
+            self.origin = self.media.get("start_time", default_origin)
+
+    def samples(self, duration, interval, cancel=None):
+        """连续解码，观察每个采样点上的第一张可用画面。"""
+        check_cancel(cancel)
+        self._open()
+        target = 0
+        for frame in self.container.decode(self.stream):
+            check_cancel(cancel)
+            if frame.time is None:
+                continue
+            seconds = round(float(frame.time) - self.origin, 9)
+            if seconds >= duration:
+                break
+            if seconds < target - 1e-6:
+                continue
+            yield max(0.0, seconds), frame
+            target = (math.floor((seconds + 1e-6) / interval) + 1) * interval
+
+    def save(self, output, seconds, cancel=None):
+        from PIL import Image
+        check_cancel(cancel)
+        self._open()
+        origin = self.origin
         self.container.seek(int((origin + seconds) / self.stream.time_base), stream=self.stream, backward=True)
         selected = None
         for frame in self.container.decode(self.stream):

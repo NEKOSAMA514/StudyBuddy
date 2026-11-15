@@ -1,13 +1,15 @@
+from contextlib import closing
 from pathlib import Path
 from typing import Literal
 from sqlalchemy import select
 from ..db import Evidence
 from ..errors import AppError
-from ..recognition.extraction import extraction_signature
+from ..recognition.extraction import LINE_OCR_IMAGE_PREFIX, extraction_signature
 from ..records import get_video, get_task
 from .serialization import public
 from .transcripts import transcript_contents
 from .notes import notes_text, notes_markdown
+from .video_reader import UniformFrameReader, source_path
 
 
 # 按任务来源快照选择依据与转录，不因读取接口重新执行识别。
@@ -66,6 +68,15 @@ class EvidenceService:
             if not item or not item.image_name:
                 raise AppError("not_found", "这条证据没有截图。", 404)
             path = self.get_settings().data_dir / "videos" / item.video_id / item.image_name
-        if not path.is_file():
-            raise AppError("not_found", "截图文件不存在。", 404)
+            if path.is_file():
+                return path
+            if item.image_name.startswith(LINE_OCR_IMAGE_PREFIX):
+                video = get_video(session, item.video_id)
+                media, seconds = video.media_info, item.start_seconds
+                source = source_path(path.parent, media)
+            else:
+                raise AppError("not_found", "截图文件不存在。", 404)
+        # 只在打开截图时解码对应画面，避免长视频提前保存大量图片。
+        with closing(UniformFrameReader(source, media)) as reader:
+            reader.save(path, seconds)
         return path

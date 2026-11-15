@@ -1,5 +1,6 @@
 from ..db import Task, Video
 from ..api_schemas import TaskPublic, VideoPublic, EvidencePublic
+from ..recognition.extraction import uses_line_ocr
 from .schemas import current_notes
 STEPS = (
     {"key": "checking", "title": "检查视频", "description": "检查格式、时长和本地原件"},
@@ -28,6 +29,9 @@ def task_progress(task):
     concise = task.config.get("note_style") == "concise"
     if concise:
         steps = (*STEPS[:3], {"key": "concise", "title": "生成简洁笔记", "description": "按输入预算逐段生成短文"})
+    if uses_line_ocr(task.config):
+        steps = tuple({**step, "description": "每秒检查画面，识别并筛选文字行"}
+                      if step["key"] == "ocr" else step for step in steps)
     stages = [step["key"] for step in steps]
     stage, _, detail = task.stage.partition(":")
     completed = len(stages) if task.status == "succeeded" else stages.index(stage) if stage in stages else 0

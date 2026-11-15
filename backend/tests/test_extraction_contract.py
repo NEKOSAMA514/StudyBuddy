@@ -2,6 +2,7 @@ from dataclasses import replace
 import pytest
 from app.videos.pipeline import Pipeline
 from app.db import Video, Task
+from app.recognition.extraction import LEGACY_EXTRACT_VERSION
 from sqlalchemy import event
 from .conftest import upload
 from .fakes import FakeRecognizer, FakeModel
@@ -41,7 +42,7 @@ def test_ocr_writes_constant_transcripts_and_recovers_cached_frames(client, app,
     task_id = client.post(f'/api/v1/videos/{video["id"]}/analyses').json()["task_id"]
     with app.state.sessions.begin() as session:
         task = session.get(Task, task_id)
-        task.config = {**{k: v for k, v in task.config.items() if k != "frame_count"}, "frame_interval": 1}
+        task.config = {**task.config, "extract_version": LEGACY_EXTRACT_VERSION, "frame_interval": 1}
     settings = replace(app.state.pipeline.get_settings(), frame_interval=1)
     recognizer = FakeRecognizer(settings)
     pipeline = Pipeline(lambda snapshot=settings: snapshot, app.state.sessions, app.state.diagnostics, lambda settings: recognizer, FakeModel)
@@ -87,7 +88,12 @@ def test_transcript_cleanup_does_not_replace_failure(client, app, video_file, mo
     video = upload(client, video_file)
     task_id = client.post(f'/api/v1/videos/{video["id"]}/analyses').json()["task_id"]
     pipeline = Pipeline(app.state.pipeline.get_settings, app.state.sessions, app.state.diagnostics, FakeRecognizer, FakeModel)
-    monkeypatch.setattr(pipeline, "complete_frame", lambda *args: (_ for _ in ()).throw(RuntimeError("original failure")))
+    persist = pipeline.persist_evidence
+    def broken_persist(video_id, evidence):
+        if any(item["kind"] == "frame" for item in evidence):
+            raise RuntimeError("original failure")
+        return persist(video_id, evidence)
+    monkeypatch.setattr(pipeline, "persist_evidence", broken_persist)
     save, count = module.save_transcript, 0
     def broken(*args, **kwargs):
         nonlocal count

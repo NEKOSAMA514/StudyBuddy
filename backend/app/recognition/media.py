@@ -26,6 +26,7 @@ class Recognizer:
         self.model = None
         self.chinese = None
         self.ocr_model = None
+        self.video_ocr_model = None
         self.cancel = None
         self.check_stop = lambda: None
 
@@ -65,25 +66,57 @@ class Recognizer:
                            "text": segment.text.strip()})
         return output
 
+    def _load_ocr_model(self, *, video=False):
+        if self.settings.ocr_engine != "rapidocr":
+            raise AppError("unknown_model", "不支持该 OCR 模型，请选择 RapidOCR。")
+        from rapidocr import ModelType, OCRVersion, RapidOCR
+        from .model_catalog import ready_ocr_path
+        directory = ready_ocr_path(self.settings)
+        if directory is None:
+            raise AppError("model_not_downloaded", "OCR 模型文件不完整，请检查运行环境。")
+        detector = (Path(__file__).with_name("weights") / "PP-OCRv6_det_tiny.onnx" if video
+                    else directory / "PP-OCRv6_det_small.onnx")
+        paths = {"Det": str(detector), "Rec": str(directory / "PP-OCRv6_rec_small.onnx"),
+                 "Cls": str(directory / "ch_ppocr_mobile_v2.0_cls_mobile.onnx")}
+        engine = RapidOCR(params={"Global.log_level": "warning",
+            **{f"{key}.model_path": path for key, path in paths.items()},
+            "EngineConfig.onnxruntime.intra_op_num_threads": self.settings.asr_threads,
+            "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+            "Det.limit_side_len": 640 if video else 1280, "Global.text_score": self.settings.ocr_min_confidence,
+            **({"Det.limit_type": "max"} if video else {}),
+            "Det.ocr_version": OCRVersion.PPOCRV6, "Det.model_type": ModelType.TINY if video else ModelType.SMALL,
+            "Rec.ocr_version": OCRVersion.PPOCRV6, "Rec.model_type": ModelType.SMALL})
+        if video:
+            # 找框和读字分阶段执行，空闲会话无需占用 CPU 等待。
+            from omegaconf import flag_override
+            from onnxruntime import InferenceSession, SessionOptions
+            options = SessionOptions()
+            options.intra_op_num_threads = self.settings.asr_threads
+            options.inter_op_num_threads = 1
+            options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+            options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+            for key, path in paths.items():
+                with flag_override(engine.cfg[key], "allow_objects", True):
+                    engine.cfg[key].session = InferenceSession(path, sess_options=options,
+                                                               providers=["CPUExecutionProvider"])
+        return engine
+
+    def ocr_video(self, samples, on_sample):
+        from .video_ocr import recognize_lines
+        self.check_stop()
+        return recognize_lines(samples, self._video_engine, self.check_stop, on_sample)
+
+    def _video_engine(self):
+        if self.video_ocr_model is None:
+            self.video_ocr_model = self._load_ocr_model(video=True)
+        return self.video_ocr_model
+
     def ocr(self, image: Path, *, preserve_rows=False):
         self.check_stop()
         if self.settings.ocr_engine != "rapidocr":
             raise AppError("unknown_model", "不支持该 OCR 模型，请选择 RapidOCR。")
-        from rapidocr import RapidOCR, OCRVersion, ModelType
         if self.ocr_model is None:
-            from .model_catalog import ready_ocr_path
-            directory = ready_ocr_path(self.settings)
-            if directory is None:
-                raise AppError("model_not_downloaded", "OCR 模型文件不完整，请检查运行环境。")
-            self.ocr_model = RapidOCR(params={"Global.log_level": "warning",
-                "Det.model_path": str(directory / "PP-OCRv6_det_small.onnx"),
-                "Rec.model_path": str(directory / "PP-OCRv6_rec_small.onnx"),
-                "Cls.model_path": str(directory / "ch_ppocr_mobile_v2.0_cls_mobile.onnx"),
-                "EngineConfig.onnxruntime.intra_op_num_threads": self.settings.asr_threads,
-                "EngineConfig.onnxruntime.inter_op_num_threads": 1,
-                "Det.limit_side_len": 1280, "Global.text_score": self.settings.ocr_min_confidence,
-                "Det.ocr_version": OCRVersion.PPOCRV6, "Det.model_type": ModelType.SMALL,
-                "Rec.ocr_version": OCRVersion.PPOCRV6, "Rec.model_type": ModelType.SMALL})
+            self.ocr_model = self._load_ocr_model()
         result = self.ocr_model(str(image))
         # 检测每个文字区域后识别；保留行结构，不把汉字强行用空格隔开。
         lines = [(str(text).strip(), float(score)) for text, score in zip(result.txts or [], result.scores or [])

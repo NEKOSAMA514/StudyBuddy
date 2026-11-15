@@ -115,6 +115,8 @@ def test_missing_task_model_after_submission_reports_asr_failure_and_continues_o
             self.ocr_calls += 1
             return FakeRecognizer(None).ocr(path)
 
+        ocr_video = FakeRecognizer.ocr_video
+
     pipeline = Pipeline(lambda snapshot=settings: snapshot, app.state.sessions, app.state.diagnostics, MissingWeightsRecognizer, FakeModel)
     record = pipeline.diagnostics.record
     def recording(code, message, exc, **kwargs):
@@ -125,7 +127,7 @@ def test_missing_task_model_after_submission_reports_asr_failure_and_continues_o
     task = client.get(f"/api/v1/tasks/{task_id}").json()
     assert failures == ["model_not_downloaded"]
     assert ("asr_failed", "model_not_downloaded") in diagnostics
-    assert pipeline.recognizer.ocr_calls == 60
+    assert pipeline.recognizer.ocr_calls == 2
     assert task["status"] == "succeeded" and task["error"] is None
     assert any("语音识别未完成" in warning and "画面文字" in warning for warning in task["warnings"])
     assert not list(folder.glob("speech-*.json"))

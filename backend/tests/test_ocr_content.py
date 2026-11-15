@@ -1,4 +1,4 @@
-from .fakes import FakeModel
+from .fakes import FakeModel, FakeRecognizer
 
 from app.db import Video
 from app.videos.pipeline import Pipeline
@@ -26,7 +26,7 @@ def test_pipeline_keeps_ocr_only_content_and_uses_speech_for_time(client, app, v
         session.get(Video, video["id"]).audio_codec = "aac"
     monkeypatch.setattr("app.videos.pipeline.extract_audio", lambda source, target, media_info=None: target.write_bytes(b"fake-audio"))
     inputs = []
-    class Recognizer:
+    class Recognizer(FakeRecognizer):
         def transcribe(self, path):
             return [{"start_seconds": 0.8, "end_seconds": 1.5, "text": "先加入过量银离子，再进行返滴定。"}]
         def ocr(self, path):
@@ -42,7 +42,7 @@ def test_pipeline_keeps_ocr_only_content_and_uses_speech_for_time(client, app, v
                 validate(value)
                 return value
             return await super().generate(operation, payload, validate)
-    Pipeline(app.state.pipeline.get_settings, app.state.sessions, app.state.diagnostics, lambda settings: Recognizer(), Model).run(task_id)
+    Pipeline(app.state.pipeline.get_settings, app.state.sessions, app.state.diagnostics, Recognizer, Model).run(task_id)
     response = client.get("/api/v1/analyses/" + task_id)
     assert response.status_code == 200, response.text
     assert [operation for operation, _ in inputs] == ["outline", "chapters", "overview"]

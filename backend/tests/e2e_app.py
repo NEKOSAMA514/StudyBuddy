@@ -6,7 +6,7 @@ from app.config import Settings
 from app.main import create_app
 from app.analysis.mind_map import MindMapModel
 from app.videos.pipeline import Pipeline
-from app.recognition.extraction import extraction_config, extraction_signature, speech_cache_path, ocr_cache_path
+from app.recognition.extraction import extraction_signature, line_ocr_cache_path, speech_cache_path, speech_signature
 from app.db import Video, Task, Document
 from app.documents.model import DocumentModelClient
 from app.recognition.local_models import MODELS, model_path
@@ -23,8 +23,8 @@ from pathlib import Path
 
 class BrowserRecognizer(FakeRecognizer):
     def ocr(self, image):
-        # 60张合计约3秒，留出操作停止按钮的时间；生产没有此延迟。
-        time.sleep(0.05)
+        # 给浏览器留出操作停止按钮的时间。
+        time.sleep(0.5)
         return super().ocr(image)
 
 
@@ -182,17 +182,15 @@ def factory():
         title = ("e2e-outline-" if preview else "e2e-segments-") + video_id
         holds[title] = threading.Event()
         from app.videos.analysis_service import AnalysisService
-        config = {**AnalysisService(None, None, None).task_config(settings), "frame_interval": 1200, "execution_started": True,
+        config = {**AnalysisService(None, None, None).task_config(settings), "execution_started": True,
                   "model": settings.llm_model, "provider": settings.llm_provider, "video_title": title}
-        config.pop("frame_count")  # 此分段恢复夹具使用历史固定间隔缓存。
         signature = extraction_signature(config)
         folder = settings.data_dir / "videos" / video_id
         (folder / "audio.wav").write_bytes(b"isolated fake audio")
         speech = [{"start_seconds": seconds, "end_seconds": seconds + 10, "text": "当前片段的讲解。"}
                   for seconds in ((0,) if preview else (0, 1200))]
-        speech_cache_path(folder, signature).write_text(json.dumps(speech), encoding="utf-8")
-        for index in range(len(speech)):
-            ocr_cache_path(folder, signature, index).write_text('{"text":""}', encoding="utf-8")
+        speech_cache_path(folder, speech_signature(config)).write_text(json.dumps(speech), encoding="utf-8")
+        line_ocr_cache_path(folder, signature).write_text("[]", encoding="utf-8")
         task_id = uuid.uuid4().hex
         with app.state.sessions.begin() as session:
             video = session.get(Video, video_id)

@@ -155,13 +155,15 @@ class PortableTests(unittest.TestCase):
             __import__("sys").path[:] = original
 
     def test_allowlist_ignores_unrelated_tracked_and_untracked_files(self):
+        model = "backend/app/recognition/weights/PP-OCRv6_det_tiny.onnx"
         inputs = "backend/app/main.py\0backend/app/__pycache__/bad.py\0backend/tests/test_api.py\0frontend/package-lock.json\0frontend/src/App.tsx\0frontend/tests/test.ts\0frontend/debug.log"
+        inputs += "\0" + model
         with patch.object(builder, "git", return_value=inputs):
             before = builder.tracked_inputs(self.root)
             (self.root / "private-unrelated.txt").write_text("never collect", encoding="utf-8")
             after = builder.tracked_inputs(self.root)
         self.assertEqual(before, after)
-        self.assertEqual(before, (["backend/app/main.py"], ["frontend/package-lock.json", "frontend/src/App.tsx"]))
+        self.assertEqual(before, (["backend/app/main.py", model], ["frontend/package-lock.json", "frontend/src/App.tsx"]))
 
     def test_audit_requires_tools_and_rejects_private_paths(self):
         required = ("启动.cmd", "launcher.py", "使用说明.txt", "LICENSE", "THIRD_PARTY_NOTICES.txt",

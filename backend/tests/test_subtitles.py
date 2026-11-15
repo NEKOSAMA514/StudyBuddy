@@ -184,7 +184,7 @@ def test_subtitle_end_to_end_speech_anchors_dedup_exports_and_resume(client, app
     assert client.post(f"/api/v1/tasks/{task_id}/retry").status_code == 202
     pipeline.run(task_id)
     assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "succeeded"
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
 
 
 def test_unavailable_subtitle_falls_back_asr_once_and_keeps_ocr_cache(client, app, video_file, monkeypatch):
@@ -201,7 +201,7 @@ def test_unavailable_subtitle_falls_back_asr_once_and_keeps_ocr_cache(client, ap
         session.get(Task, task_id).status = "interrupted"
     client.post(f"/api/v1/tasks/{task_id}/retry")
     pipeline.run(task_id)
-    assert calls == [1] and recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert calls == [1] and recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
 
 
 def test_cancel_during_fetch_does_not_fall_back(client, app, video_file, monkeypatch):
@@ -234,7 +234,7 @@ def test_new_subtitles_keep_old_asr_evidence_and_share_ocr(client, app, video_fi
     new = client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={second}&format=json').json()
     assert old["speech"][0]["text"] != new["speech"][0]["text"]
     assert client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={first}&format=json').json() == old
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
     assert old["frames"][0]["image_name"] == new["frames"][0]["image_name"]
     assert old["frames"][0]["id"] != new["frames"][0]["id"]
 

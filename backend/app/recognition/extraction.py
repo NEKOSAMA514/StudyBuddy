@@ -3,7 +3,11 @@ import hashlib
 import json
 import math
 
-EXTRACT_VERSION = "extract-v3-chinese-region-ocr"
+LEGACY_EXTRACT_VERSION = "extract-v3-chinese-region-ocr"
+EXTRACT_VERSION = "extract-v4-video-line-ocr"
+VIDEO_OCR_INTERVAL = 1
+VIDEO_OCR_CONFIDENCE = 0.90
+LINE_OCR_IMAGE_PREFIX = "ocr-line-"
 RECOGNIZER_FIELDS = ("asr_engine", "asr_model", "asr_language", "asr_device", "asr_compute", "asr_threads",
                      "ocr_engine", "ocr_languages", "ocr_min_confidence", "model_dir")
 
@@ -15,20 +19,23 @@ def recognizer_key(settings):
 
 def extraction_config(settings, previous=None):
     config = {"asr_model": settings.asr_model, "ocr_languages": settings.ocr_languages,
-            "frame_interval": settings.frame_interval, "extract_version": EXTRACT_VERSION,
-            "frame_count": 60,
+            "frame_interval": settings.frame_interval, "extract_version": LEGACY_EXTRACT_VERSION,
             "asr_engine": settings.asr_engine, "asr_language": settings.asr_language,
             "ocr_engine": settings.ocr_engine, "ocr_min_confidence": settings.ocr_min_confidence}
-    if previous is not None:
-        config["extract_version"] = previous.get("extract_version", EXTRACT_VERSION)
-        if "frame_count" in previous:
-            config["frame_count"] = previous["frame_count"]
-        else:
-            config.pop("frame_count")
+    if previous is None:
+        return {**config, "speech_cache_signature": speech_signature(config),
+                "extract_version": EXTRACT_VERSION, "frame_interval": VIDEO_OCR_INTERVAL,
+                "ocr_min_confidence": VIDEO_OCR_CONFIDENCE}
+    config.update({key: previous[key] for key in ("extract_version", "frame_count", "speech_cache_signature")
+                   if key in previous})
     return config
 
 
-# 新任务使用均匀采样点，历史任务仍按保存的固定间隔还原。
+def uses_line_ocr(config):
+    return config.get("extract_version") == EXTRACT_VERSION
+
+
+# 还原历史任务的均匀采样位置或固定间隔位置。
 def frame_times(config, duration):
     if "frame_count" in config:
         return [i * (duration / config["frame_count"]) for i in range(config["frame_count"])]
@@ -51,6 +58,8 @@ def extraction_signature(config):
 
 def speech_signature(config):
     # ASR 不受截图数量和字幕来源影响，继续复用原来的语音缓存。
+    if "speech_cache_signature" in config:
+        return config["speech_cache_signature"]
     return extraction_signature({key: value for key, value in config.items()
                                  if key not in {"frame_count", "transcript_source"}})
 
@@ -61,3 +70,13 @@ def speech_cache_path(folder, signature):
 
 def ocr_cache_path(folder, signature, index):
     return folder / f"ocr-{signature}-{index:05d}.json"
+
+
+def line_ocr_cache_path(folder, signature):
+    return folder / f"ocr-{signature}-lines.json"
+
+
+def line_ocr_evidence(rows, video_id, signature, recognition_signature):
+    return [{**row, "id": f"{video_id}-{signature}-frame-{index}", "kind": "frame",
+             "image_name": f"{LINE_OCR_IMAGE_PREFIX}{recognition_signature}-{index:05d}.jpg"}
+            for index, row in enumerate(rows)]

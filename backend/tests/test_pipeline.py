@@ -39,7 +39,7 @@ def test_pipeline_grounded_result_and_checkpoint(client, app, video_file):
     assert all(e["id"] != "old-parse" for e in scoped)
     new_task = client.post(f'/api/v1/videos/{video["id"]}/analyses').json()["task_id"]
     pipeline.run(new_task)
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/tasks/{new_task}").json()["status"] == "succeeded"
 
 
@@ -66,7 +66,7 @@ def test_model_failure_keeps_evidence_and_retry_reuses_it(client, app, video_fil
     client.post(f"/api/v1/tasks/{task_id}/retry")
     pipeline.model_factory = FakeModel
     pipeline.run(task_id)
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "succeeded"
 
 
@@ -193,7 +193,7 @@ def test_prompt_change_invalidates_summary_but_reuses_recognition(client, app, v
     third = client.post(f"/api/v1/videos/{video_id}/analyses").json()["task_id"]
     pipeline.run(third)
     assert len(calls) == 3
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     task = client.get(f"/api/v1/tasks/{third}").json()
     assert task["progress"]["percent"] == 100
     assert stored_task_config(app, task["id"] )["summary_prompt"] == "请详细解释步骤。"
@@ -208,7 +208,7 @@ def test_prompt_change_invalidates_summary_but_reuses_recognition(client, app, v
     fifth = client.post(f"/api/v1/videos/{video_id}/analyses").json()["task_id"]
     pipeline.run(fifth)
     assert len(calls) == 5  # 固定系统规则版本变化必须重新总结。
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/analyses/{fifth}").json()["prompt_version"] == "test-next-system-rules"
 
 
@@ -876,7 +876,7 @@ def test_old_paused_task_is_rejected_without_upgrading_or_touching_cache(client,
     pipeline.run(task_id)
     task = client.get(f"/api/v1/tasks/{task_id}").json()
     assert task["status"] == "failed" and task["error"]["code"] == "generation_changed"
-    assert calls == [] and recognizer.ocr_calls == 60
+    assert calls == [] and recognizer.ocr_calls == 2
     with app.state.sessions() as session:
         assert session.get(Task, task_id).config == config
     assert legacy_cache.read_text(encoding="utf-8") == "旧生成缓存不得读取"

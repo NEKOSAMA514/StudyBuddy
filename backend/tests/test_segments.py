@@ -524,16 +524,12 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
     with app.state.sessions.begin() as session:
         row = session.get(Video, video["id"])
         row.duration, row.audio_codec = 2400, "aac"
-        task = session.get(Task, identifier)
-        task.config = {**{k: v for k, v in task.config.items() if k != "frame_count"}, "frame_interval": 1200}
-    settings = replace(app.state.pipeline.get_settings(), frame_interval=1200)
+    settings = app.state.pipeline.get_settings()
     config = extraction_config(settings)
-    config.pop("frame_count")
     signature = extraction_signature(config)
     folder = settings.data_dir / "videos" / video["id"]
     (folder / "audio.wav").write_bytes(b"isolated recognizer input")
-    for index in range(2):
-        (folder / f"ocr-{signature}-{index:05d}.json").write_text('{"text":""}', encoding="utf-8")
+    (folder / f"ocr-{signature}-lines.json").write_text("[]", encoding="utf-8")
     starts, models, transcriptions = [], [], []
     class Recognizer(FakeRecognizer):
         def transcribe(self, path):

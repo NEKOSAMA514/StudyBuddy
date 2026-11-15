@@ -27,6 +27,34 @@ def test_removed_ocr_snapshot_does_not_silently_run_rapidocr():
     assert error.value.code == "unknown_model"
 
 
+def test_video_ocr_filters_entire_lines_at_inclusive_confidence_cutoff():
+    from io import BytesIO
+    from time import monotonic
+    import zlib
+    from app.recognition.video_ocr import Candidate, evidence_rows, read_crops
+
+    shape = (4, 12, 3)
+    crop = zlib.compress(bytes(int(np.prod(shape))))
+    crop_size = len(crop)
+    crops = BytesIO(crop * 3)
+    candidates = [
+        Candidate(1, 3, (0, 1, 12, 5), 1, 3, 0, crop_size, shape),
+        Candidate(1, 8, (0, 6, 12, 10), 1, 8, crop_size, crop_size, shape),
+        Candidate(1, 2, (0, 11, 12, 15), 1, 2, crop_size * 2, crop_size, shape),
+    ]
+    engine = SimpleNamespace(
+        _load_rec_model=lambda: SimpleNamespace(rec_image_shape=(3, 48, 320), rec_batch_num=6),
+        cls_and_rotate=lambda images: (images, None),
+        recognize_txt=lambda images: SimpleNamespace(txts=("整行保留", "整行删除", "后一行"),
+                                                     scores=(.90, .89999, .96)),
+    )
+    accepted, used = read_crops(engine, crops, candidates, monotonic() + 5, lambda: None)
+    assert used == 3
+    assert evidence_rows(accepted) == [
+        {"start_seconds": 1, "end_seconds": 3, "text": "整行保留\n后一行", "confidence": pytest.approx(93)},
+    ]
+
+
 def test_paraformer_uses_original_sample_offsets(monkeypatch):
     samples = np.zeros(48000, dtype=np.float32)
     monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda *args, **kwargs: samples)
@@ -54,5 +82,5 @@ def test_cache_identity_tracks_engines_and_preserves_old_lookup():
     assert extraction_signature(old) == digest({"version": old["extract_version"], "asr": "small", "ocr": "chi_sim+eng", "interval": 15})
     current = extraction_config(Settings())
     assert extraction_signature(current) != extraction_signature(old)
-    for field, value in [("asr_engine", "whisper"), ("asr_language", "en"), ("ocr_min_confidence", 0.9)]:
+    for field, value in [("asr_engine", "whisper"), ("asr_language", "en"), ("ocr_min_confidence", 0.91)]:
         assert extraction_signature({**current, field: value}) != extraction_signature(current)

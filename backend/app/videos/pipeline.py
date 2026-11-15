@@ -5,6 +5,7 @@ import math
 import threading
 import time
 import sys
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from sqlalchemy import select, update as sql_update
@@ -21,7 +22,9 @@ from ..analysis.activity import TaskActivity, in_session, merge_config
 from ..util.json_io import atomic_json
 from ..settings.model_profiles import execution_settings
 from ..recognition.media import Recognizer
-from ..recognition.extraction import extraction_config, extraction_signature, recognizer_key, speech_cache_path, ocr_cache_path, frame_times, speech_signature
+from ..recognition.extraction import (extraction_config, extraction_signature, frame_times, line_ocr_cache_path,
+                                     line_ocr_evidence, ocr_cache_path, recognizer_key, speech_cache_path,
+                                     speech_signature, uses_line_ocr)
 from .video_reader import extract_audio, extract_frame, source_path, UniformFrameReader
 from .transcripts import save_transcript
 from ..diagnostics import error_log_location
@@ -274,9 +277,27 @@ class Pipeline:
             failures = 0
             cache_hits = 0
             ocr_log = None
-            positions = frame_times(config, video.duration)
-            reader = UniformFrameReader(media, video.media_info) if "frame_count" in config else None
+            use_lines = uses_line_ocr(config)
+            positions = [] if use_lines else frame_times(config, video.duration)
+            reader = UniformFrameReader(media, video.media_info) if positions and "frame_count" in config else None
             try:
+                if use_lines:
+                    try:
+                        rows = self.read_video_lines(task_id, video, media, config, recognition_signature,
+                                                     recognizer, activity)
+                    except (TaskInterrupted, TaskPaused):
+                        raise
+                    except Exception as exc:
+                        self.checkpoint(task_id)
+                        reference = self.diagnostics.record("ocr_failed", "画面文字识别失败。", exc,
+                                                            task_id=task_id, stage=stage)
+                        warnings.append(f"画面文字识别未能完成。{error_log_location(reference)}")
+                        activity("preparing", message=warnings[-1], level="warning", error=reference)
+                    else:
+                        frames = line_ocr_evidence(rows, video.id, signature, recognition_signature)
+                        self.persist_evidence(video.id, frames)
+                        evidence.extend(frames)
+                        self.checkpoint(task_id)
                 for index, seconds in enumerate(positions):
                     self.checkpoint(task_id)
                     image_name = f"frame-{recognition_signature}-{index:05d}.jpg"
@@ -496,6 +517,30 @@ class Pipeline:
         if stopped:
             raise TaskPaused()
         self.checkpoint(task_id)
+
+    def read_video_lines(self, task_id, video, media, config, recognition_signature, recognizer, activity):
+        cache = line_ocr_cache_path(media.parent, recognition_signature)
+        if cache.is_file():
+            rows = json.loads(cache.read_text(encoding="utf-8"))
+            activity("cached", message="复用已完成的画面文字识别结果")
+            return rows
+
+        interval = config["frame_interval"]
+        total = math.ceil(video.duration / interval)
+        last_update = -math.inf
+
+        def on_sample(seconds):
+            nonlocal last_update
+            now = time.monotonic()
+            count = min(total, 1 + math.floor(seconds / interval))
+            if now - last_update >= 1 or count == total:
+                self.update(task_id, stage=f"ocr:{count}/{total}")
+                last_update = now
+
+        with closing(UniformFrameReader(media, video.media_info)) as reader:
+            rows = recognizer.ocr_video(reader.samples(video.duration, interval, self.shutdown), on_sample)
+        atomic_json(cache, rows)
+        return rows
 
     def persist_evidence(self, video_id, evidence):
         with self.sessions.begin() as session:

@@ -3,7 +3,8 @@ import json
 import math
 from pathlib import Path
 from ..errors import AppError
-from ..recognition.extraction import extraction_signature, speech_signature, speech_cache_path, ocr_cache_path, frame_times
+from ..recognition.extraction import (extraction_signature, frame_times, line_ocr_cache_path, line_ocr_evidence,
+                                     ocr_cache_path, speech_cache_path, speech_signature, uses_line_ocr)
 from ..video_download.subtitles import SUBTITLE_KINDS, subtitle_cache, content_digest
 from .model import ModelClient
 from .segments import split_segments, outline_measure
@@ -34,10 +35,14 @@ def analysis_preview(video, folder, config, settings):
                     "start_seconds": start, "end_seconds": min(end, video.duration), "text": item["text"],
                     "image_name": None, "confidence": None})
         recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
-        for index, _ in enumerate(frame_times(config, video.duration)):
-            item = json.loads(ocr_cache_path(folder, recognition_signature, index).read_text("utf-8"))
-            if item["text"].strip():
-                evidence.append({**item, "id": f"{video.id}-{signature}-frame-{index}"})
+        if uses_line_ocr(config):
+            rows = json.loads(line_ocr_cache_path(folder, recognition_signature).read_text("utf-8"))
+            evidence.extend(line_ocr_evidence(rows, video.id, signature, recognition_signature))
+        else:
+            for index, _ in enumerate(frame_times(config, video.duration)):
+                item = json.loads(ocr_cache_path(folder, recognition_signature, index).read_text("utf-8"))
+                if item["text"].strip():
+                    evidence.append({**item, "id": f"{video.id}-{signature}-frame-{index}"})
     except (OSError, ValueError, KeyError, TypeError):
         return pending
     evidence.sort(key=lambda e: (e["start_seconds"], e["end_seconds"], e["id"]))
