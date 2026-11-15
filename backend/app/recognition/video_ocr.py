@@ -1,10 +1,9 @@
-"""跟踪视频文字区域，从每条入选轨迹的清晰裁剪中识别文字。"""
+"""跟踪视频文字区域，从每条轨迹的清晰裁剪中识别文字。"""
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from itertools import zip_longest
 import logging
 import math
-from statistics import quantiles
 from tempfile import SpooledTemporaryFile
 from time import monotonic
 import zlib
@@ -19,10 +18,9 @@ from .extraction import VIDEO_OCR_CONFIDENCE
 logger = logging.getLogger("studybuddy")
 DETECTOR_SIZE = 640
 TILE_SIZE = 32
+BOX_JITTER_PIXELS = 3
 FULL_REFRESH_SECONDS = 30
 WINDOW_SECONDS = 24
-OCR_TARGET_SECONDS = 60
-MIN_READ_SECONDS = 25
 BATCH_SIZE = 12
 
 
@@ -36,6 +34,8 @@ class Track:
     best_box: tuple
     quality: float
     samples: int = 1
+    alternate_crop: np.ndarray | None = None
+    alternate_quality: float = -math.inf
 
     def observe(self, seconds):
         self.last = seconds
@@ -52,6 +52,7 @@ class Candidate:
     offset: int
     length: int
     shape: tuple
+    alternate: "Candidate | None" = None
 
 
 def resize(image, width, height):
@@ -109,6 +110,12 @@ def area(box):
     return (box[2] - box[0]) * (box[3] - box[1])
 
 
+def covers(outer, inner, margin=0):
+    left, top, right, bottom = outer
+    return (left - margin <= inner[0] and top - margin <= inner[1] and
+            right + margin >= inner[2] and bottom + margin >= inner[3])
+
+
 def overlap(left, right):
     shared = intersection(left, right)
     return shared / (area(left) + area(right) - shared) if shared else 0
@@ -162,6 +169,10 @@ def changed_regions(reference, current, tracks, dx, dy):
     return regions
 
 
+def line_signature(crop):
+    return resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 24)
+
+
 def same_line(before, after):
     difference = cv2.absdiff(before, after)
     columns = np.percentile(difference.reshape(24, 10, 12), 85, axis=(0, 2))
@@ -182,12 +193,16 @@ class TextRegions:
         self.last_full = -math.inf
 
     def finish(self, tracks):
-        for track in tracks:
-            crop = np.ascontiguousarray(track.crop)
+        def store(track, image, alternate=None):
+            crop = np.ascontiguousarray(image)
             offset = self.crops.tell()
             length = self.crops.write(zlib.compress(crop, level=1))
-            self.candidates.append(Candidate(track.first, track.last, track.best_box,
-                                             track.quality, track.samples, offset, length, crop.shape))
+            return Candidate(track.first, track.last, track.best_box, track.quality,
+                             track.samples, offset, length, crop.shape, alternate)
+
+        for track in tracks:
+            alternate = store(track, track.alternate_crop) if track.alternate_crop is not None else None
+            self.candidates.append(store(track, track.crop, alternate))
 
     def observe(self, seconds, frame):
         turn = (int(frame.rotation or 0) % 360) // 90
@@ -233,50 +248,89 @@ class TextRegions:
         native = np.ascontiguousarray(np.rot90(frame.to_ndarray(format="bgr24"), turn))
         screen = native if native.shape[:2] == (height, width) else resize(native, width, height)
         scale = np.float32([native.shape[1] / width, native.shape[0] / height])
+        checked = {}
+
+        def still_visible(track):
+            key = id(track)
+            if key not in checked:
+                crop = get_rotate_crop_image(native, track.polygon * scale)
+                checked[key] = min(crop.shape[:2]) >= 2 and same_line(track.signature, line_signature(crop))
+            return checked[key]
+
+        # 局部变化可能只擦到旧框的一侧。整行确有变化时，让检测区域覆盖完整旧框。
+        active = [(clipped_box(track.polygon, width, height), track) for track in self.active]
+        extended = []
+        for box, track in active:
+            if (any(intersection(box, region) for region in regions) and
+                    not any(covers(region, box) for region in regions) and not still_visible(track)):
+                left, top, right, bottom = box
+                extended.append((max(0, left - 24), max(0, top - 16), min(width, right + 24), min(height, bottom + 16)))
+        if extended:
+            regions = merge_rectangles([*regions, *extended])
+
         keep, previous = [], []
-        for track in self.active:
-            clipped = clipped_box(track.polygon, width, height)
-            if any(intersection(clipped, region) for region in regions):
+        for box, track in active:
+            if any(intersection(box, region) for region in regions):
                 previous.append((bounds(track.polygon), track))
             else:
                 track.observe(seconds)
                 keep.append(track)
 
         boxes = []
-        for left, top, right, bottom in regions:
+        for region in regions:
+            left, top, right, bottom = region
             detected = self.detector(np.ascontiguousarray(screen[top:bottom, left:right])).boxes
             self.reference[top:bottom, left:right] = current[top:bottom, left:right]
-            if detected is not None:
-                boxes.extend(detected.astype(np.float32) + np.float32([left, top]))
+            if detected is None:
+                continue
+            partial = [(box, track) for box, track in previous if intersection(box, region) and not covers(region, box)]
+            for polygon in detected.astype(np.float32) + np.float32([left, top]):
+                box = bounds(polygon)
+                # 局部检测可能只返回已确认仍在显示的旧行的一截。
+                if not any(covers(old, box, BOX_JITTER_PIXELS) and still_visible(track) for old, track in partial):
+                    boxes.append((box, polygon))
         added = []
-        for polygon in boxes:
-            box = bounds(polygon)
+        for box, polygon in boxes:
             if min(box[2] - box[0], box[3] - box[1]) < 2 or any(overlap(box, other) >= .70 for other in added):
                 continue
             crop = get_rotate_crop_image(native, polygon * scale)
             if min(crop.shape[:2]) < 2:
                 continue
             added.append(box)
-            signature = resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 24)
+            signature = line_signature(crop)
             quality = float(cv2.Laplacian(signature, cv2.CV_32F).var())
             matches = sorted(((overlap(box, old_box), index) for index, (old_box, _) in enumerate(previous)), reverse=True)
             track = None
             for score, index in matches:
                 if score < .65:
                     break
-                if not same_line(previous[index][1].signature, signature):
+                old_box, old = previous[index]
+                if same_line(old.signature, signature):
+                    old.polygon = polygon
+                    if quality > old.quality:
+                        old.crop, old.best_box, old.quality = crop, box, quality
+                # 重新裁剪和缩放会放大框边界的轻微抖动。复核成功时沿用原框。
+                elif max(abs(a - b) for a, b in zip(box, old_box)) > BOX_JITTER_PIXELS or not still_visible(old):
                     continue
+                elif quality > old.alternate_quality:
+                    # 清晰度不总等于识别置信度。保留一份不同的裁剪用于低置信重读。
+                    old.alternate_crop, old.alternate_quality = crop, quality
                 _, track = previous.pop(index)
-                track.polygon = polygon
                 track.observe(seconds)
-                if quality > track.quality:
-                    track.crop, track.best_box, track.quality = crop, box, quality
                 break
             if track is None:
                 track = Track(seconds, seconds, polygon, signature, crop, box, quality)
             keep.append(track)
+        ended = []
+        for box, track in previous:
+            replaced = any(overlap(box, new) >= .65 or covers(new, box, BOX_JITTER_PIXELS) for new in added)
+            if not replaced and still_visible(track):
+                track.observe(seconds)
+                keep.append(track)
+            else:
+                ended.append(track)
         self.active = keep
-        self.finish(track for _, track in previous)
+        self.finish(ended)
 
 
 def spread_windows(windows):
@@ -305,45 +359,32 @@ def rank(candidates):
         left, top, right, bottom = candidate.box
         position = round((left + right) / 160), round((top + bottom) / 48)
         category = int(candidate.last - candidate.first > 2 + 1e-6)
-        windows[int(candidate.first // WINDOW_SECONDS)][category][position].append(candidate)
+        # 持续显示的行可以代表沿途窗口，避免续轨后只挤在首次出现的窗口。
+        for window in range(int(candidate.first // WINDOW_SECONDS), int(candidate.last // WINDOW_SECONDS) + 1):
+            windows[window][category][position].append(candidate)
     queues = deque()
     for window in spread_windows(windows):
         short, long = (ranked_positions(positions) for positions in windows[window])
         queues.append((candidate for pair in zip_longest(short, long) for candidate in pair if candidate is not None))
+    seen = set()
     while queues:
         queue = queues.popleft()
-        candidate = next(queue, None)
-        if candidate is not None:
+        for candidate in queue:
+            identity = id(candidate)
+            if identity in seen:
+                continue
+            seen.add(identity)
             yield candidate
             queues.append(queue)
-
-
-def workload(batch, height, width, batch_size):
-    ratios = sorted(max(1.0, candidate.shape[1] / candidate.shape[0] * height / width) for candidate in batch)
-    groups = (ratios[i:i + batch_size] for i in range(0, len(ratios), batch_size))
-    return sum(len(group) * (1 + group[-1]) / 2 for group in groups)
-
-
-def read_crops(engine, crops, candidates, deadline, check_stop):
-    if not candidates:
-        return [], 0
-    config = engine._load_rec_model()
-    _, height, width = config.rec_image_shape
-    records, used = [], 0
-    timings = deque([.014], maxlen=18)
-    while used < len(candidates):
-        check_stop()
-        remaining = deadline - monotonic() - .25
-        cautious = max(.006, quantiles(timings, n=5, method="inclusive")[3] * 1.25) if len(timings) > 1 else .021
-        batch = candidates[used:used + BATCH_SIZE]
-        while batch:
-            cost = workload(batch, height, width, config.rec_batch_num)
-            if cost * cautious <= remaining:
-                break
-            batch.pop()
-        if not batch:
             break
-        tick = monotonic()
+
+
+def read_crops(engine, crops, candidates, check_stop):
+    records, used = [], 0
+    pending = deque(candidates)
+    while pending:
+        check_stop()
+        batch = [pending.popleft() for _ in range(min(BATCH_SIZE, len(pending)))]
         images = []
         for candidate in batch:
             crops.seek(candidate.offset)
@@ -351,22 +392,26 @@ def read_crops(engine, crops, candidates, deadline, check_stop):
             images.append(np.frombuffer(pixels, dtype=np.uint8).reshape(candidate.shape).copy())
         images, _ = engine.cls_and_rotate(images)
         result = engine.recognize_txt(images)
+        retries = []
         for candidate, text, score in zip(batch, result.txts, result.scores, strict=True):
             if text.strip() and float(score) >= VIDEO_OCR_CONFIDENCE:
                 records.append((candidate, text.strip(), float(score)))
-        timings.append((monotonic() - tick) / cost)
+            elif candidate.alternate is not None:
+                retries.append(candidate.alternate)
         used += len(batch)
+        pending.extendleft(reversed(retries))
     return records, used
 
 
 def evidence_rows(records):
     grouped = defaultdict(list)
     for candidate, text, confidence in records:
-        grouped[candidate.first].append((candidate, text, confidence))
+        # 同时出现的题卡和名牌可能在不同时间消失。
+        grouped[candidate.first, candidate.last].append((candidate, text, confidence))
     rows = []
-    for seconds, lines in sorted(grouped.items()):
+    for (start, end), lines in sorted(grouped.items()):
         lines.sort(key=lambda line: (line[0].box[1], line[0].box[0]))
-        rows.append({"start_seconds": seconds, "end_seconds": max(line[0].last for line in lines),
+        rows.append({"start_seconds": start, "end_seconds": end,
                      "text": "\n".join(line[1] for line in lines),
                      "confidence": 100 * sum(line[2] for line in lines) / len(lines)})
     return rows
@@ -390,8 +435,7 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample):
         tracker.finish(tracker.active)
         tracker.active.clear()
         candidates = list(rank(tracker.candidates))
-        deadline = max(start + OCR_TARGET_SECONDS, monotonic() + MIN_READ_SECONDS)
-        records, used = read_crops(engine, crops, candidates, deadline, check_stop)
+        records, used = read_crops(engine, crops, candidates, check_stop)
     logger.info("video_ocr samples=%s candidates=%s read=%s retained=%s seconds=%.2f",
                 count, len(candidates), used, len(records), monotonic() - start)
     return evidence_rows(records)
