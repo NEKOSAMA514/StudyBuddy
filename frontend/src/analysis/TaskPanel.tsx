@@ -119,11 +119,16 @@ export function TaskPanel({
           </div>
         )}
       {task && task.status === "failed" && (
-        <button className="secondary" disabled={busy} onClick={retry}>
-          {outdatedRecognition
-            ? "使用新版识别，重新分析"
-            : "复用已有识别，重试任务"}
-        </button>
+        <div className="task-resume-actions">
+          <button className="secondary" disabled={busy} onClick={retry}>
+            {outdatedRecognition
+              ? "使用新版识别，重新分析"
+              : "复用已有识别，重试任务"}
+          </button>
+          <button className="secondary" disabled={busy} onClick={onStart}>
+            重新生成笔记
+          </button>
+        </div>
       )}
       {(!task || task.status === "succeeded") && (
         <button className="secondary" disabled={busy} onClick={() => onStart()}>

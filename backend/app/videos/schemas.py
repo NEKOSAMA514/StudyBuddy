@@ -9,8 +9,12 @@ from ..analysis.schemas import ConciseNote
 FORMAT_VERSION = 4
 
 
+class VideoChapterPlan(ChapterPlan):
+    start_anchor_id: str | None = None
+
+
 class Outline(Record):
-    chapters: list[ChapterPlan] = Field(min_length=1)
+    chapters: list[VideoChapterPlan] = Field(min_length=1)
     video_summary: str = Field(min_length=1)
     content_type: str = Field(json_schema_extra={"enum": list(CONTENT_TYPES.values())})
 

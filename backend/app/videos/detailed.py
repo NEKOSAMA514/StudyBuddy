@@ -119,14 +119,16 @@ class DetailedVideoGeneration:
         if operation == "outline":
             if payload.get("content_type") and value["content_type"] != payload["content_type"]:
                 raise ValueError("content_type_must_match_planned_video_type")
-            times = {item["id"]: item["start_seconds"] for item in payload["anchors"]}
-            ids = [item["start_anchor_id"] for item in value["chapters"]]
+            anchors = payload["anchors"]
+            chapters = value["chapters"]
+            chapters[0]["start_anchor_id"] = anchors[0]["id"]
+            times = {item["id"]: item["start_seconds"] for item in anchors}
+            ids = [item["start_anchor_id"] for item in chapters]
             invalid = [identifier for identifier in ids if identifier not in times]
             if invalid:
                 raise ValueError("invalid_boundary_anchor: start_anchor_id 不在本段原文中：" +
                                  json.dumps(invalid, ensure_ascii=False) + "。请从本段 evidence 中选择，不要编造或改写编号。")
-            if not ids or ids[0] != payload["anchors"][0]["id"] or any(
-                    times[a] >= times[b] for a, b in zip(ids, ids[1:])):
+            if any(times[a] >= times[b] for a, b in zip(ids, ids[1:])):
                 raise ValueError("chapter_boundaries_must_increase_from_first_anchor")
         elif operation == "chapters":
             expected = [item["chapter_id"] for item in payload["chapters"]]

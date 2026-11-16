@@ -109,7 +109,7 @@ def test_invalid_json_or_reference_has_only_one_repair(monkeypatch):
     client = configured()
     coordinator = generation(client)
     bad = outline()
-    bad["chapters"][0]["start_anchor_id"] = "unknown"
+    bad["chapters"].append({**bad["chapters"][0], "start_anchor_id": "unknown"})
     outputs = iter(['{}', json.dumps(bad)])
     calls = []
     async def request(messages, **kwargs):
@@ -217,8 +217,9 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     payload = {"anchors": coordinator.anchor_payload(), "evidence": evidence}
     before, cache = deepcopy(payload), coordinator.path(operation, payload)
     good = outline()
+    good["chapters"].append({**good["chapters"][0], "start_anchor_id": "E2"})
     bad = deepcopy(good)
-    bad["chapters"][0]["start_anchor_id"] = "unknown-boundary"
+    bad["chapters"][1]["start_anchor_id"] = "unknown-boundary"
     outputs, captured = iter([bad, good]), []
     async def post(self, url, **kwargs):
         captured.append(deepcopy(kwargs["json"]["messages"]))
@@ -244,7 +245,7 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     assert [item["id"] for item in coordinator.anchors] == [f"E{i}" for i in range(1, 7)]
     assert coordinator.evidence[0]["start_seconds"] == 0
     invalid = deepcopy(good)
-    invalid["chapters"][0]["start_anchor_id"] = frame["id"]
+    invalid["chapters"][1]["start_anchor_id"] = frame["id"]
     with pytest.raises(ValueError, match="invalid_boundary_anchor"):
         coordinator.validate(operation, payload, invalid)
 
@@ -771,26 +772,45 @@ def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, e
         assert model.calls == len(counts) == len(requests) == 1
 
 
-def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_path):
+@pytest.mark.parametrize("first_anchor", [{}, {"start_anchor_id": "E2"}], ids=["omitted", "same-time"])
+def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_path, monkeypatch, first_anchor):
     model = configured()
-    evidence = [{"id": "frame", "kind": "frame", "text": "第一章标题", "start_seconds": 0, "end_seconds": 0},
-                {"id": "speech", "kind": "speech", "text": "随后讲解", "start_seconds": 2, "end_seconds": 5}]
-    coordinator = DetailedVideoGeneration("boundaries", model, model.settings, tmp_path, evidence, 10,
+    evidence = [
+        {"id": "frame", "kind": "frame", "text": "第一章标题", "start_seconds": 62, "end_seconds": 62},
+        {"id": "details", "kind": "frame", "text": "同一时刻的画面文字", "start_seconds": 62, "end_seconds": 63},
+        {"id": "speech", "kind": "speech", "text": "随后讲解", "start_seconds": 66, "end_seconds": 69},
+        {"id": "later", "kind": "speech", "text": "下一部分", "start_seconds": 72, "end_seconds": 74},
+    ]
+    coordinator = DetailedVideoGeneration("boundaries", model, model.settings, tmp_path, evidence, 90,
         asyncio.Event(), lambda: None, lambda stage: None, {})
+    coordinator.range_start = 60
     payload = {"evidence": coordinator.evidence, "anchors": coordinator.anchor_payload(),
-               "context": [{"id": "previous", "text": "前段上下文", "kind": "speech", "start_seconds": 0, "end_seconds": 1}]}
-    sent = json.loads(model.messages("outline", payload)[-1]["content"])
+               "context": [{"id": "previous", "text": "前段上下文", "kind": "speech", "start_seconds": 59, "end_seconds": 60}]}
+    value, captured = outline(), []
+    first_chapter = value["chapters"][0]
+    value["chapters"].append({**first_chapter, "title": "随后讲解", "start_anchor_id": "E3"})
+    first_chapter.pop("start_anchor_id")
+    first_chapter.update(first_anchor)
+
+    async def request(messages, **kwargs):
+        captured.append(messages)
+        return model_content(value)
+
+    monkeypatch.setattr(model, "request", request)
+    result = run_model(model, "generate", "outline", payload, lambda output: coordinator.validate("outline", payload, output))
+    assert len(captured) == 1
+    assert "从第二章开始选择起点" in captured[0][0]["content"]
+    sent = json.loads(captured[0][-1]["content"])
     assert "anchors" not in sent
-    assert sent["evidence"] == [{"id": "E1", "text": "第一章标题"}, {"id": "E2", "text": "随后讲解"}]
-    value = outline()
-    value["chapters"].append({**value["chapters"][0], "title": "随后讲解", "start_anchor_id": "E2"})
-    assert coordinator.validate("outline", payload, value)["chapters"] == value["chapters"]
-    for identifier in ["previous", "unknown"]:
-        invalid = {**value, "chapters": [{**value["chapters"][0], "start_anchor_id": identifier}]}
+    assert sent["evidence"] == [{"id": item["id"], "text": item["text"]} for item in coordinator.evidence]
+    assert result["chapters"] == [{**first_chapter, "start_anchor_id": "E1"}, value["chapters"][1]]
+    chapters = coordinator.assign(result)
+    assert [(chapter["start_seconds"], chapter["end_seconds"]) for chapter in chapters] == [(60, 66), (66, 90)]
+    for identifier in ["previous", "unknown", None]:
+        invalid = {**result, "chapters": [result["chapters"][0], {**result["chapters"][1], "start_anchor_id": identifier}]}
         with pytest.raises(ValueError, match="invalid_boundary_anchor"):
             coordinator.validate("outline", payload, invalid)
-    for identifiers in [["E2", "E1"], ["E1", "E1"]]:
-        invalid = {**value, "chapters": [{**chapter, "start_anchor_id": identifier}
-            for chapter, identifier in zip(value["chapters"], identifiers)]}
+    for identifiers in [("E1", "E2"), ("E1", "E3", "E3"), ("E1", "E4", "E3")]:
+        invalid = {**result, "chapters": [{**first_chapter, "start_anchor_id": identifier} for identifier in identifiers]}
         with pytest.raises(ValueError, match="chapter_boundaries_must_increase_from_first_anchor"):
             coordinator.validate("outline", payload, invalid)

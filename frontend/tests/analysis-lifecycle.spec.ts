@@ -650,6 +650,47 @@ test("停止完成后可继续或重新生成笔记，重新生成创建新任�
   expect(state.writes).toEqual(["/api/v1/tasks/first-task/stop", "/api/v1/videos/first/analyses"]);
 });
 
+test("识别失败后可重新生成笔记，即使旧任务无法重试", async ({ page }) => {
+  const state = await mockWorkspace(page);
+  const failed = { ...state.tasks["first-task"], status: "failed", stage: "ocr:1/10",
+    notes_state: "none", notes_revision: 0, error: { message: "画面识别失败" } };
+  state.videos[0].latest_task = state.tasks[failed.id] = failed;
+  const generated = { ...failed, id: "new-task", status: "queued", stage: "queued", error: null };
+  state.tasks[generated.id] = generated;
+  const message = "笔记生成规则已更新，请重新生成笔记。";
+  await page.route("**/api/v1/tasks/first-task/retry", async (route) => {
+    state.writes.push(new URL(route.request().url()).pathname);
+    await route.fulfill({ status: 409, json: { error: {
+      code: "generation_changed", message, error_id: "generation-changed",
+      log_file: "log/generation-changed.log", log_saved: true,
+    } } });
+  });
+  await page.route("**/api/v1/videos/first/analyses", async (route) => {
+    if (route.request().method() === "GET") return route.fallback();
+    state.writes.push(new URL(route.request().url()).pathname);
+    state.videos[0].latest_task = generated;
+    await route.fulfill({ status: 202, json: { task_id: generated.id, status: generated.status } });
+  });
+
+  await page.goto("/#summary/first");
+  const panel = page.locator(".task-panel");
+  const regenerate = panel.getByRole("button", { name: "重新生成笔记", exact: true });
+  await expect(regenerate).toBeEnabled();
+  await panel.getByRole("button", { name: "复用已有识别，重试任务", exact: true }).click();
+  const error = page.getByRole("alert").filter({ hasText: message });
+  await expect(error).toBeVisible();
+  await error.getByRole("button", { name: "关闭错误通知" }).click();
+
+  await regenerate.click();
+  const setup = page.getByRole("dialog", { name: "选择处理模型" });
+  await setup.getByRole("button", { name: "开始处理", exact: true }).click();
+  await expect(setup).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "停止处理", exact: true })).toBeVisible();
+  expect(state.tasks[failed.id].status).toBe("failed");
+  expect(state.videos[0].latest_task.id).toBe(generated.id);
+  expect(state.writes).toEqual(["/api/v1/tasks/first-task/retry", "/api/v1/videos/first/analyses"]);
+});
+
 test("设置覆盖详情，关闭和前进后退保留同一播放器、引用与播放时间", async ({
   page,
 }) => {
