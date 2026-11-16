@@ -186,6 +186,7 @@ export function Notes({
                     <li key={issue.id}>
                       {issue.quote && <p>原文：{issue.quote}</p>}
                       <p>存疑原因：{issue.reason}</p>
+                      <p>{clock(issue.start_seconds)} - {clock(issue.end_seconds)}</p>
                     </li>
                   ))}
                 </ul>

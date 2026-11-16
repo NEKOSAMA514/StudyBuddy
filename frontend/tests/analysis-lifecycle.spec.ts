@@ -1036,10 +1036,11 @@ test("文件类型缺少容器、null 或空字符串均回退 MP4", async ({ pa
 });
 
 
-test("整章Markdown按原顺序展示，末尾存疑区默认折叠且没有时间戳", async ({ page }) => {
+test("整章Markdown按原顺序展示，末尾存疑区默认折叠并显示时间范围", async ({ page }) => {
   const state = await mockWorkspace(page);
   state.notes.chapters[0].markdown = "完整的**解释性正文**。\n\n#### 不同群体\n\n- 第一类群体的特点。\n- 第二类群体的特点。";
-  state.notes.source_issues = [{ id: "I1", chapter_id: "C1", kind: "source_issue", quote: "转录 0", reason: "具体名称无法确认。", evidence_ids: ["speech-0"], critical: true }];
+  state.notes.source_issues = [{ id: "I1", chapter_id: "C1", kind: "source_issue", quote: "转录 0",
+    reason: "具体名称无法确认。", evidence_ids: ["speech-0", "speech-6"], critical: true, start_seconds: 0, end_seconds: 6.5 }];
   await page.goto("/#summary/first");
   await expect(page.locator(".note-markdown").first()).toContainText("完整的解释性正文。");
   await expect(page.locator(".note-markdown strong")).toHaveText("解释性正文");
@@ -1057,7 +1058,7 @@ test("整章Markdown按原顺序展示，末尾存疑区默认折叠且没有时
   await expect(toggle).toHaveCSS("font-size", "15px");
   await expect(issues.locator("p").first()).toHaveCSS("font-size", "14px");
   await expect(issues.locator("button,time,.time-button")).toHaveCount(0);
-  expect(await issues.innerText()).not.toMatch(/\d{2}:\d{2}/);
+  await expect(issues.locator("li > p").last()).toHaveText("00:00 - 00:06");
   expect(await issues.evaluate(element => element === element.parentElement?.lastElementChild)).toBe(true);
   await issues.screenshot({ path: test.info().outputPath("source-issues-expanded.png") });
   await page.screenshot({ path: test.info().outputPath("block-notes.png"), fullPage: true });
@@ -1302,7 +1303,7 @@ for (const theme of ["light", "dark"]) test(`代码块保留缩进、复制原�
 test("关键疑问仍在折叠存疑区，省略无效引文且不增加需核查标记", async ({ page }) => {
   const state = await mockWorkspace(page);
   state.notes.source_issues = [{ id: "I1", chapter_id: "C1", kind: "source_issue", quote: null,
-    reason: "关键结论的适用条件无法确认。", evidence_ids: ["speech-0"], critical: true }];
+    reason: "关键结论的适用条件无法确认。", evidence_ids: ["speech-6"], critical: true, start_seconds: 6, end_seconds: 6.5 }];
   await page.goto("/#summary/first");
   await expect(page.getByText("需核查", { exact: true })).toHaveCount(0);
   const issues = page.getByRole("complementary", { name: "存疑部分" });
@@ -1310,6 +1311,7 @@ test("关键疑问仍在折叠存疑区，省略无效引文且不增加需核�
   await issues.locator("summary").click();
   await expect(issues).toContainText("关键结论的适用条件无法确认。");
   await expect(issues).not.toContainText("原文：");
+  await expect(issues.locator("li > p").last()).toHaveText("00:06 - 00:06");
   await expect(page.locator(".note-markdown")).toContainText("要点");
 });
 

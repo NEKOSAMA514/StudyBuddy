@@ -175,11 +175,14 @@ def test_txt_and_markdown_download_read_the_same_saved_body(client, app, video_f
     assert text.headers["content-type"].startswith("text/plain")
     assert ".md" in markdown.headers["content-disposition"] and ".txt" in text.headers["content-disposition"]
     normalized = normalize_math(body)
-    assert client.get(f"/api/v1/analyses/{task_id}").json()["chapters"][0]["markdown"] == normalized
+    notes = client.get(f"/api/v1/analyses/{task_id}").json()
+    assert notes["chapters"][0]["markdown"] == normalized
+    issue = notes["source_issues"][0]
+    assert (issue["start_seconds"], issue["end_seconds"]) == (0, 1)
     assert normalized in markdown.text and "## 存疑部分" in markdown.text
     assert markdown_text(normalized) in text.text and text.text == explicit_text.text
-    assert "原文：TCP" in text.text and "00:" not in text.text.split("存疑部分：")[1]
-    assert "原文：TCP" in markdown.text and "00:" not in markdown.text.split("## 存疑部分")[1]
+    assert "原文：TCP\n存疑原因：名称存疑\n00:00 - 00:01\n" in text.text.split("存疑部分：")[1]
+    assert "原文：TCP\n\n存疑原因：名称存疑\n\n00:00 - 00:01\n" in markdown.text.split("## 存疑部分")[1]
     assert client.get(f"/api/v1/analyses/{task_id}/notes?format=html").status_code == 422
     with app.state.sessions() as session:
         assert session.get(Task, task_id).result == result
