@@ -249,7 +249,8 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
     sent = json.loads(requests[0][-1]["content"])
     sent_chapter = sent["chapters"][0] if operation == "chapters" else sent["chapter"]
     if operation == "chapters":
-        frames = [row["text"].rstrip("\r\n").replace("\n", "\n> ") for row in coordinator.evidence[:3]]
+        frames = [coordinator.evidence[0]["text"].rstrip("\r\n").replace("\n", "\n> ")]
+        frames.extend(row["text"].splitlines()[-1] for row in coordinator.evidence[1:3])
         assert sent_chapter == {
             "chapter_id": "C1",
             "primary": "\n".join(f"> [F{index}] {text}" for index, text in enumerate(frames, 1)),
@@ -461,6 +462,25 @@ def test_chapter_filter_removes_spoken_short_phrases_and_continuous_repeated_sen
     assert records == before and "你的儿子今年15岁" in sent["primary"]
 
 
+def test_chapter_deduplicates_identical_formula_lines_and_keeps_value_changes():
+    formula = "入1-3mL硝基苯，使其包裹在AgCl沉淀表面"
+    changed = formula.replace("1-3mL", "1-5mL")
+    first = timed_record("E2", "frame", 1, 3, formula)
+    clipped = timed_record("E3", "frame", 4, 6, f"{formula}\n观察沉淀转化")
+    different = timed_record("E4", "frame", 6, 7, changed)
+    later = timed_record("E5", "frame", 11, 12, formula)
+    records = [timed_record("E1", "speech", 0, 15, "接着看这里的实验条件"), first, clipped, different, later]
+    before = deepcopy(records)
+
+    sent, sources = pack_chapter_material({"primary": records})
+
+    assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
+        f"> [F1] {formula}", "> [F2] 观察沉淀转化", f"> [F3] {changed}", f"> [F4] {formula}",
+    ]
+    assert [sources[f"F{i}"] for i in range(1, 5)] == [[first], [clipped], [different], [later]]
+    assert records == before
+
+
 def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_repair(tmp_path, monkeypatch):
     model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
     evidence = [
@@ -611,7 +631,7 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
             value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": "滴定", "core_question": "如何操作", "topics": ["反应与条件"],
                                    "start_anchor_id": "E1"}], "video_summary": "介绍滴定。"}
         elif "chapters" in sent:
-            label = evidence[3]["text"].rstrip("\r\n").replace("\n", "\n> ")
+            label = evidence[3]["text"].splitlines()[-1]
             assert sent["chapters"][0]["primary"].endswith(f"\n> [F4] {label}")
             value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': 'AgCl / AgC1', 'reason': '字母不清', 'evidence_ids': ['F4']}]}]}
         else:

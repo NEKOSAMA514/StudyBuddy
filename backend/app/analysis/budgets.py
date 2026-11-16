@@ -8,10 +8,10 @@ OUTPUT_TOKENS = {"outline": 32768, "extract": 32768,
                  "chapters": 32768, "overview": 16384, "issue_quotes": 32768,
                  "connection_test": 1024}
 
-# 小章节合批时预留的输出空间，不限制正文实际长度。
+# 文档小章节合批时预留的输出空间，不限制正文实际长度。
 OUTPUT_BUDGET_RATIO = 0.8
 
-# 每批最多合并的章节数，仍须满足输入与输出预算。
+# 每批最多合并的章节数。
 MAX_BATCH_CHAPTERS = 5
 
 

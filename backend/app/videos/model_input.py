@@ -246,9 +246,10 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames):
             parts = _ocr_text_parts(text)
             repeated = set()
             for part, count in Counter(part.strip() for part in parts).items():
-                if (len(_normalized(part)) < MIN_OCR_TEXT_MATCH or _requires_literal_match(part)
+                if (len(_normalized(part)) < MIN_OCR_TEXT_MATCH
                         or _short_ocr_label("".join(part.split()))):
                     continue
+                # 画面之间用整行原文比较，数值或运算符不同的行会分别保留。
                 key = (block_id, part)
                 previous = previous_parts.get(key)
                 # 逐字出现的字幕会重复带上此前的整句，即使其间插入了名牌等画面。

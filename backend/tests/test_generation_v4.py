@@ -96,14 +96,16 @@ def test_bad_auxiliary_quote_keeps_body_and_only_verified_quote_is_exported(tmp_
         assert ("这个事实尚无法确认" in text) == critical
 
 
-def test_batching_uses_output_budget_without_limiting_writing(tmp_path, monkeypatch):
+@pytest.mark.parametrize("excess,expected", [(0, [5]), (1, [4, 1])])
+def test_batching_splits_on_actual_input_characters(tmp_path, monkeypatch, excess, expected):
     coordinator, model = flow(tmp_path, evidence=sources(5, 10), budget=24000)
     chapters = coordinator.assign({"content_type": CONTENT_TYPES["课程或教材"], "chapters": plan(coordinator.anchors), "video_summary": "主题"})
-    # 最多可合五章，输出预算只容纳两章时仍应拆批。
     monkeypatch.setitem(model.settings.llm_output_tokens, "chapters", 2500)
+    payload = coordinator.input_payload("chapters", {"chapters": chapters, "video_summary": "主题"})
+    model.settings.llm_input_text_limit = model.input_characters("chapters", payload) - excess
     asyncio.run(coordinator.writing(chapters, "主题"))
     batches = [p["chapters"] for op, p in model.inputs if op == "chapters"]
-    assert list(map(len, batches)) == [2, 2, 1]
+    assert list(map(len, batches)) == expected
 
 
 def test_actual_batch_truncation_splits_without_rewriting_saved_chapters(tmp_path):

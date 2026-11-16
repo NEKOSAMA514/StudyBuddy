@@ -11,7 +11,7 @@ from ..util.json_io import atomic_json
 from ..analysis.activity import emit
 from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
-from ..analysis.budgets import OUTPUT_TOKENS, OUTPUT_BUDGET_RATIO, MAX_BATCH_CHAPTERS
+from ..analysis.budgets import OUTPUT_TOKENS, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
 from .model_input import pack_chapter_material, split_chapter_context
 from .segments import FLOW_VERSION, split_segments, preceding_context, outline_overhead
@@ -448,8 +448,8 @@ class DetailedVideoGeneration:
             if chapter["chapter_id"] in drafts:
                 continue
             if self.fits("chapters", payload([chapter])):
-                if small and (len(small) == MAX_BATCH_CHAPTERS or not self.fits("chapters", payload([*small, chapter])) or
-                              not self.output_fits([*small, chapter])):
+                if small and (len(small) == MAX_BATCH_CHAPTERS or
+                              not self.fits("chapters", payload([*small, chapter]))):
                     flush()
                 small.append(chapter)
             else:
@@ -484,13 +484,6 @@ class DetailedVideoGeneration:
                 # 保留已完成章节；只缩小实际截断的批次，不改正文长度。
                 jobs = [failed, *[job for job in jobs if job != failed]]
         return [drafts[chapter["chapter_id"]] for chapter in chapters]
-
-    def output_fits(self, chapters):
-        # 仅用于合批调度；不向模型施加正文长度要求。按原文保守估算并预留20%输出余量。
-        material = [{key: chapter[key] for key in ("primary", "facts", "issues") if key in chapter}
-                    for chapter in chapters]
-        estimate = len(json.dumps(material, ensure_ascii=False).encode("utf-8")) + 512 * len(chapters)
-        return estimate <= self.settings.llm_output_tokens["chapters"] * OUTPUT_BUDGET_RATIO
 
     def diagnostic(self, code, message, **details):
         logger.warning("task=%s code=%s %s details=%s", self.common["task_id"], code, message, details)

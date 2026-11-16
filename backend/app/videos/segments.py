@@ -6,7 +6,7 @@ from ..analysis.content_types import CONTENT_TYPES
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v13-raw-outline"
+FLOW_VERSION = "video-flow-v14-exact-ocr-formulas"
 
 
 def outline_overhead(model, video_title=""):
