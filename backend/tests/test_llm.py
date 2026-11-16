@@ -176,9 +176,7 @@ def test_writing_evidence_is_compact_without_changing_local_material(operation, 
             assert sent_chapter["facts"] == data["facts"] and sent_chapter["issues"] == data["issues"]
         else:
             if operation == "chapters":
-                assert sent_chapter["primary"] == [
-                    {"id": "F1", "text": "画面原文"},
-                    {"id": "New_S1", "text": "[+1]原始知识[-1]"}]
+                assert sent_chapter["primary"] == "[New_S1]\n> [F1] 画面原文\n原始知识"
             else:
                 assert sent_chapter["primary"] == [
                     {"id": "E1", "kind": "speech", "text": "原始知识"},
@@ -307,13 +305,12 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
         if "evidence" in payload:
             value = outline()
         elif "chapters" in payload:
-            items = payload["chapters"][0]["primary"]
-            expected = (
-                [{"id": "F1", "text": "frame原始文字"}, {"id": "New_S1", "text": "[+1]speech原始文字[-1]"}]
-                if kinds == ("speech", "frame") else
-                [{"id": "New_S1" if kinds[0] == "speech" else "F1", "text": evidence[0]["text"]}]
-            )
-            assert items == expected
+            expected = {
+                ("speech",): "[New_S1]\nspeech原始文字",
+                ("frame",): "> [F1] frame原始文字",
+                ("speech", "frame"): "[New_S1]\n> [F1] frame原始文字\nspeech原始文字",
+            }
+            assert payload["chapters"][0]["primary"] == expected[kinds]
             value = {"chapters": [{'chapter_id': 'C1', 'summary': '章节摘要', "markdown": "\n\n".join(item["text"] for item in evidence), "issues": []}]}
         else:
             value = {"title": "视频知识", "tags": [], "overview_paragraphs": ["主题导览"]}

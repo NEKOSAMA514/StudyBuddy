@@ -168,16 +168,6 @@ def _without_spoken_lines(text, speech):
     return "".join(retained).strip("\r\n")
 
 
-def _closest_fragment(block, seconds, *, ending=False):
-    # 等距时，开始使用较早的原句，结束使用较晚的原句。
-    fragments = reversed(block["fragments"]) if ending else block["fragments"]
-    return min(fragments, key=lambda cue: round(max(cue["start_seconds"] - seconds, seconds - cue["end_seconds"], 0), 9))
-
-
-def _frame_markers(markers):
-    return f"[{','.join(markers)}]" if markers else ""
-
-
 def _chapter_frame_texts(items, speech, seen_frames):
     speech_at = _overlap_lookup(speech)
     previous_end, previous_lines = None, Counter()
@@ -202,44 +192,48 @@ def _chapter_frame_texts(items, speech, seen_frames):
         yield item, text
 
 
-def _pack_chapter_primary(records, sources, seen_frames, chapter_end):
+def _pack_chapter_primary(records, sources, seen_frames):
     items = sorted(records, key=_start_order)
     speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
-    blocks = _speech_blocks(speech)
-    for number, block in enumerate(blocks, 1):
-        block["id"] = f"New_S{number}"
-        sources[block["id"]] = block["fragments"]
+    headings = {}
+    for number, block in enumerate(_speech_blocks(speech), 1):
+        identifier = f"New_S{number}"
+        fragments = block["fragments"]
+        headings[fragments[0]["id"]] = f"[{identifier}]"
+        sources[identifier] = fragments
 
-    blocks_at = _overlap_lookup(blocks)
-    appearances, disappearances = defaultdict(list), defaultdict(list)
-    before_block, ordered = defaultdict(list), []
+    timed_speech = [cue for cue in speech if cue.get("start_seconds") is not None and cue.get("end_seconds") is not None]
+    speech_starts = [cue["start_seconds"] for cue in timed_speech]
+    frames_at = defaultdict(list)
     for number, (item, text) in enumerate(_chapter_frame_texts(items, speech, seen_frames), 1):
-        start, end = item.get("start_seconds"), item.get("end_seconds")
         identifier = f"F{number}"
-        frame = {"id": identifier, "text": text}
         sources[identifier] = [item]
-        overlapping = blocks_at(start, end) if start is not None and end is not None else []
-        if overlapping:
-            first, last = overlapping[0], overlapping[-1]
-            begin = _closest_fragment(first, start)
-            appearances[begin["id"]].append(f"+{number}")
-            if chapter_end is None or end < chapter_end:
-                finish = _closest_fragment(last, end, ending=True)
-                disappearances[finish["id"]].append((end, f"-{number}"))
-            before_block[first["id"]].append(frame)
-        else:
-            ordered.append((_start_order(item), [frame]))
+        # 画面出现在最近一句中时放到句前，停顿中的画面保留自己的时间顺序。
+        start = item.get("start_seconds")
+        index = bisect_right(speech_starts, start) - 1 if start is not None else -1
+        anchor = item["id"]
+        if index >= 0 and start <= timed_speech[index]["end_seconds"]:
+            anchor = timed_speech[index]["id"]
+        first, *rest = text.splitlines(keepends=True)
+        continuation = "".join(f"> {line}" for line in rest)
+        frames_at[anchor].append(f"> [{identifier}] {first}{continuation}")
 
-    for block in blocks:
-        fragments = []
-        for cue in block["fragments"]:
-            start_markers = _frame_markers(appearances[cue["id"]])
-            endings = sorted(disappearances[cue["id"]], key=lambda event: event[0])
-            end_markers = _frame_markers([marker for _, marker in endings])
-            fragments.append(start_markers + cue["text"].strip() + end_markers)
-        speech_block = {"id": block["id"], "text": " ".join(fragments)}
-        ordered.append((_start_order(block), [*before_block[block["id"]], speech_block]))
-    return [record for _, group in sorted(ordered, key=lambda entry: entry[0]) for record in group]
+    lines, spoken = [], []
+    for item in items:
+        heading = headings.get(item["id"])
+        frames = frames_at.pop(item["id"], ())
+        if heading or frames:
+            if spoken:
+                lines.append(" ".join(spoken))
+                spoken.clear()
+            if heading:
+                lines.append(heading)
+            lines.extend(frames)
+        if item["kind"] == "speech" and (text := item["text"].strip()):
+            spoken.append(text)
+    if spoken:
+        lines.append(" ".join(spoken))
+    return "\n".join(lines)
 
 
 def split_chapter_context(chapter):
@@ -279,8 +273,7 @@ def pack_chapter_material(chapter):
     sources, seen_frames = {}, set()
     crossing, preceding = split_chapter_context(chapter)
     if "primary" in chapter or crossing:
-        sent["primary"] = _pack_chapter_primary([*crossing, *chapter.get("primary", [])], sources, seen_frames,
-                                                chapter.get("end_seconds"))
+        sent["primary"] = _pack_chapter_primary([*crossing, *chapter.get("primary", [])], sources, seen_frames)
     if "context" in chapter:
         sent["context"] = _chapter_context_text(preceding, seen_frames)
     return sent, sources

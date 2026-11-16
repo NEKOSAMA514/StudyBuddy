@@ -163,14 +163,14 @@ def test_duplicate_subtitle_is_removed_instead_of_encoded(operation):
     assert "ocr_texts" not in sent
     records = sent["evidence"] if operation == "outline" else (
         sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
+    table = "积分表：A 14；B 12"
+    detail = "注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
     if operation == "chapters":
-        frame, speech = records
-        assert speech == {"id": "New_S1", "text": f'[+1]{evidence[0]["text"]}[-1]'}
-        assert frame["id"] == "F1"
+        assert records.splitlines() == ["[New_S1]", f"> [F1] {table}", f"> {detail}", evidence[0]["text"]]
     else:
         speech, frame = records
         assert speech["text"] == evidence[0]["text"]
-    assert frame["text"] == "积分表：A 14；B 12\n注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
+        assert frame["text"] == f"{table}\n{detail}"
     assert payload == before
 
 
@@ -188,18 +188,19 @@ def test_sent_plain_text_matches_actual_request_budget(operation):
     assert "ocr_texts" not in sent
     records = sent["evidence"] if operation == "outline" else (
         sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
-    assert all(isinstance(item["text"], str) for item in records)
     if operation == "chapters":
-        assert [item["id"] for item in records] == ["F1", "New_S1"]
-        assert message_characters(messages[-1:]) == sum(len(item["text"]) for item in records)
-        assert records[-1]["text"].endswith("[-1]")
+        assert records.startswith("[New_S1]\n> [F1] ")
+        text_length = len(records)
+        assert message_characters(messages[-1:]) == text_length
     else:
+        assert all(isinstance(item["text"], str) for item in records)
         assert [(item["id"], item["text"]) for item in records] == [
             (item["id"], item["text"]) for item in deduplicate_ocr({"evidence": evidence})["evidence"]]
+        text_length = sum(len(item["text"]) for item in records)
     assert "start_seconds" not in json.dumps(sent) and "end_seconds" not in json.dumps(sent)
     assert payload == before
     assert model.input_characters(operation, payload) == message_characters(messages)
-    assert sum(len(item["text"]) for item in records) < sum(len(item["text"]) for item in evidence)
+    assert text_length < sum(len(item["text"]) for item in evidence)
 
 
 def test_similar_subtitles_are_not_deleted_and_speech_is_unchanged_without_ocr():
@@ -245,10 +246,10 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
     sent = json.loads(requests[0][-1]["content"])
     sent_chapter = sent["chapters"][0] if operation == "chapters" else sent["chapter"]
     if operation == "chapters":
+        frames = [row["text"].rstrip("\r\n").replace("\n", "\n> ") for row in coordinator.evidence[:3]]
         assert sent_chapter == {
             "chapter_id": "C1",
-            "primary": [{"id": f"F{index + 1}", "text": row["text"].rstrip("\r\n")}
-                        for index, row in enumerate(coordinator.evidence[:3])],
+            "primary": "\n".join(f"> [F{index}] {text}" for index, text in enumerate(frames, 1)),
             "context": coordinator.evidence[3]["text"].rstrip("\r\n"),
         }
     else:
@@ -297,12 +298,9 @@ def test_chapter_context_is_plain_timeline_text_and_crossing_frames_are_citable(
                "primary": [timed_record("E7", "speech", 60, 65, "本章原话")]}
     before = deepcopy(chapter)
     sent, sources = pack_chapter_material(chapter)
+    crossing_text = "> [F1] 章首还在显示\n> [F2] 跨过整章的标题"
     assert sent == {
-        "primary": [
-            {"id": "F1", "text": "章首还在显示"},
-            {"id": "F2", "text": "跨过整章的标题"},
-            {"id": "New_S1", "text": "[+1,+2]本章原话[-1]"},
-        ],
+        "primary": f"{crossing_text}\n[New_S1]\n本章原话",
         "context": "接上前文 前一条说明\n旧画面\n画面补充\n接着说完",
     }
     assert sources == {"F1": [context[4]], "F2": [context[5]], "New_S1": chapter["primary"]}
@@ -312,11 +310,11 @@ def test_chapter_context_is_plain_timeline_text_and_crossing_frames_are_citable(
     extracted["facts"] = [{"text": "本章事实"}]
     sent_after_extract, _ = pack_chapter_material(extracted)
     assert sent_after_extract["facts"] == extracted["facts"]
-    assert sent_after_extract["primary"] == sent["primary"][:2]
+    assert sent_after_extract["primary"] == crossing_text
     assert sent_after_extract["context"] == sent["context"]
 
 
-def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_in_order():
+def test_chapter_material_inserts_frames_at_original_fragments_and_keeps_standalone_frames_in_order():
     primary = [
         timed_record("E1", "speech", 0, 10, "  开场原话  "),
         timed_record("E2", "frame", 9, 65, "Claude"),
@@ -334,16 +332,11 @@ def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_i
     before = deepcopy(chapter)
     sent, sources = pack_chapter_material(chapter)
     assert sent == {
-        "primary": [
-            {"id": "F1", "text": "Claude"},
-            {"id": "F2", "text": "短时标牌"},
-            {"id": "New_S1", "text": "[+1]开场原话 第一条说明 [+2]第一块末句[-2]"},
-            {"id": "New_S2", "text": "第二块原话[-1]"},
-            {"id": "F3", "text": "独立画面"},
-            {"id": "F4", "text": "Claude"},
-            {"id": "New_S3", "text": "[+4]超过一分钟的单条语音"},
-            {"id": "New_S4", "text": "仍从新块开始[-4]"},
-        ],
+        "primary": "\n".join([
+            "[New_S1]", "> [F1] Claude", "开场原话 第一条说明", "> [F2] 短时标牌", "第一块末句",
+            "[New_S2]", "第二块原话", "> [F3] 独立画面",
+            "[New_S3]", "超过一分钟的单条语音", "[New_S4]", "> [F4] Claude", "仍从新块开始",
+        ]),
         "context": "本章前文",
     }
     assert [item["id"] for item in sources["New_S1"]] == ["E1", "E3", "E5"]
@@ -351,31 +344,24 @@ def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_i
     assert chapter == before
 
 
-def test_chapter_material_groups_markers_on_the_same_fragment_in_time_order():
+def test_chapter_material_groups_frames_before_the_same_fragment_in_time_order():
     records = [
         timed_record("E1", "speech", 0, 6, "第一句"),
         timed_record("E2", "frame", 1, 5, "画面甲"),
         timed_record("E3", "frame", 2, 4, "画面乙"),
     ]
     sent, _ = pack_chapter_material({"primary": records})
-    assert sent["primary"] == [
-        {"id": "F1", "text": "画面甲"},
-        {"id": "F2", "text": "画面乙"},
-        {"id": "New_S1", "text": "[+1,+2]第一句[-2,-1]"},
-    ]
+    assert sent["primary"] == "[New_S1]\n> [F1] 画面甲\n> [F2] 画面乙\n第一句"
 
 
-def test_chapter_material_uses_nearest_fragments_on_either_side_of_a_speech_gap():
+def test_chapter_material_inserts_frames_at_appearances_during_a_speech_gap():
     records = [
         timed_record("E1", "speech", 10, 12, "停顿前的话"),
-        timed_record("E2", "frame", 15, 15, "过渡画面"),
+        timed_record("E2", "frame", 15, 19, "过渡画面"),
         timed_record("E3", "speech", 18, 20, "停顿后的话"),
     ]
     sent, _ = pack_chapter_material({"primary": records})
-    assert sent["primary"] == [
-        {"id": "F1", "text": "过渡画面"},
-        {"id": "New_S1", "text": "[+1]停顿前的话 停顿后的话[-1]"},
-    ]
+    assert sent["primary"] == "[New_S1]\n停顿前的话\n> [F1] 过渡画面\n停顿后的话"
 
 
 def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
@@ -392,10 +378,10 @@ def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
     ]
     context = [timed_record("E7", "speech", 8, 9, primary[-1]["text"])]
     sent, _ = pack_chapter_material({"primary": primary, "context": context})
-    assert sent["primary"][0] == {
-        "id": "F1", "text": f"Claude\n{number.replace('0.01', '0.1')}\n条件变化时保持 Fe3+ 而非 Fe2+"}
-    assert "[+1]" in sent["primary"][1]["text"]
-    assert sent["primary"][-1] == {"id": "F2", "text": primary[-1]["text"]}
+    assert sent["primary"].splitlines() == [
+        "> [F1] Claude", f"> {number.replace('0.01', '0.1')}", "> 条件变化时保持 Fe3+ 而非 Fe2+",
+        "[New_S1]", f"{first} {second} Claude {number}", f"> [F2] {primary[-1]['text']}",
+    ]
     assert sent["context"] == context[0]["text"]
 
 
@@ -403,7 +389,7 @@ def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_r
     model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
     evidence = [
         timed_record("first", "speech", 0, 2, "甲先解释第一问"),
-        timed_record("first-label", "frame", 1, 2, "甲的名牌"),
+        timed_record("first-label", "frame", 3, 5, "甲的名牌"),
         timed_record("second", "speech", 4, 6, "甲再解释第二问"),
         timed_record("third", "speech", 100, 102, "乙先解释第三问"),
         timed_record("second-label", "frame", 101, 102, "乙的名牌"),
@@ -448,7 +434,10 @@ def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_r
 
     issues = asyncio.run(run())
     assert len(sent) == 2 and sent[1] == sent[0][1:]
-    assert [[row["id"] for row in chapter["primary"]] for chapter in sent[0]] == [["F1", "New_S1"]] * 2
+    assert [chapter["primary"] for chapter in sent[0]] == [
+        "[New_S1]\n甲先解释第一问\n> [F1] 甲的名牌\n甲再解释第二问",
+        "[New_S1]\n> [F1] 乙的名牌\n乙先解释第三问",
+    ]
     assert [item["evidence_ids"] for item in snapshots[0]["issues"]] == [["E3"], ["E1", "E3"], ["E2"]]
     assert [item["evidence_ids"] for item in issues] == [["second"], ["first", "second"], ["first-label"], ["second-label"]]
     assert issues[1]["quote"] == "甲再解释第二问"
@@ -548,7 +537,8 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
             value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": "滴定", "core_question": "如何操作", "topics": ["反应与条件"],
                                    "start_anchor_id": "E1"}], "video_summary": "介绍滴定。"}
         elif "chapters" in sent:
-            assert sent["chapters"][0]["primary"][3] == {"id": "F4", "text": evidence[3]["text"].rstrip("\r\n")}
+            label = evidence[3]["text"].rstrip("\r\n").replace("\n", "\n> ")
+            assert sent["chapters"][0]["primary"].endswith(f"\n> [F4] {label}")
             value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': 'AgCl / AgC1', 'reason': '字母不清', 'evidence_ids': ['F4']}]}]}
         else:
             value = {"title": "滴定", "tags": [], "overview_paragraphs": ["实验内容。"]}

@@ -168,8 +168,8 @@ def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anch
         expected_primary = {item["id"] for item in chapter["primary"]}
         if index == 1:
             expected_primary.add("E4")
-            assert sent["primary"][0] == {"id": "F1", "text": "原文3"}
-        assert {original["id"] for item in sent["primary"] for original in sources[item["id"]]} == expected_primary
+            assert sent["primary"].startswith("> [F1] 原文3\n[New_S1]\n")
+        assert {original["id"] for records in sources.values() for original in records} == expected_primary
     assert [item for c in chapters for item in c["primary"]] == coordinator.evidence
 
     request = {"chapters": [chapters[1]]}
