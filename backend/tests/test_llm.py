@@ -178,7 +178,7 @@ def test_writing_evidence_is_compact_without_changing_local_material(operation, 
             if operation == "chapters":
                 assert sent_chapter["primary"] == [
                     {"id": "F1", "text": "画面原文"},
-                    {"id": "New_S1", "text": "（F1出现处）原始知识（F1消失处）"}]
+                    {"id": "New_S1", "text": "[+1]原始知识[-1]"}]
             else:
                 assert sent_chapter["primary"] == [
                     {"id": "E1", "kind": "speech", "text": "原始知识"},
@@ -308,7 +308,7 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
         elif "chapters" in payload:
             items = payload["chapters"][0]["primary"]
             expected = (
-                [{"id": "F1", "text": "frame原始文字"}, {"id": "New_S1", "text": "（F1出现处）speech原始文字（F1消失处）"}]
+                [{"id": "F1", "text": "frame原始文字"}, {"id": "New_S1", "text": "[+1]speech原始文字[-1]"}]
                 if kinds == ("speech", "frame") else
                 [{"id": "New_S1" if kinds[0] == "speech" else "F1", "text": evidence[0]["text"]}]
             )

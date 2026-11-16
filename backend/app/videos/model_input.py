@@ -174,6 +174,10 @@ def _closest_fragment(block, seconds, *, ending=False):
     return min(fragments, key=lambda cue: round(max(cue["start_seconds"] - seconds, seconds - cue["end_seconds"], 0), 9))
 
 
+def _frame_markers(markers):
+    return f"[{','.join(markers)}]" if markers else ""
+
+
 def _pack_chapter_group(records, sources, counts, seen_frames):
     items = sorted(records, key=_start_order)
     speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
@@ -207,7 +211,8 @@ def _pack_chapter_group(records, sources, counts, seen_frames):
                 text = "".join(remaining).strip("\r\n") or text
         previous_end, previous_lines = end if timed else None, current
         counts["frame"] += 1
-        identifier = f'F{counts["frame"]}'
+        number = counts["frame"]
+        identifier = f"F{number}"
         frame = {"id": identifier, "text": text}
         sources[identifier] = [item]
         overlapping = blocks_at(start, end) if timed else []
@@ -215,8 +220,8 @@ def _pack_chapter_group(records, sources, counts, seen_frames):
             first, last = overlapping[0], overlapping[-1]
             begin = _closest_fragment(first, start)
             finish = _closest_fragment(last, end, ending=True)
-            appearances[begin["id"]].append(f"（{identifier}出现处）")
-            disappearances[finish["id"]].append((end, f"（{identifier}消失处）"))
+            appearances[begin["id"]].append(f"+{number}")
+            disappearances[finish["id"]].append((end, f"-{number}"))
             before_block[first["id"]].append(frame)
         else:
             ordered.append((_start_order(item), [frame]))
@@ -224,8 +229,9 @@ def _pack_chapter_group(records, sources, counts, seen_frames):
     for block in blocks:
         fragments = []
         for cue in block["fragments"]:
-            start_markers = "".join(appearances[cue["id"]])
-            end_markers = "".join(label for _, label in sorted(disappearances[cue["id"]], key=lambda event: event[0]))
+            start_markers = _frame_markers(appearances[cue["id"]])
+            endings = sorted(disappearances[cue["id"]], key=lambda event: event[0])
+            end_markers = _frame_markers([marker for _, marker in endings])
             fragments.append(start_markers + cue["text"].strip() + end_markers)
         speech_block = {"id": block["id"], "text": " ".join(fragments)}
         ordered.append((_start_order(block), [*before_block[block["id"]], speech_block]))

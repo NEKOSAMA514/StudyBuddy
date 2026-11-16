@@ -165,7 +165,7 @@ def test_duplicate_subtitle_is_removed_instead_of_encoded(operation):
         sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
     if operation == "chapters":
         frame, speech = records
-        assert speech == {"id": "New_S1", "text": f'（F1出现处）{evidence[0]["text"]}（F1消失处）'}
+        assert speech == {"id": "New_S1", "text": f'[+1]{evidence[0]["text"]}[-1]'}
         assert frame["id"] == "F1"
     else:
         speech, frame = records
@@ -192,7 +192,7 @@ def test_sent_plain_text_matches_actual_request_budget(operation):
     if operation == "chapters":
         assert [item["id"] for item in records] == ["F1", "New_S1"]
         assert message_characters(messages[-1:]) == sum(len(item["text"]) for item in records)
-        assert records[-1]["text"].endswith("（F1消失处）")
+        assert records[-1]["text"].endswith("[-1]")
     else:
         assert [(item["id"], item["text"]) for item in records] == [
             (item["id"], item["text"]) for item in deduplicate_ocr({"evidence": evidence})["evidence"]]
@@ -305,18 +305,32 @@ def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_i
         "primary": [
             {"id": "F1", "text": "Claude"},
             {"id": "F2", "text": "短时标牌"},
-            {"id": "New_S1", "text": "（F1出现处）开场原话 第一条说明 （F2出现处）第一块末句（F2消失处）"},
-            {"id": "New_S2", "text": "第二块原话（F1消失处）"},
+            {"id": "New_S1", "text": "[+1]开场原话 第一条说明 [+2]第一块末句[-2]"},
+            {"id": "New_S2", "text": "第二块原话[-1]"},
             {"id": "F3", "text": "独立画面"},
             {"id": "F4", "text": "Claude"},
-            {"id": "New_S3", "text": "（F4出现处）超过一分钟的单条语音"},
-            {"id": "New_S4", "text": "仍从新块开始（F4消失处）"},
+            {"id": "New_S3", "text": "[+4]超过一分钟的单条语音"},
+            {"id": "New_S4", "text": "仍从新块开始[-4]"},
         ],
         "context": [{"id": "New_S5", "text": "本章前文"}],
     }
     assert [item["id"] for item in sources["New_S1"]] == ["E1", "E3", "E5"]
     assert sources["F1"] == [primary[1]] and sources["F4"] == [primary[-1]]
     assert chapter == before
+
+
+def test_chapter_material_groups_markers_on_the_same_fragment_in_time_order():
+    records = [
+        timed_record("E1", "speech", 0, 6, "第一句"),
+        timed_record("E2", "frame", 1, 5, "画面甲"),
+        timed_record("E3", "frame", 2, 4, "画面乙"),
+    ]
+    sent, _ = pack_chapter_material({"primary": records})
+    assert sent["primary"] == [
+        {"id": "F1", "text": "画面甲"},
+        {"id": "F2", "text": "画面乙"},
+        {"id": "New_S1", "text": "[+1,+2]第一句[-2,-1]"},
+    ]
 
 
 def test_chapter_material_uses_nearest_fragments_on_either_side_of_a_speech_gap():
@@ -328,7 +342,7 @@ def test_chapter_material_uses_nearest_fragments_on_either_side_of_a_speech_gap(
     sent, _ = pack_chapter_material({"primary": records})
     assert sent["primary"] == [
         {"id": "F1", "text": "过渡画面"},
-        {"id": "New_S1", "text": "（F1出现处）停顿前的话 停顿后的话（F1消失处）"},
+        {"id": "New_S1", "text": "[+1]停顿前的话 停顿后的话[-1]"},
     ]
 
 
@@ -348,7 +362,7 @@ def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
     sent, _ = pack_chapter_material({"primary": primary, "context": context})
     assert sent["primary"][0] == {
         "id": "F1", "text": f"Claude\n{number.replace('0.01', '0.1')}\n条件变化时保持 Fe3+ 而非 Fe2+"}
-    assert "（F1出现处）" in sent["primary"][1]["text"]
+    assert "[+1]" in sent["primary"][1]["text"]
     assert sent["primary"][-1] == {"id": "F2", "text": primary[-1]["text"]}
     assert sent["context"] == [{"id": "New_S2", "text": context[0]["text"]}]
 

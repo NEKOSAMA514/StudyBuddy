@@ -2,7 +2,7 @@
 import json
 
 # 各阶段统一统计输入文字；不计材料 JSON 包装和来源定位元数据。
-DEFAULT_INPUT_TEXT_LIMIT = 30000
+DEFAULT_INPUT_TEXT_LIMIT = 25000
 
 OUTPUT_TOKENS = {"outline": 32768, "extract": 32768,
                  "chapters": 32768, "overview": 16384, "issue_quotes": 32768,
