@@ -9,8 +9,8 @@ from itertools import accumulate
 OCR_REPEAT_SECONDS = 2
 SLIDE_REPEAT_SECONDS = 30
 SPEECH_LINK_SECONDS = 1
-OCR_SPEECH_HALF_WINDOW = 30
 SPEECH_BLOCK_SECONDS = 60
+MIN_OCR_TEXT_MATCH = 5
 NEGATIONS = "不没未无非别勿否"
 SIGNIFICANT_HAN = NEGATIONS + "正负〇零一二三四五六七八九十百千万亿两半"
 
@@ -49,11 +49,10 @@ def _requires_literal_match(text):
     return any(char.isdigit() for char in text) or re.search(r'[+\-−=<>%\\^_{}\[\]()/]', text)
 
 
-def _without_repeated_lines(lines, current, previous, gap, *, preserve_details=False):
-    minimum = 6 if gap <= OCR_REPEAT_SECONDS and not preserve_details else 12
+def _without_repeated_lines(lines, current, previous, gap):
+    minimum = 6 if gap <= OCR_REPEAT_SECONDS else 12
     repeats = {line for line, count in current.items()
-               if previous[line] == count and len(_normalized(line)) >= minimum
-               and not (preserve_details and _requires_literal_match(line))}
+               if previous[line] == count and len(_normalized(line)) >= minimum}
     if gap <= OCR_REPEAT_SECONDS or (len(repeats) >= 2 and
             2 * sum(map(len, repeats)) >= sum(map(len, current))):
         return [line for line in lines if line.strip() not in repeats]
@@ -173,36 +172,33 @@ def _one_ocr_edit(candidate, phrase):
 
 
 def _spoken_duplicate(raw, plain, spoken, normalized_speech):
-    if len(plain) < 12:
-        return False
     literal = _requires_literal_match(raw)
+    if len(plain) < (12 if literal else MIN_OCR_TEXT_MATCH):
+        return False
     candidate = raw.rstrip("。！？") if literal else plain
-    phrases = spoken if literal else normalized_speech
+    phrase = spoken if literal else normalized_speech
     prefix = r"(?<![\d.+−正负-])" if literal and (candidate[0].isdigit() or candidate[0] == ".") else ""
     suffix = r"(?![\d.+−%‰]|[,，:：-]\d)" if literal and (candidate[-1].isdigit() or candidate[-1] in ".,，:：") else ""
     pattern = prefix + rf"(?<![{NEGATIONS}])" + re.escape(candidate) + suffix
-    if any(candidate in phrase and re.search(pattern, phrase) for phrase in phrases):
+    if candidate in phrase and re.search(pattern, phrase):
         return True
-    return not literal and len(plain) >= 16 and any(_one_ocr_edit(plain, phrase) for phrase in phrases)
+    return not literal and len(plain) >= 16 and _one_ocr_edit(plain, phrase)
 
 
-def _without_spoken_lines(text, speech):
-    if not speech:
-        return text.strip("\r\n")
-    runs, last_end = [], float("-inf")
-    for item in speech:
-        if item["start_seconds"] - last_end > SPEECH_LINK_SECONDS:
-            runs.append([])
-        runs[-1].append("".join(item["text"].split()))
-        last_end = max(last_end, item["end_seconds"])
-    spoken = ["".join(run) for run in runs]
-    normalized_speech = [_speech_comparison_text(phrase) for phrase in spoken]
-    longest = max(map(len, normalized_speech)) + 1
-    # 以行和句号为保留边界，同时允许同一条字幕连续换行。
-    parts = [part for line in text.splitlines(keepends=True) for part in re.split(r"(?<=[。！？])", line) if part]
+def _ocr_text_parts(text):
+    return [part for line in text.splitlines(keepends=True) for part in re.split(r"(?<=[。！？])", line) if part]
+
+
+def _short_ocr_label(raw):
+    return raw.isalpha() and (len(raw) <= 3 or (raw.isascii() and len(raw) < 12))
+
+
+def _without_spoken_lines(text, spoken, normalized_speech):
+    longest = len(normalized_speech) + 1
+    parts = _ocr_text_parts(text)
     compact = ["".join(part.split()) for part in parts]
     # 独立成行的短词可能是角色或图表名牌，保留它们的出现位置。
-    labels = [raw.isalpha() and (len(raw) <= 3 or (raw.isascii() and len(raw) < 12)) for raw in compact]
+    labels = [_short_ocr_label(raw) for raw in compact]
     retained = []
     index = 0
     while index < len(parts):
@@ -222,36 +218,55 @@ def _without_spoken_lines(text, speech):
     return "".join(retained).strip("\r\n")
 
 
-def _chapter_frame_texts(items, speech, seen_frames):
-    speech_at = _overlap_lookup(speech)
-    previous_end, previous_lines = None, Counter()
+def _chapter_frame_texts(items, speech_blocks, seen_frames):
+    blocks_at = _overlap_lookup(speech_blocks)
+    speech_texts = {}
+    for block in speech_blocks:
+        merged = " ".join(fragment["text"] for fragment in block["fragments"])
+        spoken = "".join(merged.split())
+        speech_texts[block["fragments"][0]["id"]] = (spoken, _speech_comparison_text(spoken))
+    previous_parts = {}
     for item in items:
         if item["kind"] != "frame" or item["id"] in seen_frames:
             continue
         seen_frames.add(item["id"])
         start, end = item.get("start_seconds"), item.get("end_seconds")
         timed = start is not None and end is not None
-        text = (_without_spoken_lines(item["text"], speech_at(start - OCR_SPEECH_HALF_WINDOW, start + OCR_SPEECH_HALF_WINDOW))
-                if timed else item["text"])
+        text = item["text"].strip("\r\n") if timed else item["text"]
+        overlapping = blocks_at(start, end) if timed else []
+        block_id = None
+        if overlapping:
+            # 优先使用画面开始时的语音块，若从停顿延续进语音，则用首个相交块。
+            block = next((block for block in reversed(overlapping) if block["start_seconds"] <= start), overlapping[0])
+            block_id = block["fragments"][0]["id"]
+            text = _without_spoken_lines(text, *speech_texts[block_id])
         if not text.strip():
             continue
-        lines = text.splitlines(keepends=True)
-        current = Counter(line.strip() for line in lines)
-        if timed and previous_end is not None:
-            gap = max(0, start - previous_end)
-            if gap <= OCR_REPEAT_SECONDS and current != previous_lines:
-                # 连续画面只压缩共同的长段文字，每次出现仍保留自己的原始时段。
-                remaining = _without_repeated_lines(lines, current, previous_lines, gap, preserve_details=True)
-                text = "".join(remaining).strip("\r\n") or text
-        previous_end, previous_lines = end if timed else None, current
-        yield item, text
+        if timed:
+            parts = _ocr_text_parts(text)
+            repeated = set()
+            for part, count in Counter(part.strip() for part in parts).items():
+                if (len(_normalized(part)) < MIN_OCR_TEXT_MATCH or _requires_literal_match(part)
+                        or _short_ocr_label("".join(part.split()))):
+                    continue
+                key = (block_id, part)
+                previous = previous_parts.get(key)
+                # 逐字出现的字幕会重复带上此前的整句，即使其间插入了名牌等画面。
+                if previous and previous[0] < start <= previous[1] + OCR_REPEAT_SECONDS and previous[2] == count:
+                    repeated.add(part)
+                previous_parts[key] = (start, end, count)
+            if repeated:
+                text = "".join(part for part in parts if part.strip() not in repeated).strip("\r\n")
+        if text.strip():
+            yield item, text
 
 
 def _pack_chapter_primary(records, sources, seen_frames):
     items = sorted(records, key=_start_order)
     speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
+    blocks = _speech_blocks(speech)
     headings = {}
-    for number, block in enumerate(_speech_blocks(speech), 1):
+    for number, block in enumerate(blocks, 1):
         identifier = f"New_S{number}"
         fragments = block["fragments"]
         headings[fragments[0]["id"]] = f"[{identifier}]"
@@ -260,7 +275,7 @@ def _pack_chapter_primary(records, sources, seen_frames):
     timed_speech = [cue for cue in speech if cue.get("start_seconds") is not None and cue.get("end_seconds") is not None]
     speech_starts = [cue["start_seconds"] for cue in timed_speech]
     frames_at = defaultdict(list)
-    for number, (item, text) in enumerate(_chapter_frame_texts(items, speech, seen_frames), 1):
+    for number, (item, text) in enumerate(_chapter_frame_texts(items, blocks, seen_frames), 1):
         identifier = f"F{number}"
         sources[identifier] = [item]
         # 画面出现在最近一句中时放到句前，停顿中的画面保留自己的时间顺序。
@@ -308,7 +323,7 @@ def split_chapter_context(chapter):
 def _chapter_context_text(records, seen_frames):
     items = sorted(records, key=_start_order)
     speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
-    frames = {item["id"]: text for item, text in _chapter_frame_texts(items, speech, seen_frames)}
+    frames = {item["id"]: text for item, text in _chapter_frame_texts(items, _speech_blocks(speech), seen_frames)}
     parts, previous_kind = [], None
     for item in items:
         kind = item["kind"]

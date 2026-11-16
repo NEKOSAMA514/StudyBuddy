@@ -272,7 +272,7 @@ def test_input_budget_uses_only_deduplicated_material(tmp_path, monkeypatch):
     payload = {"video_summary": "当前片段主题", "chapters": [{"chapter_id": "C1", "primary": coordinator.evidence, "context": []}]}
     compressed_size = model.input_characters("chapters", payload)
     with monkeypatch.context() as patch:
-        patch.setattr("app.videos.model_input._without_spoken_lines", lambda text, speech: text)
+        patch.setattr("app.videos.model_input._without_spoken_lines", lambda text, spoken, normalized_speech: text)
         full_size = model.input_characters("chapters", payload)
     assert compressed_size < full_size
     model.settings.llm_input_text_limit = compressed_size
@@ -385,8 +385,8 @@ def test_chapter_filter_keeps_labels_values_and_context_separate():
     assert sent["context"] == context[0]["text"]
 
 
-def test_chapter_filter_removes_nearby_spoken_passages_across_visual_line_breaks():
-    outside = "这句话在一分钟窗口之外才会出现在语音里。"
+def test_chapter_filter_matches_merged_speech_across_visual_line_breaks():
+    outside = "这句话只出现在相邻的语音块里。"
     quantity = "试验要求把溶液浓度保持在0.01"
     visual = "附加提醒是先保存副本。"
     long_line = "我们还要提前核对每份申请所需要提交的全部"
@@ -397,7 +397,7 @@ def test_chapter_filter_removes_nearby_spoken_passages_across_visual_line_breaks
                          f"{quantity}\n能仅凭画面判定整道题目的答案。\n{outside}")
     chapter = {"primary": [
         timed_record("E1", "speech", 31, 32, "本章需要说明怎样"),
-        timed_record("E2", "speech", 32, 33, "整理这份原始材料"),
+        timed_record("E2", "speech", 38, 39, "整理这份原始材料"),
         timed_record("E3", "speech", 44, 46, long_line + "证明材料。"),
         frame,
         timed_record("E5", "speech", 87, 89, "这份补充资料可以帮助整理完整的复习笔记。"
@@ -410,6 +410,52 @@ def test_chapter_filter_removes_nearby_spoken_passages_across_visual_line_breaks
         f"> [F1] {visual}", f"> {quantity}", "> 能仅凭画面判定整道题目的答案。", f"> {outside}",
     ]
     assert sources["F1"] == [frame] and chapter == before
+
+
+def test_chapter_filter_uses_the_speech_block_where_the_frame_appears():
+    first = "这里已经讲清楚如何核对整份原始材料。"
+    following = "下一步会讲解怎样提交最后的复习笔记。"
+    crossing = timed_record("E3", "frame", 58, 64, f"{first}\n{following}")
+    gap = timed_record("E4", "frame", 60, 60, following)
+    records = [
+        timed_record("E1", "speech", 0, 4, first),
+        timed_record("E2", "speech", 57, 59, "第一部分到这里结束。"),
+        crossing,
+        gap,
+        timed_record("E5", "speech", 61, 66, following),
+        timed_record("E6", "frame", 62, 63, following),
+    ]
+    sent, sources = pack_chapter_material({"primary": records})
+    assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
+        f"> [F1] {following}", f"> [F2] {following}",
+    ]
+    assert sources == {"New_S1": records[:2], "New_S2": [records[4]], "F1": [crossing], "F2": [gap]}
+
+
+def test_chapter_filter_removes_spoken_short_phrases_and_continuous_repeated_sentences():
+    age = "你的儿子今年十五岁。"
+    first = timed_record("E2", "frame", 1, 1, age)
+    label = timed_record("E3", "frame", 1.5, 2, "牢大")
+    extra = timed_record("E6", "frame", 3, 3, age + "画面另有一条提醒。")
+    later = timed_record("E8", "frame", 8, 8, age)
+    records = [
+        timed_record("E1", "speech", 0, 2.3, "你的儿子今年15岁"),
+        first,
+        label,
+        timed_record("E4", "frame", 2, 2, age + "有点早熟，成"),
+        timed_record("E5", "speech", 2.3, 4, "有点早熟成绩不错"),
+        extra,
+        timed_record("E7", "frame", 3.5, 4, "有点早熟，成绩不错。"),
+        later,
+        timed_record("E9", "speech", 9, 10, "最近在了解这项内容"),
+    ]
+    before = deepcopy(records)
+    sent, sources = pack_chapter_material({"primary": records})
+    assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
+        f"> [F1] {age}", "> [F2] 牢大", "> [F3] 画面另有一条提醒。", f"> [F4] {age}",
+    ]
+    assert [sources[f"F{i}"] for i in range(1, 5)] == [[first], [label], [extra], [later]]
+    assert records == before and "你的儿子今年15岁" in sent["primary"]
 
 
 def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_repair(tmp_path, monkeypatch):
