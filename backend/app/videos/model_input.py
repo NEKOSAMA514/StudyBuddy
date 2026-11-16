@@ -347,10 +347,3 @@ def pack_chapter_material(chapter):
     if "context" in chapter:
         sent["context"] = _chapter_context_text(preceding, seen_frames)
     return sent, sources
-
-
-def outline_text_length(payload):
-    """统计实际发送的材料与内容类型文字，已省略的重复 OCR 不再计入。"""
-    compact = deduplicate_ocr(payload)
-    return len(compact.get("content_type", "")) + sum(len(item["text"]) for key in ("evidence", "primary", "context")
-               for item in compact.get(key, []))

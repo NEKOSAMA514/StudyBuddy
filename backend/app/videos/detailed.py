@@ -13,8 +13,8 @@ from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
 from ..analysis.budgets import OUTPUT_TOKENS, OUTPUT_BUDGET_RATIO, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import outline_text_length, deduplicate_ocr, pack_chapter_material, split_chapter_context
-from .segments import FLOW_VERSION, split_segments, preceding_context, outline_measure
+from .model_input import pack_chapter_material, split_chapter_context
+from .segments import FLOW_VERSION, split_segments, preceding_context, outline_overhead
 from ..errors import AppError, TaskPaused
 
 logger = logging.getLogger("studybuddy")
@@ -39,7 +39,7 @@ class DetailedVideoGeneration:
         self.original = {f"E{i + 1}": item for i, item in enumerate(ordered)}
         self.evidence = [{"id": alias, **{key: item[key] for key in ("kind", "start_seconds", "end_seconds", "text")}}
                          for alias, item in self.original.items()]
-        self.anchors = deduplicate_ocr({"evidence": self.evidence})["evidence"]
+        self.anchors = self.evidence
         self.common = {"task_id": task_id, "flow": FLOW_VERSION, "prompt": PROMPT_VERSION, "model": settings.llm_model,
                        "provider": settings.llm_provider, "base": settings.llm_base_url,
                        "stream": settings.llm_stream, "json_mode": settings.llm_json_mode,
@@ -607,11 +607,10 @@ class DetailedVideoGeneration:
         self.content_type = None
         all_evidence, base = self.all_evidence, self.base_common
         self.common = base
-        measure = outline_measure(self.model, self.video_title)
-        segmented, segments = split_segments(all_evidence, self.duration, self.settings.llm_input_text_limit, measure)
-        logger.info("task=%s source_characters=%s input_characters=%s segments=%s",
-                    base["task_id"], sum(len(item["text"]) for item in all_evidence),
-                    outline_text_length({"evidence": all_evidence}), len(segments))
+        overhead = outline_overhead(self.model, self.video_title)
+        segmented, segments = split_segments(all_evidence, self.duration, self.settings.llm_input_text_limit, overhead)
+        logger.info("task=%s source_characters=%s segments=%s",
+                    base["task_id"], sum(len(item["text"]) for item in all_evidence), len(segments))
         manifest = [{**{key: segment[key] for key in ("index", "start_seconds", "end_seconds")},
                      "evidence_ids": [item["id"] for item in segment["primary"]]} for segment in segments]
         manifest_path = self.path("segments", manifest)
@@ -636,7 +635,7 @@ class DetailedVideoGeneration:
             self.range_start, self.range_end = segment["start_seconds"], segment["end_seconds"]
             self.chapter_offset = len(body)
             self.evidence = segment["primary"]
-            self.anchors = deduplicate_ocr({"evidence": self.evidence})["evidence"]
+            self.anchors = self.evidence
             self.boundary = preceding_context(all_evidence, self.range_start)
             self.common = {**base, "segment": description, "context": digest(self.boundary),
                            "previous_outline": digest(self.previous_chapter_outline)}

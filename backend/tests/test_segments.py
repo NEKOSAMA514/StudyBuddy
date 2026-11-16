@@ -1,4 +1,3 @@
-from app.analysis.budgets import message_characters
 from app.analysis.content_types import CONTENT_TYPES
 import asyncio
 from copy import deepcopy
@@ -10,7 +9,7 @@ import pytest
 
 from app.videos.detailed import DetailedVideoGeneration
 from app.errors import TaskPaused
-from app.videos.segments import split_segments, preceding_context
+from app.videos.segments import split_segments, preceding_context, outline_overhead
 from app.analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
 from app.videos.notes import notes_text, notes_markdown
 from app.videos.pipeline import Pipeline
@@ -59,23 +58,24 @@ def test_segment_trigger_boundaries(seconds, characters, segmented):
     assert parts[0]["start_seconds"] == 0 and parts[-1]["end_seconds"] == seconds
 
 
-def test_repeated_ocr_does_not_split_short_video_or_discard_chemical_changes(tmp_path):
-    repeated = "酸性条件下以铁铵矾为指示剂，使用标准溶液进行滴定。\n" * 25
+def test_repeated_ocr_counts_in_outline_and_preserves_chemical_changes(tmp_path):
+    repeated = "酸性条件下以铁铵矾为指示剂，使用标准溶液进行滴定。\n" * 350
     changes = ["AgCl；Fe2+；0.1mL", "AgC1；Fe3+；0.01mL", "SCN−；温度20℃", "SCN+；温度30℃"]
-    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i,
-                 "end_seconds": i, "text": repeated + text} for i, text in enumerate(changes)]
-    evidence = [{**item, "text": item["text"] * 12} for item in evidence]
+    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
+                 "end_seconds": seconds, "text": repeated + text}
+                for i, (seconds, text) in enumerate(zip((0, 1, 130, 131), changes))]
     original = deepcopy(evidence)
     assert sum(len(item["text"]) for item in evidence) > DEFAULT_INPUT_TEXT_LIMIT
     segmented, parts = split_segments(evidence, 650)
-    assert not segmented and len(parts) == 1 and parts[0]["primary"] == original
+    assert segmented and [part["primary"] for part in parts] == [original[:2], original[2:]]
     coordinator, model, _, progress = flow(tmp_path, evidence, duration=650)
     result = asyncio.run(coordinator.run())
-    assert [op for op, _ in model.inputs] == ["outline", "chapters", "overview"]
-    assert not progress and not result["segment_guides"]
-    chapter = result["chapters"][0]
-    assert chapter["evidence_ids"] == [item["id"] for item in evidence]
-    assert (chapter["start_seconds"], chapter["end_seconds"], chapter["timestamp_basis"]) == (0, 650, "frame")
+    outlines = [json.loads(model.messages(op, payload)[-1]["content"]) for op, payload in model.inputs if op == "outline"]
+    assert [item["text"] for outline in outlines for item in outline["evidence"]] == [item["text"] for item in original]
+    assert [(chapter["start_seconds"], chapter["end_seconds"], chapter["timestamp_basis"])
+            for chapter in result["chapters"]] == [(0, 130, "frame"), (130, 650, "frame")]
+    assert [item for chapter in result["chapters"] for item in chapter["evidence_ids"]] == [i["id"] for i in evidence]
+    assert progress and len(result["segment_guides"]) == 2
     assert evidence == original
     calls = model.calls
     assert asyncio.run(coordinator.run()) == result and model.calls == calls
@@ -90,19 +90,23 @@ def test_unique_ocr_still_counts_towards_segment_budget():
     assert [item for part in parts for item in part["primary"]] == evidence
 
 
-def test_each_segment_counts_its_own_shared_ocr_and_reserves_context(small_outline_budget):
-    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i,
-                 "end_seconds": i, "text": text * count}
-                for i, (text, count) in enumerate((("甲", 8000), ("甲", 8000),
-                                                  ("乙", 8000), ("乙", 8000), ("丙", 6000)))]
-    segmented, parts = split_segments(evidence, 650)
+def test_segment_cut_counts_repeated_context_and_content_type():
+    repeated = "画面原文" * 30
+    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
+                 "end_seconds": seconds, "text": text}
+                for i, (seconds, text) in enumerate([(0, "开场"), (1140, repeated), (1141, repeated),
+                                                      (1200, repeated), (1280, "末")])]
+    model = FakeModel(Settings(summary_prompt="保留实验条件"))
+    title = "课程视频"
+    overhead = outline_overhead(model, title)
+    longest_type = max(CONTENT_TYPES.values(), key=len)
+    limit = overhead + len(longest_type) + 3 * len(repeated)
+    segmented, parts = split_segments(evidence, 1800, limit, overhead)
     assert segmented and [[item["id"] for item in part["primary"]] for part in parts] == [
-        ["frame0", "frame1"], ["frame2", "frame3"], ["frame4"]]
-    model = FakeModel(Settings())
-    for part in parts:
-        payload = {"evidence": part["primary"]}
-        assert model.input_characters("outline", payload) == message_characters(model.messages("outline", payload))
-    assert [item for part in parts for item in part["primary"]] == evidence
+        ["frame0", "frame1", "frame2"], ["frame3"], ["frame4"]]
+    payload = {"evidence": parts[1]["primary"], "context": evidence[1:3],
+               "video_title": title, "content_type": longest_type}
+    assert model.input_characters("outline", payload) == limit
 
 
 def test_same_time_records_stay_together_and_silence_has_no_empty_request():
@@ -124,7 +128,7 @@ def test_dense_material_reserves_actual_preceding_minute_context(small_outline_b
     assert preceding_context(evidence, parts[1]["start_seconds"]) == []
     dense = [{**item, "start_seconds": i * 20, "end_seconds": i * 20 + 1} for i, item in enumerate(evidence)]
     model = FakeModel(Settings())
-    _, parts = split_segments(dense, 600, 15000, lambda p: model.input_characters("outline", p))
+    _, parts = split_segments(dense, 600, 15000, outline_overhead(model))
     for part in parts:
         payload = {"evidence": part["primary"], "context": preceding_context(dense, part["start_seconds"])}
         assert model.input_characters("outline", payload) <= 15000 or len(part["primary"]) == 1

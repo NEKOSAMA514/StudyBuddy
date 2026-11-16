@@ -14,7 +14,7 @@ class ModelClient(BaseModelClient):
     def messages(self, operation, payload):
         if operation == "chapters" and "chapters" in payload:
             payload = {**payload, "chapters": [pack_chapter_material(chapter)[0] for chapter in payload["chapters"]]}
-        else:
+        elif operation != "outline":
             payload = deduplicate_ocr(payload)
         if operation in {"extract", "concise"}:
             # 根据完整时间关联同期语音，发送副本只带来源编号。

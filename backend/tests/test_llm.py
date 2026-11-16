@@ -775,6 +775,7 @@ def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_p
     evidence = [
         {"id": "frame", "kind": "frame", "text": "第一章标题", "start_seconds": 62, "end_seconds": 62},
         {"id": "details", "kind": "frame", "text": "同一时刻的画面文字", "start_seconds": 62, "end_seconds": 63},
+        {"id": "repeat", "kind": "frame", "text": "同一时刻的画面文字", "start_seconds": 64, "end_seconds": 64},
         {"id": "speech", "kind": "speech", "text": "随后讲解", "start_seconds": 66, "end_seconds": 69},
         {"id": "later", "kind": "speech", "text": "下一部分", "start_seconds": 72, "end_seconds": 74},
     ]
@@ -802,7 +803,7 @@ def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_p
     assert sent["evidence"] == [{"id": item["id"], "text": item["text"]} for item in coordinator.evidence]
     assert result["chapters"] == [{**first_chapter, "start_anchor_id": "E1"}, value["chapters"][1]]
     chapters = coordinator.assign(result)
-    assert [(chapter["start_seconds"], chapter["end_seconds"]) for chapter in chapters] == [(60, 66), (66, 90)]
+    assert [(chapter["start_seconds"], chapter["end_seconds"]) for chapter in chapters] == [(60, 64), (64, 90)]
     for identifier in ["previous", "unknown", None]:
         invalid = {**result, "chapters": [result["chapters"][0], {**result["chapters"][1], "start_anchor_id": identifier}]}
         with pytest.raises(ValueError, match="invalid_boundary_anchor"):

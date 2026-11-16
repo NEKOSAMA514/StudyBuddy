@@ -152,17 +152,15 @@ def test_nearby_speech_can_be_a_long_segment_overlapping_a_shorter_segment():
     assert sent["chapter"]["primary"][-1]["nearby_speech_id"] == "S1"
 
 
-@pytest.mark.parametrize("operation", ["outline", "chapters", "extract"])
+@pytest.mark.parametrize("operation", ["chapters", "extract"])
 def test_duplicate_subtitle_is_removed_instead_of_encoded(operation):
     evidence = subtitle_materials()
     chapter = {"chapter_id": "C1", "primary": evidence, "context": []}
-    payload = ({"evidence": evidence, "anchors": [{"id": "S1", "start_seconds": 0}]} if operation == "outline" else
-               {"chapters": [chapter]} if operation == "chapters" else {"chapter": chapter})
+    payload = {"chapters": [chapter]} if operation == "chapters" else {"chapter": chapter}
     before = deepcopy(payload)
     sent = json.loads(ModelClient(Settings()).messages(operation, payload)[-1]["content"])
     assert "ocr_texts" not in sent
-    records = sent["evidence"] if operation == "outline" else (
-        sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
+    records = (sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
     table = "积分表：A 14；B 12"
     detail = "注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
     if operation == "chapters":
@@ -194,13 +192,18 @@ def test_sent_plain_text_matches_actual_request_budget(operation):
         assert message_characters(messages[-1:]) == text_length
     else:
         assert all(isinstance(item["text"], str) for item in records)
+        expected = evidence if operation == "outline" else deduplicate_ocr({"evidence": evidence})["evidence"]
         assert [(item["id"], item["text"]) for item in records] == [
-            (item["id"], item["text"]) for item in deduplicate_ocr({"evidence": evidence})["evidence"]]
+            (item["id"], item["text"]) for item in expected]
         text_length = sum(len(item["text"]) for item in records)
     assert "start_seconds" not in json.dumps(sent) and "end_seconds" not in json.dumps(sent)
     assert payload == before
     assert model.input_characters(operation, payload) == message_characters(messages)
-    assert text_length < sum(len(item["text"]) for item in evidence)
+    original_length = sum(len(item["text"]) for item in evidence)
+    if operation == "outline":
+        assert text_length == original_length
+    else:
+        assert text_length < original_length
 
 
 def test_similar_subtitles_are_not_deleted_and_speech_is_unchanged_without_ocr():
@@ -562,7 +565,7 @@ def test_writing_repair_uses_character_budget_at_exact_boundary(monkeypatch, ope
 
 
 
-def test_outline_counts_complete_deduplicated_request_during_repair(tmp_path, monkeypatch):
+def test_outline_counts_complete_raw_request_during_repair(monkeypatch):
     model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
     evidence = materials()
     evidence.append({"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 1,
@@ -583,15 +586,13 @@ def test_outline_counts_complete_deduplicated_request_during_repair(tmp_path, mo
     assert requests[1][-2] == {"role": "assistant", "content": model_content({})}
     sent = json.loads(requests[0][-1]["content"])
     assert "ocr_texts" not in sent
-    compact = deduplicate_ocr(payload)
     assert "anchors" not in sent
-    assert sent == {**{k: v for k, v in compact.items() if k != "anchors"}, **{
-        key: [{"id": item["id"], "text": item["text"]} for item in compact[key]]
-        for key in ("evidence", "context")}}
-    assert sent["context"] == []
-    length = sum(len(item["text"]) for key in ("evidence", "context") for item in sent[key])
+    assert sent == {key: [{"id": item["id"], "text": item["text"]} for item in payload[key]]
+                    for key in ("evidence", "context")}
+    overhead = model.input_characters("outline", {"evidence": [], "context": []})
     assert model.input_characters("outline", payload) == message_characters(requests[0])
-    assert length < sum(len(i["text"]) for key in ("evidence", "context") for i in payload[key])
+    assert message_characters(requests[0]) == overhead + sum(
+        len(item["text"]) for key in ("evidence", "context") for item in payload[key])
     assert payload == before
 
 

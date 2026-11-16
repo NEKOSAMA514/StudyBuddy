@@ -7,7 +7,7 @@ from ..recognition.extraction import (extraction_signature, frame_times, line_oc
                                      ocr_cache_path, speech_cache_path, speech_signature, uses_line_ocr)
 from ..video_download.subtitles import SUBTITLE_KINDS, subtitle_cache, content_digest
 from .model import ModelClient
-from .segments import split_segments, outline_measure
+from .segments import split_segments, outline_overhead
 from .concise import plan
 
 
@@ -58,10 +58,10 @@ def analysis_preview(video, folder, config, settings):
             # 详尽生成先分配紧凑的 E 编号，再计量大纲请求的输入。
             items = [{"id": f"E{index + 1}", **{key: item[key] for key in ("kind", "start_seconds", "end_seconds", "text")}}
                      for index, item in enumerate(evidence)]
-            measure = outline_measure(model, title)
-            if measure({"evidence": [], "context": []}) >= settings.llm_input_text_limit:
+            overhead = outline_overhead(model, title)
+            if overhead >= settings.llm_input_text_limit:
                 raise AppError("model_input_budget", "提示词与补充要求未留下材料空间，请提高生成输入上限。")
-            _, segments = split_segments(items, video.duration, settings.llm_input_text_limit, measure)
+            _, segments = split_segments(items, video.duration, settings.llm_input_text_limit, overhead)
         return {"character_count": count, "estimated_segments": len(segments), "reason": None}
     except AppError as error:
         if error.code != "model_input_budget":
