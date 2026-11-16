@@ -175,6 +175,58 @@ def test_video_ocr_keeps_unchanged_lines_during_detection(case):
         assert scans[-1][1] >= 167 - 18
 
 
+@pytest.mark.parametrize(("case", "starts", "reads"), [
+    ("growing", [2], 1),
+    ("number", [0, 1, 2], 4),
+    ("low_confidence", [0, 1], 4),
+    ("changed_prefix", [0, 1, 2], 3),
+    ("one_sample", [0, 1, 2], 3),
+])
+def test_video_ocr_checks_growing_line_before_reading_crops(monkeypatch, case, starts, reads):
+    import av
+    from app.recognition import video_ocr
+
+    def detect(image):
+        y, x = np.nonzero(image[:, :, 0])
+        left, top, right, bottom = x.min() - 1, y.min() - 1, x.max() + 2, y.max() + 2
+        return SimpleNamespace(boxes=np.array([[[left, top], [right, top], [right, bottom], [left, bottom]]]))
+
+    # 模拟同一行在相邻采样快速变宽，常规 IoU 匹配无法把它并为一条。
+    widths = [49, 82, 135] if case == "one_sample" else [49, 82, 135, 135]
+    samples = []
+    for seconds, right in enumerate(widths):
+        frame = np.zeros((64, 192, 3), dtype=np.uint8)
+        frame[13:28, 22:right:3] = 255
+        if case == "changed_prefix" and seconds >= 2:
+            frame[13:28, 24:41] = 255
+        samples.append((seconds, av.VideoFrame.from_ndarray(frame, format="bgr24")))
+
+    batches = []
+
+    def recognize(images):
+        batches.extend(image.shape[1] for image in images)
+        texts, scores = [], []
+        for image in images:
+            width = image.shape[1]
+            if width > 80:
+                texts.append("开始讲解这个现象的原因" + ("12" if case == "number" else ""))
+            else:
+                texts.append("开始讲解" if width < 40 else "开始讲解这个")
+            scores.append(.89 if case == "low_confidence" and width > 80 else .99)
+        return SimpleNamespace(txts=texts, scores=scores)
+
+    monkeypatch.setattr(video_ocr, "alignment", lambda *_: (0, 0))
+    monkeypatch.setattr(video_ocr, "changed_regions", lambda *_: [(0, 0, 192, 64)])
+    engine = SimpleNamespace(_load_det_model=lambda: detect, cls_and_rotate=lambda images: (images, None),
+                             recognize_txt=recognize)
+    rows = video_ocr.recognize_lines(samples, lambda: engine, lambda: None, lambda _: None)
+    assert len(batches) == reads
+    assert [row["start_seconds"] for row in rows] == starts
+    if case == "growing":
+        assert rows == [{"text": "开始讲解这个现象的原因", "start_seconds": 2, "end_seconds": 3,
+                         "confidence": pytest.approx(99)}]
+
+
 def test_paraformer_uses_original_sample_offsets(monkeypatch):
     samples = np.zeros(48000, dtype=np.float32)
     monkeypatch.setattr("faster_whisper.audio.decode_audio", lambda *args, **kwargs: samples)
@@ -210,7 +262,7 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     settings = Settings()
     current = extraction_config(settings)
     assert uses_line_ocr(current)
-    for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr"):
+    for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)

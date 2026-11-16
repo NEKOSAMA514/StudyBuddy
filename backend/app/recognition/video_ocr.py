@@ -1,11 +1,12 @@
 """跟踪视频文字区域，从每条轨迹的清晰裁剪中识别文字。"""
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from itertools import zip_longest
 import logging
 import math
 from tempfile import SpooledTemporaryFile
 from time import monotonic
+import unicodedata
 import zlib
 
 import cv2
@@ -36,6 +37,7 @@ class Track:
     samples: int = 1
     alternate_crop: np.ndarray | None = None
     alternate_quality: float = -math.inf
+    prefix: "Candidate | None" = None
 
     def observe(self, seconds):
         self.last = seconds
@@ -53,6 +55,7 @@ class Candidate:
     length: int
     shape: tuple
     alternate: "Candidate | None" = None
+    prefix: "Candidate | None" = None
 
 
 def resize(image, width, height):
@@ -183,6 +186,21 @@ def same_line(before, after):
     return cv2.boxFilter(changed, cv2.CV_16U, (7, 5), normalize=False).max() < 12
 
 
+def extends_right(old_box, box, before, after):
+    left, top, right, bottom = old_box
+    if (max(abs(box[0] - left), abs(box[1] - top), abs(box[3] - bottom)) > BOX_JITTER_PIXELS
+            or box[2] - right < (bottom - top) * .5
+            or intersection(old_box, box) < .85 * area(old_box)):
+        return False
+    height, width = after.shape
+    x0, x1 = max(0, math.ceil(right)), min(width, math.ceil(box[2]))
+    y0, y1 = max(0, math.floor(box[1])), min(height, math.ceil(box[3]) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return False
+    changed = cv2.absdiff(before[y0:y1, x0:x1], after[y0:y1, x0:x1]) >= 33
+    return np.count_nonzero(changed) >= max(12, changed.size * .04)
+
+
 class TextRegions:
     def __init__(self, detector, crops):
         self.detector = detector
@@ -193,16 +211,16 @@ class TextRegions:
         self.last_full = -math.inf
 
     def finish(self, tracks):
-        def store(track, image, alternate=None):
+        def store(track, image, alternate=None, prefix=None):
             crop = np.ascontiguousarray(image)
             offset = self.crops.tell()
             length = self.crops.write(zlib.compress(crop, level=1))
             return Candidate(track.first, track.last, track.best_box, track.quality,
-                             track.samples, offset, length, crop.shape, alternate)
+                             track.samples, offset, length, crop.shape, alternate, prefix)
 
         for track in tracks:
             alternate = store(track, track.alternate_crop) if track.alternate_crop is not None else None
-            self.candidates.append(store(track, track.crop, alternate))
+            self.candidates.append(store(track, track.crop, alternate, track.prefix))
 
     def observe(self, seconds, frame):
         turn = (int(frame.rotation or 0) % 360) // 90
@@ -211,14 +229,17 @@ class TextRegions:
                               height=max(32, round(frame.height * scale)), format="gray")
         current = np.ascontiguousarray(np.rot90(gray.to_ndarray(), turn))
         height, width = current.shape
+        last_frame = self.previous
         if self.reference is not None and self.reference.shape != current.shape:
             self.finish(self.active)
             self.active.clear()
             self.reference = None
+            last_frame = None
         full = self.reference is None or seconds - self.last_full >= FULL_REFRESH_SECONDS
         if not full:
             dx, dy = alignment(self.previous, current)
             if dx or dy:
+                last_frame = None
                 matrix = np.float32([[1, 0, dx], [0, 1, dy]])
                 self.reference = cv2.warpAffine(self.reference, matrix, (width, height), flags=cv2.INTER_NEAREST,
                                                 borderMode=cv2.BORDER_REPLICATE)
@@ -238,12 +259,12 @@ class TextRegions:
             self.last_full = seconds
             regions = [(0, 0, width, height)]
         if regions:
-            self.refresh(frame, turn, seconds, current, regions)
+            self.refresh(frame, turn, seconds, current, regions, last_frame)
         else:
             for track in self.active:
                 track.observe(seconds)
 
-    def refresh(self, frame, turn, seconds, current, regions):
+    def refresh(self, frame, turn, seconds, current, regions, last_frame=None):
         height, width = current.shape
         native = np.ascontiguousarray(np.rot90(frame.to_ndarray(format="bgr24"), turn))
         screen = native if native.shape[:2] == (height, width) else resize(native, width, height)
@@ -289,7 +310,7 @@ class TextRegions:
                 # 局部检测可能只返回已确认仍在显示的旧行的一截。
                 if not any(covers(old, box, BOX_JITTER_PIXELS) and still_visible(track) for old, track in partial):
                     boxes.append((box, polygon))
-        added = []
+        added, started = [], []
         for box, polygon in boxes:
             if min(box[2] - box[0], box[3] - box[1]) < 2 or any(overlap(box, other) >= .70 for other in added):
                 continue
@@ -320,6 +341,7 @@ class TextRegions:
                 break
             if track is None:
                 track = Track(seconds, seconds, polygon, signature, crop, box, quality)
+                started.append(track)
             keep.append(track)
         ended = []
         for box, track in previous:
@@ -328,9 +350,28 @@ class TextRegions:
                 track.observe(seconds)
                 keep.append(track)
             else:
-                ended.append(track)
+                ended.append((box, track))
         self.active = keep
-        self.finish(ended)
+        self.finish(track for _, track in ended)
+        if last_frame is None or not started or not ended:
+            return
+
+        # 先按旧框覆盖率配对，再比较原字形。只连接相邻采样中一对一的追加。
+        previous_crops = list(zip(ended, self.candidates[-len(ended):], strict=True))
+        links = []
+        children = Counter()
+        last_sample = int(seconds + 1e-6) - 1
+        for track in started:
+            matches = [candidate for (box, old), candidate in previous_crops
+                       if int(old.last + 1e-6) == last_sample
+                       and extends_right(box, track.best_box, last_frame, current)
+                       and still_visible(old)]
+            children.update(id(candidate) for candidate in matches)
+            if len(matches) == 1:
+                links.append((track, matches[0]))
+        for track, candidate in links:
+            if children[id(candidate)] == 1:
+                track.prefix = candidate
 
 
 def spread_windows(windows):
@@ -379,12 +420,17 @@ def rank(candidates):
             break
 
 
-def read_crops(engine, crops, candidates, check_stop):
+def read_crops(engine, crops, candidates, check_stop, skipped=frozenset()):
     records, used = [], 0
     pending = deque(candidates)
     while pending:
         check_stop()
         batch = [pending.popleft() for _ in range(min(BATCH_SIZE, len(pending)))]
+        if skipped:
+            # 过滤前切分批次，避免整段剩余裁剪向前补位。
+            batch = [candidate for candidate in batch if id(candidate) not in skipped]
+            if not batch:
+                continue
         images = []
         for candidate in batch:
             crops.seek(candidate.offset)
@@ -401,6 +447,34 @@ def read_crops(engine, crops, candidates, check_stop):
         used += len(batch)
         pending.extendleft(reversed(retries))
     return records, used
+
+
+def read_candidates(engine, crops, candidates, check_stop):
+    parents = {id(candidate.prefix) for candidate in candidates if candidate.prefix is not None}
+    growing = [candidate for candidate in candidates if id(candidate) not in parents
+               and candidate.samples >= 2 and candidate.prefix is not None and candidate.prefix.prefix is not None]
+    if not growing:
+        return read_crops(engine, crops, candidates, check_stop)
+
+    # 只先读连续扩展后稳定下来的裁剪。数值、公式和低置信度保留原读取顺序。
+    preferred, used = read_crops(engine, crops, growing, check_stop)
+    accepted = {id(record[0]): record for record in preferred}
+    selected, skipped = [], set()
+    for candidate in growing:
+        record = accepted.get(id(candidate)) or accepted.get(id(candidate.alternate))
+        if record is None:
+            continue
+        text = record[1]
+        if len(text) < 6 or any(char.isnumeric() or char in "%/^_{}[]\\-()" or
+                                 unicodedata.category(char) in ("Sm", "Sc") for char in text):
+            continue
+        selected.append(record)
+        while candidate is not None:
+            skipped.add(id(candidate))
+            candidate = candidate.prefix
+
+    records, remaining = read_crops(engine, crops, candidates, check_stop, skipped)
+    return [*records, *selected], used + remaining
 
 
 def evidence_rows(records):
@@ -435,7 +509,7 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample):
         tracker.finish(tracker.active)
         tracker.active.clear()
         candidates = list(rank(tracker.candidates))
-        records, used = read_crops(engine, crops, candidates, check_stop)
+        records, used = read_candidates(engine, crops, candidates, check_stop)
     logger.info("video_ocr samples=%s candidates=%s read=%s retained=%s seconds=%.2f",
                 count, len(candidates), used, len(records), monotonic() - start)
     return evidence_rows(records)
