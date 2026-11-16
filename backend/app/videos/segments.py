@@ -3,6 +3,7 @@ from bisect import bisect_left, bisect_right
 from itertools import groupby
 from ..analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
 from ..analysis.content_types import CONTENT_TYPES
+from .model_input import evidence_request_text
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
@@ -24,7 +25,7 @@ def preceding_context(evidence, start):
             (item["start_seconds"] >= left or item["end_seconds"] > left)]
 
 
-# 同时按视频时间和原始材料字数分段，同一时间点的证据整组保留。
+# 同时按视频时间和发送材料字数分段，同一时间点的证据整组保留。
 def split_segments(evidence, duration, limit=None, overhead=0):
     limit = DEFAULT_INPUT_TEXT_LIMIT if limit is None else limit
     starts, offsets, prefix_characters = [], [0], [0]
@@ -32,7 +33,7 @@ def split_segments(evidence, duration, limit=None, overhead=0):
         group = list(records)
         starts.append(seconds)
         offsets.append(offsets[-1] + len(group))
-        prefix_characters.append(prefix_characters[-1] + sum(len(item["text"]) for item in group))
+        prefix_characters.append(prefix_characters[-1] + sum(len(evidence_request_text(item)) for item in group))
 
     available = limit - overhead
     segmented = duration > SEGMENT_SECONDS or prefix_characters[-1] > available
@@ -45,7 +46,7 @@ def split_segments(evidence, duration, limit=None, overhead=0):
     while first_group < len(starts):
         room = available
         if first_group:
-            room -= continuation + sum(len(item["text"]) for item in preceding_context(evidence, start))
+            room -= continuation + sum(len(evidence_request_text(item)) for item in preceding_context(evidence, start))
         time_limit = bisect_left(starts, start + SEGMENT_SECONDS, lo=first_group + 1)
         # 至少保留第一组，超长单组沿用原有的段内提取流程。
         character_limit = max(prefix_characters[first_group] + room, prefix_characters[first_group + 1])

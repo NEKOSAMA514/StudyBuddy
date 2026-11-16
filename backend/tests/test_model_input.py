@@ -152,23 +152,24 @@ def test_nearby_speech_can_be_a_long_segment_overlapping_a_shorter_segment():
     assert sent["chapter"]["primary"][-1]["nearby_speech_id"] == "S1"
 
 
-@pytest.mark.parametrize("operation", ["chapters", "extract"])
+@pytest.mark.parametrize("operation", ["chapters", "extract", "concise"])
 def test_duplicate_subtitle_is_removed_instead_of_encoded(operation):
     evidence = subtitle_materials()
     chapter = {"chapter_id": "C1", "primary": evidence, "context": []}
-    payload = {"chapters": [chapter]} if operation == "chapters" else {"chapter": chapter}
+    payload = ({"chapters": [chapter]} if operation == "chapters" else
+               {"chapter": chapter} if operation == "extract" else payload_for("视频", evidence, []))
     before = deepcopy(payload)
     sent = json.loads(ModelClient(Settings()).messages(operation, payload)[-1]["content"])
     assert "ocr_texts" not in sent
-    records = (sent["chapters"][0] if operation == "chapters" else sent["chapter"])["primary"]
+    records = (sent["chapters"][0] if operation == "chapters" else sent.get("chapter", sent))["primary"]
     table = "积分表：A 14；B 12"
     detail = "注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
     if operation == "chapters":
-        assert records.splitlines() == ["[New_S1]", f"> [F1] {table}", f"> {detail}", evidence[0]["text"]]
+        assert records.splitlines() == ["[New_S1]", f"> [F1] {table}{detail}", evidence[0]["text"]]
     else:
         speech, frame = records
         assert speech["text"] == evidence[0]["text"]
-        assert frame["text"] == f"{table}\n{detail}"
+        assert frame["text"] == f"{table}{detail}"
     assert payload == before
 
 
@@ -194,14 +195,15 @@ def test_sent_plain_text_matches_actual_request_budget(operation):
         assert all(isinstance(item["text"], str) for item in records)
         expected = evidence if operation == "outline" else deduplicate_ocr({"evidence": evidence})["evidence"]
         assert [(item["id"], item["text"]) for item in records] == [
-            (item["id"], item["text"]) for item in expected]
+            (item["id"], item["text"].replace("\r", "").replace("\n", "") if item["kind"] == "frame" else item["text"])
+            for item in expected]
         text_length = sum(len(item["text"]) for item in records)
     assert "start_seconds" not in json.dumps(sent) and "end_seconds" not in json.dumps(sent)
     assert payload == before
     assert model.input_characters(operation, payload) == message_characters(messages)
     original_length = sum(len(item["text"]) for item in evidence)
     if operation == "outline":
-        assert text_length == original_length
+        assert text_length == original_length - evidence[1]["text"].count("\n")
     else:
         assert text_length < original_length
 
@@ -249,17 +251,18 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
     sent = json.loads(requests[0][-1]["content"])
     sent_chapter = sent["chapters"][0] if operation == "chapters" else sent["chapter"]
     if operation == "chapters":
-        frames = [coordinator.evidence[0]["text"].rstrip("\r\n").replace("\n", "\n> ")]
+        frames = [coordinator.evidence[0]["text"].replace("\r", "").replace("\n", "")]
         frames.extend(row["text"].splitlines()[-1] for row in coordinator.evidence[1:3])
         assert sent_chapter == {
             "chapter_id": "C1",
             "primary": "\n".join(f"> [F{index}] {text}" for index, text in enumerate(frames, 1)),
-            "context": coordinator.evidence[3]["text"].rstrip("\r\n"),
+            "context": coordinator.evidence[3]["text"].replace("\r", "").replace("\n", ""),
         }
     else:
         expected = deduplicate_ocr(chapter)
         assert sent_chapter == {**expected, **{
-            key: [{field: item[field] for field in ("id", "kind", "text")} for item in expected[key]]
+            key: [{"id": item["id"], "kind": item["kind"], "text": item["text"].replace("\r", "").replace("\n", "")}
+                  for item in expected[key]]
             for key in ("primary", "context")}}
     assert model.input_characters(operation, payload) == message_characters(requests[0])
     assert payload == before and coordinator.path(operation, payload) == path
@@ -322,7 +325,7 @@ def test_chapter_context_is_plain_timeline_text_and_crossing_frames_are_citable(
     crossing_text = "> [F1] 章首还在显示\n> [F2] 跨过整章的标题"
     assert sent == {
         "primary": f"{crossing_text}\n[New_S1]\n本章原话",
-        "context": "接上前文 前一条说明\n旧画面\n画面补充\n接着说完",
+        "context": "接上前文 前一条说明\n旧画面画面补充\n接着说完",
     }
     assert sources == {"F1": [context[4]], "F2": [context[5]], "New_S1": chapter["primary"]}
     assert chapter == before
@@ -400,7 +403,7 @@ def test_chapter_filter_keeps_labels_values_and_context_separate():
     context = [timed_record("E7", "speech", 8, 9, primary[-1]["text"])]
     sent, _ = pack_chapter_material({"primary": primary, "context": context})
     assert sent["primary"].splitlines() == [
-        "> [F1] Claude", f"> {number.replace('0.01', '0.1')}", "> 条件变化时保持 Fe3+ 而非 Fe2+",
+        f"> [F1] Claude{number.replace('0.01', '0.1')}条件变化时保持 Fe3+ 而非 Fe2+",
         "[New_S1]", f"{first} {second} Claude {number}", f"> [F2] {primary[-1]['text']}",
     ]
     assert sent["context"] == context[0]["text"]
@@ -428,7 +431,7 @@ def test_chapter_filter_matches_merged_speech_across_visual_line_breaks():
     before = deepcopy(chapter)
     sent, sources = pack_chapter_material(chapter)
     assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
-        f"> [F1] {visual}", f"> {quantity}", "> 能仅凭画面判定整道题目的答案。", f"> {outside}",
+        f"> [F1] {visual}{quantity}能仅凭画面判定整道题目的答案。{outside}",
     ]
     assert sources["F1"] == [frame] and chapter == before
 
@@ -602,11 +605,11 @@ def test_writing_repair_uses_character_budget_at_exact_boundary(monkeypatch, ope
 
 
 
-def test_outline_counts_complete_raw_request_during_repair(monkeypatch):
+def test_outline_counts_every_record_with_flattened_ocr_during_repair(monkeypatch):
     model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
     evidence = materials()
     evidence.append({"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 1,
-                     "text": "对比 Fe2+、Fe3+，注意 0.1 与 0.01 的区别。"})
+                     "text": "对比 Fe2+、Fe3+，\n注意 0.1 与 0.01 的区别。"})
     payload = {"anchors": [{"id": "S1", "start_seconds": 0}], "evidence": evidence,
                "context": [evidence[0]]}
     before = deepcopy(payload)
@@ -624,18 +627,26 @@ def test_outline_counts_complete_raw_request_during_repair(monkeypatch):
     sent = json.loads(requests[0][-1]["content"])
     assert "ocr_texts" not in sent
     assert "anchors" not in sent
-    assert sent == {key: [{"id": item["id"], "text": item["text"]} for item in payload[key]]
-                    for key in ("evidence", "context")}
+    assert sent == {
+        key: [{"id": item["id"], "text": item["text"].replace("\r", "").replace("\n", "")
+               if item["kind"] == "frame" else item["text"]} for item in payload[key]]
+        for key in ("evidence", "context")
+    }
     overhead = model.input_characters("outline", {"evidence": [], "context": []})
     assert model.input_characters("outline", payload) == message_characters(requests[0])
     assert message_characters(requests[0]) == overhead + sum(
-        len(item["text"]) for key in ("evidence", "context") for item in payload[key])
+        len(item["text"]) for key in ("evidence", "context") for item in sent[key])
     assert payload == before
 
 
-def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkpoints(tmp_path, monkeypatch):
+@pytest.mark.parametrize("repair_quote", [False, True])
+def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkpoints(tmp_path, monkeypatch, repair_quote):
     from app.videos.notes import notes_text, notes_markdown
     evidence = materials()
+    label = evidence[-1]["text"].splitlines()[-1]
+    raw_quote = "AgCl /\r\n AgC1"
+    sent_quote = "AgCl / AgC1"
+    evidence[-1]["text"] = evidence[-1]["text"].replace(sent_quote, raw_quote)
     before = deepcopy(evidence)
     model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
     coordinator = DetailedVideoGeneration("roundtrip", model, model.settings, tmp_path, evidence, 10,
@@ -648,9 +659,12 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
             value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": "滴定", "core_question": "如何操作", "topics": ["反应与条件"],
                                    "start_anchor_id": "E1"}], "video_summary": "介绍滴定。"}
         elif "chapters" in sent:
-            label = evidence[3]["text"].splitlines()[-1]
             assert sent["chapters"][0]["primary"].endswith(f"\n> [F4] {label}")
-            value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': 'AgCl / AgC1', 'reason': '字母不清', 'evidence_ids': ['F4']}]}]}
+            quote = "错误引文" if repair_quote else sent_quote
+            value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': quote, 'reason': '字母不清', 'evidence_ids': ['F4']}]}]}
+        elif "repairs" in sent:
+            assert sent["sources"][0]["text"] == evidence[-1]["text"].replace("\r", "").replace("\n", "")
+            value = {"repairs": [{"chapter_id": "C1", "block_index": 0, "quote": sent_quote}]}
         else:
             value = {"title": "滴定", "tags": [], "overview_paragraphs": ["实验内容。"]}
         return httpx.Response(200, json={"choices": [{"message": {"content": model_content(value)}}]},
@@ -665,9 +679,10 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
                 assert await coordinator.run() == result
             return result
     result = asyncio.run(run())
-    assert model.calls == len(requests) == 3 and evidence == before
+    assert model.calls == len(requests) == 3 + repair_quote and evidence == before
     block, issue = result["chapters"][0], result["source_issues"][0]
     assert block["evidence_ids"] == ["E1", "E2", "E3", "E4"] and issue["evidence_ids"] == ["E4"]
     assert (block["start_seconds"], block["end_seconds"], block["timestamp_basis"]) == (0, 10, "frame")
     assert "start_seconds" not in issue
-    assert "1-4mL" in notes_text("实验", 10, result) and "AgCl / AgC1" in notes_markdown("实验", 10, result)
+    assert issue["quote"] == raw_quote
+    assert "1-4mL" in notes_text("实验", 10, result) and "AgC1" in notes_markdown("实验", 10, result)

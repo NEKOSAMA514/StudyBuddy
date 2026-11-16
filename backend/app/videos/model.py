@@ -4,7 +4,7 @@ from ..analysis.llm import ModelClient as BaseModelClient
 from ..analysis.concise_prompt import concise_messages
 from .prompts import SYSTEM_SUMMARY_PROMPT, VIDEO_INSTRUCTIONS, CONCISE_VIDEO_RULES, CONCISE_VIDEO_INSTRUCTION
 from .schemas import SCHEMAS
-from .model_input import deduplicate_ocr, nearby_speech_ids, pack_chapter_material
+from .model_input import deduplicate_ocr, evidence_request_text, nearby_speech_ids, pack_chapter_material
 
 
 class ModelClient(BaseModelClient):
@@ -27,6 +27,7 @@ class ModelClient(BaseModelClient):
                     sent[key] = []
                     for item in chapter[key]:
                         record = {field: value for field, value in item.items() if field not in {"start_seconds", "end_seconds"}}
+                        record["text"] = evidence_request_text(item)
                         if key == "primary" and item["id"] in links:
                             record["nearby_speech_id"] = links[item["id"]]
                         sent[key].append(record)
@@ -41,8 +42,10 @@ class ModelClient(BaseModelClient):
         if operation == "outline":
             # 规划只发送有序编号和原文；候选边界及时间由本地校验。
             payload = {**{key: value for key, value in payload.items() if key != "anchors"}, **{
-                key: [{"id": item["id"], "text": item["text"]} for item in payload[key]]
+                key: [{"id": item["id"], "text": evidence_request_text(item)} for item in payload[key]]
                 for key in ("evidence", "primary", "context") if key in payload}}
+        if operation == "issue_quotes" and "sources" in payload:
+            payload = {**payload, "sources": [{**item, "text": evidence_request_text(item)} for item in payload["sources"]]}
         output_rule = ("直接输出带约定标记的Markdown，不输出JSON或包裹全文的代码围栏。" if operation == "chapters" else
                        "只输出一个符合 Schema 的 JSON 对象。\nJSON Schema：" +
                        json.dumps(SCHEMAS[operation].model_json_schema(), ensure_ascii=False))

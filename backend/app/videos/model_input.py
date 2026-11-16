@@ -15,6 +15,27 @@ NEGATIONS = "不没未无非别勿否"
 SIGNIFICANT_HAN = NEGATIONS + "正负〇零一二三四五六七八九十百千万亿两半"
 
 
+def ocr_request_text(text):
+    return text.replace("\r", "").replace("\n", "")
+
+
+def evidence_request_text(item):
+    return ocr_request_text(item["text"]) if item.get("kind") == "frame" else item["text"]
+
+
+def find_original_quote(quote, sources):
+    for item in sources:
+        text = item["text"]
+        if quote in text:
+            return quote
+        start = evidence_request_text(item).find(quote)
+        if start >= 0:
+            # 发送时删去的换行在引用中还原，以便校验真实原文。
+            offsets = [index for index, char in enumerate(text) if char not in "\r\n"]
+            return text[offsets[start]:offsets[start + len(quote) - 1] + 1]
+    return None
+
+
 def _start_order(item):
     start = item.get("start_seconds")
     return (start is None, start)
@@ -267,7 +288,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
             if repeated:
                 text = "".join(part for part in parts if part.strip() not in repeated).strip("\r\n")
         if text.strip():
-            yield item, text
+            yield item, ocr_request_text(text)
 
 
 def _pack_chapter_primary(records, sources, seen_frames, clipped_lines):
@@ -293,9 +314,7 @@ def _pack_chapter_primary(records, sources, seen_frames, clipped_lines):
         anchor = item["id"]
         if index >= 0 and start <= timed_speech[index]["end_seconds"]:
             anchor = timed_speech[index]["id"]
-        first, *rest = text.splitlines(keepends=True)
-        continuation = "".join(f"> {line}" for line in rest)
-        frames_at[anchor].append(f"> [{identifier}] {first}{continuation}")
+        frames_at[anchor].append(f"> [{identifier}] {text}")
 
     lines, spoken = [], []
     for item in items:

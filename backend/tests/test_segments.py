@@ -50,8 +50,9 @@ def flow(tmp_path, evidence=None, model_type=RecordingModel, **kwargs):
     (1200, DEFAULT_INPUT_TEXT_LIMIT + 1, True), (1199, DEFAULT_INPUT_TEXT_LIMIT - 1, False)])
 def test_segment_trigger_boundaries(seconds, characters, segmented):
     evidence = sources(2)
-    evidence[1].update(start_seconds=600, end_seconds=601)
-    evidence[0]["text"], evidence[1]["text"] = "甲" * (characters // 2), "乙" * (characters - characters // 2)
+    evidence[1].update(kind="frame", start_seconds=600, end_seconds=601)
+    evidence[0]["text"] = "甲" * (characters // 2)
+    evidence[1]["text"] = "乙\r\n" + "乙" * (characters - characters // 2 - 1)
     actual, parts = split_segments(evidence, seconds)
     assert actual is segmented
     assert [item["id"] for part in parts for item in part["primary"]] == ["s0", "s1"]
@@ -71,7 +72,8 @@ def test_repeated_ocr_counts_in_outline_and_preserves_chemical_changes(tmp_path)
     coordinator, model, _, progress = flow(tmp_path, evidence, duration=650)
     result = asyncio.run(coordinator.run())
     outlines = [json.loads(model.messages(op, payload)[-1]["content"]) for op, payload in model.inputs if op == "outline"]
-    assert [item["text"] for outline in outlines for item in outline["evidence"]] == [item["text"] for item in original]
+    assert [item["text"] for outline in outlines for item in outline["evidence"]] == [
+        item["text"].replace("\n", "") for item in original]
     assert [(chapter["start_seconds"], chapter["end_seconds"], chapter["timestamp_basis"])
             for chapter in result["chapters"]] == [(0, 130, "frame"), (130, 650, "frame")]
     assert [item for chapter in result["chapters"] for item in chapter["evidence_ids"]] == [i["id"] for i in evidence]
@@ -91,7 +93,7 @@ def test_unique_ocr_still_counts_towards_segment_budget():
 
 
 def test_segment_cut_counts_repeated_context_and_content_type():
-    repeated = "画面原文" * 30
+    repeated = "画面原文\r\n" * 30
     evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
                  "end_seconds": seconds, "text": text}
                 for i, (seconds, text) in enumerate([(0, "开场"), (1140, repeated), (1141, repeated),
@@ -100,7 +102,7 @@ def test_segment_cut_counts_repeated_context_and_content_type():
     title = "课程视频"
     overhead = outline_overhead(model, title)
     longest_type = max(CONTENT_TYPES.values(), key=len)
-    limit = overhead + len(longest_type) + 3 * len(repeated)
+    limit = overhead + len(longest_type) + 3 * len("画面原文" * 30)
     segmented, parts = split_segments(evidence, 1800, limit, overhead)
     assert segmented and [[item["id"] for item in part["primary"]] for part in parts] == [
         ["frame0", "frame1", "frame2"], ["frame3"], ["frame4"]]

@@ -13,7 +13,7 @@ from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
 from ..analysis.budgets import OUTPUT_TOKENS, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import pack_chapter_material, split_chapter_context
+from .model_input import find_original_quote, pack_chapter_material, split_chapter_context
 from .segments import FLOW_VERSION, split_segments, preceding_context, outline_overhead
 from ..errors import AppError, TaskPaused
 
@@ -164,10 +164,12 @@ class DetailedVideoGeneration:
             if [(i["chapter_id"], i["block_index"]) for i in repairs] != [
                     (i["chapter_id"], i["block_index"]) for i in expected]:
                 raise ValueError("issue_quote_repairs_must_match_request_order")
-            sources = {i["id"]: i["text"] for i in payload["sources"]}
-            if any(not any(item["quote"] in sources[i] for i in request["evidence_ids"])
-                   for item, request in zip(repairs, expected)):
-                raise ValueError("issue_quote_must_be_original_text")
+            sources = {i["id"]: i for i in payload["sources"]}
+            for item, request in zip(repairs, expected):
+                quote = find_original_quote(item["quote"], (sources[i] for i in request["evidence_ids"]))
+                if quote is None:
+                    raise ValueError("issue_quote_must_be_original_text")
+                item["quote"] = quote
         return value
 
     def body_path(self, chapter):
@@ -534,9 +536,11 @@ class DetailedVideoGeneration:
                 issue.update(evidence_ids=ids, chapter_id=chapter["chapter_id"], id=f"{chapter['chapter_id']}-I{len(issues) + 1}")
                 issues.append(issue)
                 quote = issue.get("quote")
-                if quote and not any(quote in self.original[i]["text"] for i in ids):
-                    repairs.append({"chapter_id": chapter["chapter_id"], "block_index": len(issues) - 1,
-                                    "quote": quote, "reason": issue["reason"], "evidence_ids": ids})
+                if quote:
+                    issue["quote"] = find_original_quote(quote, (self.original[i] for i in ids))
+                    if issue["quote"] is None:
+                        repairs.append({"chapter_id": chapter["chapter_id"], "block_index": len(issues) - 1,
+                                        "quote": quote, "reason": issue["reason"], "evidence_ids": ids})
         if repairs:
             def make(group):
                 ids = list(dict.fromkeys(i for item in group for i in item["evidence_ids"]))

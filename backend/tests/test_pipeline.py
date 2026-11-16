@@ -77,7 +77,7 @@ def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, 
     pipeline.run(new_task)
     assert recognizer.ocr_calls == 1
     assert [payload["evidence"][1]["text"] for operation, payload in requests if operation == "outline"] == [
-        f"{part}\nGrok", f"{part}\nGrok"]
+        f"{part}Grok", f"{part}Grok"]
     assert [payload["chapters"][0]["primary"] for operation, payload in requests if operation == "chapters"] == [
         f"> [F1] {whole}\n> [F2] Grok", f"> [F1] {whole}\n> [F2] Grok"]
     exported = client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={new_task}&format=json').json()
