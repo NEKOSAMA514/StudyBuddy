@@ -77,6 +77,32 @@ def test_video_ocr_tries_alternate_crop_only_for_low_confidence():
         ]
 
 
+@pytest.mark.parametrize("case", ["clipped", "other_row", "one_character", "missing_negation", "split_formula", "reappears"])
+def test_video_ocr_requires_two_matching_full_lines_to_fold_a_crop(case):
+    from app.recognition.video_ocr import Candidate, evidence_rows
+
+    whole = "滴定开始前加入1-3mL试剂，慢慢搅拌并观察沉淀"
+    part = "3mL试剂，慢慢搅拌并观察沉淀" if case == "split_formula" else "慢慢搅拌并观察沉淀"
+    if case == "missing_negation":
+        whole, part = "不需要搅拌即可观察溶液颜色", "需要搅拌即可观察溶液颜色"
+    width = 10 * len(whole)
+    offset = 10 * whole.index(part)
+    top = 40 if case == "other_row" else 10
+    if case == "one_character":
+        part = part.replace("沉淀", "沉积")
+
+    def read(seconds, box, text):
+        return Candidate(seconds, seconds, box, 1, 1, 0, 0, ()), text, .95
+
+    rows = evidence_rows([
+        read(0, (10, 10, 10 + width, 30), whole),
+        read(1, (10 + offset, top, 10 + width, top + 20), part),
+        read(8 if case == "reappears" else 3, (10, 10, 10 + width, 30), whole),
+    ])
+    assert [row["text"] for row in rows] == [whole, part, whole]
+    assert rows[1].get("clipped_lines") == ([[0, 0, 2]] if case == "clipped" else None)
+
+
 def test_video_ocr_reads_all_tracks_after_a_slow_recognition_batch(monkeypatch):
     import zlib
     from app.recognition import video_ocr
@@ -262,7 +288,8 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     settings = Settings()
     current = extraction_config(settings)
     assert uses_line_ocr(current)
-    for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr"):
+    for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
+                    "extract-v7-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)

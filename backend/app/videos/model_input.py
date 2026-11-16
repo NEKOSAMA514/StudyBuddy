@@ -218,7 +218,7 @@ def _without_spoken_lines(text, spoken, normalized_speech):
     return "".join(retained).strip("\r\n")
 
 
-def _chapter_frame_texts(items, speech_blocks, seen_frames):
+def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
     blocks_at = _overlap_lookup(speech_blocks)
     speech_texts = {}
     for block in speech_blocks:
@@ -226,13 +226,21 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames):
         spoken = "".join(merged.split())
         speech_texts[block["fragments"][0]["id"]] = (spoken, _speech_comparison_text(spoken))
     previous_parts = {}
+    available = {item["id"] for item in items} - seen_frames if clipped_lines else set()
     for item in items:
         if item["kind"] != "frame" or item["id"] in seen_frames:
             continue
         seen_frames.add(item["id"])
         start, end = item.get("start_seconds"), item.get("end_seconds")
         timed = start is not None and end is not None
-        text = item["text"].strip("\r\n") if timed else item["text"]
+        text = item["text"]
+        if clips := clipped_lines.get(item["id"]):
+            # 前后完整读数必须同时在这一组材料中，跨章或仅在章前的读数不能替代。
+            removed = {line for line, before, after in clips if before in available and after in available}
+            if removed:
+                text = "\n".join(line for index, line in enumerate(text.split("\n")) if index not in removed)
+        if timed:
+            text = text.strip("\r\n")
         overlapping = blocks_at(start, end) if timed else []
         block_id = None
         if overlapping:
@@ -262,7 +270,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames):
             yield item, text
 
 
-def _pack_chapter_primary(records, sources, seen_frames):
+def _pack_chapter_primary(records, sources, seen_frames, clipped_lines):
     items = sorted(records, key=_start_order)
     speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
     blocks = _speech_blocks(speech)
@@ -276,7 +284,7 @@ def _pack_chapter_primary(records, sources, seen_frames):
     timed_speech = [cue for cue in speech if cue.get("start_seconds") is not None and cue.get("end_seconds") is not None]
     speech_starts = [cue["start_seconds"] for cue in timed_speech]
     frames_at = defaultdict(list)
-    for number, (item, text) in enumerate(_chapter_frame_texts(items, blocks, seen_frames), 1):
+    for number, (item, text) in enumerate(_chapter_frame_texts(items, blocks, seen_frames, clipped_lines), 1):
         identifier = f"F{number}"
         sources[identifier] = [item]
         # 画面出现在最近一句中时放到句前，停顿中的画面保留自己的时间顺序。
@@ -321,10 +329,11 @@ def split_chapter_context(chapter):
     return crossing, preceding
 
 
-def _chapter_context_text(records, seen_frames):
+def _chapter_context_text(records, seen_frames, clipped_lines):
     items = sorted(records, key=_start_order)
     speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
-    frames = {item["id"]: text for item, text in _chapter_frame_texts(items, _speech_blocks(speech), seen_frames)}
+    frames = {item["id"]: text for item, text in _chapter_frame_texts(
+        items, _speech_blocks(speech), seen_frames, clipped_lines)}
     parts, previous_kind = [], None
     for item in items:
         kind = item["kind"]
@@ -340,11 +349,12 @@ def _chapter_context_text(records, seen_frames):
 
 def pack_chapter_material(chapter):
     """组装正文发送副本，按章返回短编号与原始依据的映射。"""
-    sent = {key: value for key, value in chapter.items() if key not in {"start_seconds", "end_seconds"}}
+    sent = {key: value for key, value in chapter.items() if key not in {"start_seconds", "end_seconds", "clipped_lines"}}
     sources, seen_frames = {}, set()
     crossing, preceding = split_chapter_context(chapter)
+    clipped_lines = chapter.get("clipped_lines", {})
     if "primary" in chapter or crossing:
-        sent["primary"] = _pack_chapter_primary([*crossing, *chapter.get("primary", [])], sources, seen_frames)
+        sent["primary"] = _pack_chapter_primary([*crossing, *chapter.get("primary", [])], sources, seen_frames, clipped_lines)
     if "context" in chapter:
-        sent["context"] = _chapter_context_text(preceding, seen_frames)
+        sent["context"] = _chapter_context_text(preceding, seen_frames, clipped_lines)
     return sent, sources

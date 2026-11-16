@@ -289,6 +289,23 @@ def timed_record(identifier, kind, start, end, text):
     return {"id": identifier, "kind": kind, "start_seconds": start, "end_seconds": end, "text": text}
 
 
+def test_clipped_ocr_keeps_the_fragment_when_the_complete_line_is_in_another_chapter():
+    original = timed_record("E1", "frame", 0, 2, "加入硝基苯试剂并充分搅拌，观察沉淀的转化")
+    clipped = timed_record("E2", "frame", 3, 3, "观察沉淀的转化")
+    following = {**original, "id": "E3", "start_seconds": 5, "end_seconds": 6}
+    hints = {"E2": [[0, "E1", "E3"]]}
+
+    sent, sources = pack_chapter_material({"primary": [original, clipped, following], "clipped_lines": hints})
+    assert "> [F2] 观察沉淀的转化" not in sent["primary"]
+    assert sources["F1"] == [original]
+    assert "clipped_lines" not in sent
+
+    sent, sources = pack_chapter_material({"start_seconds": 3, "primary": [clipped, following],
+                                          "context": [original], "clipped_lines": hints})
+    assert sent["primary"].startswith("> [F1] 观察沉淀的转化\n")
+    assert sources["F1"] == [clipped]
+
+
 def test_chapter_context_is_plain_timeline_text_and_crossing_frames_are_citable():
     context = [
         timed_record("E1", "speech", 41, 44, "接上前文"),

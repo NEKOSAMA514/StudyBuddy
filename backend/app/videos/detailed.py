@@ -23,7 +23,7 @@ logger = logging.getLogger("studybuddy")
 class DetailedVideoGeneration:
     def __init__(self, task_id, model, settings, folder, evidence, duration, stop, checkpoint, update, timings,
                  publish=lambda result: None, segment_update=lambda progress: None, video_title="",
-                 outline_ready=lambda summary: None):
+                 outline_ready=lambda summary: None, clipped_lines=None):
         self.model, self.settings, self.folder = model, settings, folder
         self.stop, self.checkpoint, self.update, self.timings = stop, checkpoint, update, timings
         self.duration = duration
@@ -39,6 +39,13 @@ class DetailedVideoGeneration:
         self.original = {f"E{i + 1}": item for i, item in enumerate(ordered)}
         self.evidence = [{"id": alias, **{key: item[key] for key in ("kind", "start_seconds", "end_seconds", "text")}}
                          for alias, item in self.original.items()]
+        self.clipped_lines = {}
+        if clipped_lines:
+            aliases = {item["id"]: alias for alias, item in self.original.items()}
+            self.clipped_lines = {
+                aliases[source]: [(line, aliases[before], aliases[after]) for line, before, after in clips]
+                for source, clips in clipped_lines.items()
+            }
         self.anchors = self.evidence
         self.common = {"task_id": task_id, "flow": FLOW_VERSION, "prompt": PROMPT_VERSION, "model": settings.llm_model,
                        "provider": settings.llm_provider, "base": settings.llm_base_url,
@@ -46,6 +53,8 @@ class DetailedVideoGeneration:
                        "summary_prompt": settings.summary_prompt,
                        "input_limit": settings.llm_input_text_limit,
                        "source": digest(ordered)}
+        if self.clipped_lines:
+            self.common["clipped_lines"] = digest(self.clipped_lines)
         if settings.llm_output_tokens != OUTPUT_TOKENS:
             self.common["output_tokens"] = dict(settings.llm_output_tokens)
         if video_title:
@@ -391,8 +400,14 @@ class DetailedVideoGeneration:
     # 小章节直接合批，超预算章节先提取事实，并只补写缺失章节。
     async def writing(self, chapters, video_summary):
         drafts, small, jobs, rounds = {}, [], [], {}
+        chapter_clips = {}
         self.body_paths = {c["chapter_id"]: self.path("chapter", {"video_summary": video_summary, "chapter": c}) for c in chapters}
         for chapter in chapters:
+            if self.clipped_lines:
+                chapter_clips[chapter["chapter_id"]] = {
+                    item["id"]: self.clipped_lines[item["id"]]
+                    for field in ("primary", "context") for item in chapter[field] if item["id"] in self.clipped_lines
+                }
             cache = self.body_path(chapter)
             if cache.exists():
                 value = self.validate("chapters", {"chapters": [chapter]},
@@ -403,8 +418,13 @@ class DetailedVideoGeneration:
         if drafts:
             self.update(f"summarizing:{len(drafts)}/{len(chapters)}")
         def payload(group):
-            return {"video_summary": video_summary, "chapters": [{key: value for key, value in chapter.items()
-                                   if key != "primary" or "facts" not in chapter} for chapter in group]}
+            sent = []
+            for chapter in group:
+                request = {key: value for key, value in chapter.items() if key != "primary" or "facts" not in chapter}
+                if clips := chapter_clips.get(chapter["chapter_id"]):
+                    request["clipped_lines"] = clips
+                sent.append(request)
+            return {"video_summary": video_summary, "chapters": sent}
         def extracting(chapter, requests, previous=None):
             rounds[chapter["chapter_id"]] = (chapter, [self.path(*job) for job in requests], {}, previous)
             return requests

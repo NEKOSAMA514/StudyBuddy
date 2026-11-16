@@ -1,4 +1,5 @@
 """跟踪视频文字区域，从每条轨迹的清晰裁剪中识别文字。"""
+from bisect import bisect_right
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from itertools import zip_longest
@@ -477,17 +478,111 @@ def read_candidates(engine, crops, candidates, check_stop):
     return [*records, *selected], used + remaining
 
 
+def _same_baseline(left, right):
+    overlap_height = min(left[3], right[3]) - max(left[1], right[1])
+    heights = left[3] - left[1], right[3] - right[1]
+    return (overlap_height >= .65 * min(heights)
+            and abs(left[1] + left[3] - right[1] - right[3]) <= .7 * max(heights))
+
+
+def _same_line_extent(left, right):
+    smaller, larger = sorted((left[2] - left[0], right[2] - right[0]))
+    return (smaller >= .73 * larger and min(left[2], right[2]) - max(left[0], right[0]) >= .85 * smaller
+            and _same_baseline(left, right))
+
+
+def _literal_character(char):
+    return (char.isnumeric() or (char.isascii() and char.isalpha())
+            or char in ".,+-/^_()[]%" or unicodedata.category(char) == "Sm")
+
+
+def _fragment_offset(whole, part):
+    offset = whole.find(part)
+    if offset < 0 or len(whole) - len(part) < 2 or whole.find(part, offset + 1) >= 0:
+        return None
+    end = offset + len(part)
+    # 小数、单位和公式需要完整保留，不能从字母或符号的中间截断。
+    if (offset and _literal_character(whole[offset - 1]) and _literal_character(part[0])
+            or end < len(whole) and _literal_character(part[-1]) and _literal_character(whole[end])):
+        return None
+    return offset
+
+
+def _box_fits_fragment(box, whole, offset, length, total):
+    left, _, right, _ = whole
+    width = right - left
+    tolerance = .13 * width + BOX_JITTER_PIXELS
+    return (box[2] - box[0] < .94 * width and _same_baseline(box, whole)
+            and left - 4 <= box[0] and box[2] <= right + 4
+            and abs(box[0] - (left + width * offset / total)) <= tolerance
+            and abs(box[2] - (left + width * (offset + length) / total)) <= tolerance)
+
+
+def _clipped_line_sources(groups):
+    punctuation = str.maketrans("（）：，", "():,")
+    lines = []
+    for row, group in enumerate(groups):
+        line = 0
+        for candidate, text, _ in group:
+            if len(text) >= 5 and "\n" not in text:
+                matching = text.translate(punctuation) if any("\u3400" <= char <= "\u9fff" for char in text) else text
+                lines.append((row, line, candidate, matching))
+            line += text.count("\n") + 1
+    starts = [candidate.first for _, _, candidate, _ in lines]
+    complete = defaultdict(list)
+    matches = defaultdict(dict)
+    for index, (after, _, following, whole) in enumerate(lines):
+        if len(whole) < 12:
+            continue
+        nearby = complete[whole]
+        nearby[:] = [(row, candidate) for row, candidate in nearby if candidate.last >= following.first - 30]
+        earlier = max(((row, candidate) for row, candidate in nearby if candidate.last < following.first
+                       and _same_line_extent(candidate.box, following.box)),
+                      key=lambda entry: entry[1].last, default=None)
+        nearby.append((after, following))
+        if earlier is None:
+            continue
+        before, preceding = earlier
+        end = preceding.last
+        supported = []
+        for row, line, candidate, part in lines[bisect_right(starts, end):index]:
+            if candidate.last >= following.first:
+                continue
+            offset = _fragment_offset(whole, part)
+            if (offset is None or not _box_fits_fragment(candidate.box, preceding.box, offset, len(part), len(whole))
+                    or not _box_fits_fragment(candidate.box, following.box, offset, len(part), len(whole))):
+                continue
+            if candidate.first - end > 3.05:
+                break
+            supported.append((row, line))
+            end = max(end, candidate.last)
+        else:
+            # 只使用前后都读到全文、且中间有连续识别线索的裁切片段。
+            if following.first - end <= 3.05:
+                for position in supported:
+                    matches[position][whole] = before, after
+    clipped = defaultdict(list)
+    for (row, line), sources in matches.items():
+        if len(sources) == 1:
+            before, after = next(iter(sources.values()))
+            clipped[row].append([line, before, after])
+    return clipped
+
+
 def evidence_rows(records):
     grouped = defaultdict(list)
     for candidate, text, confidence in records:
         # 同时出现的题卡和名牌可能在不同时间消失。
         grouped[candidate.first, candidate.last].append((candidate, text, confidence))
     rows = []
-    for (start, end), lines in sorted(grouped.items()):
+    groups = sorted(grouped.items())
+    for (start, end), lines in groups:
         lines.sort(key=lambda line: (line[0].box[1], line[0].box[0]))
         rows.append({"start_seconds": start, "end_seconds": end,
                      "text": "\n".join(line[1] for line in lines),
                      "confidence": 100 * sum(line[2] for line in lines) / len(lines)})
+    for index, sources in _clipped_line_sources([lines for _, lines in groups]).items():
+        rows[index]["clipped_lines"] = sources
     return rows
 
 

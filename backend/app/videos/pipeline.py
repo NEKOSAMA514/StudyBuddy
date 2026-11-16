@@ -221,6 +221,7 @@ class Pipeline:
             media = source_path(folder, video.media_info)
             recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
             evidence = []
+            clipped_lines = {}
             stage = "transcribing"
             self.update(task_id, stage=stage)
             tick = time.monotonic()
@@ -295,6 +296,11 @@ class Pipeline:
                         activity("preparing", message=warnings[-1], level="warning", error=reference)
                     else:
                         frames = line_ocr_evidence(rows, video.id, signature, recognition_signature)
+                        clipped_lines = {
+                            frame["id"]: [(line, frames[before]["id"], frames[after]["id"])
+                                          for line, before, after in row["clipped_lines"]]
+                            for row, frame in zip(rows, frames, strict=True) if "clipped_lines" in row
+                        }
                         self.persist_evidence(video.id, frames)
                         evidence.extend(frames)
                         self.checkpoint(task_id)
@@ -445,7 +451,8 @@ class Pipeline:
                             generation = DetailedVideoGeneration(task_id, model, settings, folder, evidence, video.duration,
                                                         stopped, lambda: self.checkpoint(task_id), update_model_stage, timings,
                                                         publish=publish_notes, segment_update=update_segment,
-                                                        video_title=config["video_title"], outline_ready=publish_outline)
+                                                        video_title=config["video_title"], outline_ready=publish_outline,
+                                                        clipped_lines=clipped_lines)
                         active, stopping = asyncio.create_task(generation.run()), asyncio.create_task(stopped.wait())
                         try:
                             await asyncio.wait([active, stopping], return_when=asyncio.FIRST_COMPLETED)
