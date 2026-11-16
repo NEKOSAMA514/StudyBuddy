@@ -364,7 +364,7 @@ def test_chapter_material_inserts_frames_at_appearances_during_a_speech_gap():
     assert sent["primary"] == "[New_S1]\n停顿前的话\n> [F1] 过渡画面\n停顿后的话"
 
 
-def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
+def test_chapter_filter_keeps_labels_values_and_context_separate():
     first, second = "这一段已经完整讲过", "后面的条件和限制"
     number = "实验要求体积精确保持在 0.01mL"
     frame_text = f"{first}，{second}\nClaude\n{number}\n{number.replace('0.01', '0.1')}\n条件变化时保持 Fe3+ 而非 Fe2+"
@@ -383,6 +383,33 @@ def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
         "[New_S1]", f"{first} {second} Claude {number}", f"> [F2] {primary[-1]['text']}",
     ]
     assert sent["context"] == context[0]["text"]
+
+
+def test_chapter_filter_removes_nearby_spoken_passages_across_visual_line_breaks():
+    outside = "这句话在一分钟窗口之外才会出现在语音里。"
+    quantity = "试验要求把溶液浓度保持在0.01"
+    visual = "附加提醒是先保存副本。"
+    long_line = "我们还要提前核对每份申请所需要提交的全部"
+    frame = timed_record("E4", "frame", 60, 62,
+                         "本章、需要说明怎样\n整理这份原始材料。\n"
+                         f"{long_line}\n证明材料。\n"
+                         f"这份补充资料可以帮助橙理完整的复习笔记。{visual}\n"
+                         f"{quantity}\n能仅凭画面判定整道题目的答案。\n{outside}")
+    chapter = {"primary": [
+        timed_record("E1", "speech", 31, 32, "本章需要说明怎样"),
+        timed_record("E2", "speech", 32, 33, "整理这份原始材料"),
+        timed_record("E3", "speech", 44, 46, long_line + "证明材料。"),
+        frame,
+        timed_record("E5", "speech", 87, 89, "这份补充资料可以帮助整理完整的复习笔记。"
+                     f"{quantity}2。不能仅凭画面判定整道题目的答案。"),
+        timed_record("E6", "speech", 91, 92, outside),
+    ]}
+    before = deepcopy(chapter)
+    sent, sources = pack_chapter_material(chapter)
+    assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
+        f"> [F1] {visual}", f"> {quantity}", "> 能仅凭画面判定整道题目的答案。", f"> {outside}",
+    ]
+    assert sources["F1"] == [frame] and chapter == before
 
 
 def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_repair(tmp_path, monkeypatch):

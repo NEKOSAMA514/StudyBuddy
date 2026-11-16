@@ -5,7 +5,7 @@ from .model_input import outline_text_length
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v9-content-budget"
+FLOW_VERSION = "video-flow-v10-speech-ocr-dedup"
 
 
 def outline_measure(model, video_title=""):

@@ -2,13 +2,17 @@
 import re
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 from itertools import accumulate
 
 
 OCR_REPEAT_SECONDS = 2
 SLIDE_REPEAT_SECONDS = 30
 SPEECH_LINK_SECONDS = 1
+OCR_SPEECH_HALF_WINDOW = 30
 SPEECH_BLOCK_SECONDS = 60
+NEGATIONS = "不没未无非别勿否"
+SIGNIFICANT_HAN = NEGATIONS + "正负〇零一二三四五六七八九十百千万亿两半"
 
 
 def _start_order(item):
@@ -148,23 +152,73 @@ def _speech_blocks(speech):
     return blocks
 
 
+def _speech_comparison_text(text):
+    # 英文标识或表达式内部的点保留，句末和中文词间的点用于排版。
+    return re.sub(r"(?<![A-Za-z0-9])[.·]|[.·](?![A-Za-z0-9])", "", _normalized(text).replace("…", ""))
+
+
+def _one_ocr_edit(candidate, phrase):
+    middle = len(candidate) // 2
+    if candidate[:middle] not in phrase and candidate[middle:] not in phrase:
+        return False
+    # 整分钟转录可以有前文和后文，只检查候选句内部的一处差异。
+    edits = [edit for edit in SequenceMatcher(None, candidate, phrase, autojunk=False).get_opcodes()
+             if edit[0] != "equal" and not (edit[0] == "insert" and edit[1] in (0, len(candidate)))]
+    if len(edits) != 1:
+        return False
+    _, left, right, start, end = edits[0]
+    changed = candidate[left:right] + phrase[start:end]
+    return (0 < left <= right < len(candidate) and max(right - left, end - start) == 1
+            and all("\u3400" <= char <= "\u9fff" and char not in SIGNIFICANT_HAN for char in changed))
+
+
+def _spoken_duplicate(raw, plain, spoken, normalized_speech):
+    if len(plain) < 12:
+        return False
+    literal = _requires_literal_match(raw)
+    candidate = raw.rstrip("。！？") if literal else plain
+    phrases = spoken if literal else normalized_speech
+    prefix = r"(?<![\d.+−正负-])" if literal and (candidate[0].isdigit() or candidate[0] == ".") else ""
+    suffix = r"(?![\d.+−%‰]|[,，:：-]\d)" if literal and (candidate[-1].isdigit() or candidate[-1] in ".,，:：") else ""
+    pattern = prefix + rf"(?<![{NEGATIONS}])" + re.escape(candidate) + suffix
+    if any(candidate in phrase and re.search(pattern, phrase) for phrase in phrases):
+        return True
+    return not literal and len(plain) >= 16 and any(_one_ocr_edit(plain, phrase) for phrase in phrases)
+
+
 def _without_spoken_lines(text, speech):
+    if not speech:
+        return text.strip("\r\n")
     runs, last_end = [], float("-inf")
     for item in speech:
         if item["start_seconds"] - last_end > SPEECH_LINK_SECONDS:
             runs.append([])
-        runs[-1].append(item["text"].strip())
+        runs[-1].append("".join(item["text"].split()))
         last_end = max(last_end, item["end_seconds"])
-    spoken = [" ".join(run) for run in runs]
-    normalized_speech = [_normalized(phrase) for phrase in spoken]
+    spoken = ["".join(run) for run in runs]
+    normalized_speech = [_speech_comparison_text(phrase) for phrase in spoken]
+    longest = max(map(len, normalized_speech)) + 1
+    # 以行和句号为保留边界，同时允许同一条字幕连续换行。
+    parts = [part for line in text.splitlines(keepends=True) for part in re.split(r"(?<=[。！？])", line) if part]
+    compact = ["".join(part.split()) for part in parts]
+    # 独立成行的短词可能是角色或图表名牌，保留它们的出现位置。
+    labels = [raw.isalpha() and (len(raw) <= 3 or (raw.isascii() and len(raw) < 12)) for raw in compact]
     retained = []
-    for line in text.splitlines(keepends=True):
-        raw, plain = line.strip(), _normalized(line)
-        if len(plain) >= 12:
-            candidate, phrases = (raw, spoken) if _requires_literal_match(raw) else (plain, normalized_speech)
-            if any(candidate in phrase for phrase in phrases):
-                continue
-        retained.append(line)
+    index = 0
+    while index < len(parts):
+        raw, last_match = "", index
+        for end in range(index, len(parts)):
+            if labels[end]:
+                break
+            raw += compact[end]
+            plain = _speech_comparison_text(raw)
+            if len(plain) > longest:
+                break
+            if _spoken_duplicate(raw, plain, spoken, normalized_speech):
+                last_match = end + 1
+        if last_match == index:
+            retained.append(parts[index])
+        index = max(index + 1, last_match)
     return "".join(retained).strip("\r\n")
 
 
@@ -177,7 +231,8 @@ def _chapter_frame_texts(items, speech, seen_frames):
         seen_frames.add(item["id"])
         start, end = item.get("start_seconds"), item.get("end_seconds")
         timed = start is not None and end is not None
-        text = _without_spoken_lines(item["text"], speech_at(start, end)) if timed else item["text"]
+        text = (_without_spoken_lines(item["text"], speech_at(start - OCR_SPEECH_HALF_WINDOW, start + OCR_SPEECH_HALF_WINDOW))
+                if timed else item["text"])
         if not text.strip():
             continue
         lines = text.splitlines(keepends=True)
