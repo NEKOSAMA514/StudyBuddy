@@ -249,7 +249,7 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
             "chapter_id": "C1",
             "primary": [{"id": f"F{index + 1}", "text": row["text"].rstrip("\r\n")}
                         for index, row in enumerate(coordinator.evidence[:3])],
-            "context": [{"id": "F4", "text": coordinator.evidence[3]["text"].rstrip("\r\n")}],
+            "context": coordinator.evidence[3]["text"].rstrip("\r\n"),
         }
     else:
         expected = deduplicate_ocr(chapter)
@@ -284,6 +284,38 @@ def timed_record(identifier, kind, start, end, text):
     return {"id": identifier, "kind": kind, "start_seconds": start, "end_seconds": end, "text": text}
 
 
+def test_chapter_context_is_plain_timeline_text_and_crossing_frames_are_citable():
+    context = [
+        timed_record("E1", "speech", 41, 44, "接上前文"),
+        timed_record("E2", "speech", 44, 46, "前一条说明"),
+        timed_record("E3", "frame", 46, 56, "旧画面\n画面补充"),
+        timed_record("E4", "speech", 48, 51, "接着说完"),
+        timed_record("E5", "frame", 51, 64, "章首还在显示"),
+        timed_record("E6", "frame", 55, 80, "跨过整章的标题"),
+    ]
+    chapter = {"start_seconds": 60, "end_seconds": 70, "context": context,
+               "primary": [timed_record("E7", "speech", 60, 65, "本章原话")]}
+    before = deepcopy(chapter)
+    sent, sources = pack_chapter_material(chapter)
+    assert sent == {
+        "primary": [
+            {"id": "F1", "text": "章首还在显示"},
+            {"id": "F2", "text": "跨过整章的标题"},
+            {"id": "New_S1", "text": "[+1,+2]本章原话[-1]"},
+        ],
+        "context": "接上前文 前一条说明\n旧画面\n画面补充\n接着说完",
+    }
+    assert sources == {"F1": [context[4]], "F2": [context[5]], "New_S1": chapter["primary"]}
+    assert chapter == before
+
+    extracted = {key: value for key, value in chapter.items() if key != "primary"}
+    extracted["facts"] = [{"text": "本章事实"}]
+    sent_after_extract, _ = pack_chapter_material(extracted)
+    assert sent_after_extract["facts"] == extracted["facts"]
+    assert sent_after_extract["primary"] == sent["primary"][:2]
+    assert sent_after_extract["context"] == sent["context"]
+
+
 def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_in_order():
     primary = [
         timed_record("E1", "speech", 0, 10, "  开场原话  "),
@@ -312,7 +344,7 @@ def test_chapter_material_marks_original_fragments_and_keeps_standalone_frames_i
             {"id": "New_S3", "text": "[+4]超过一分钟的单条语音"},
             {"id": "New_S4", "text": "仍从新块开始[-4]"},
         ],
-        "context": [{"id": "New_S5", "text": "本章前文"}],
+        "context": "本章前文",
     }
     assert [item["id"] for item in sources["New_S1"]] == ["E1", "E3", "E5"]
     assert sources["F1"] == [primary[1]] and sources["F4"] == [primary[-1]]
@@ -364,7 +396,7 @@ def test_chapter_filter_uses_full_frame_range_and_preserves_visual_details():
         "id": "F1", "text": f"Claude\n{number.replace('0.01', '0.1')}\n条件变化时保持 Fe3+ 而非 Fe2+"}
     assert "[+1]" in sent["primary"][1]["text"]
     assert sent["primary"][-1] == {"id": "F2", "text": primary[-1]["text"]}
-    assert sent["context"] == [{"id": "New_S2", "text": context[0]["text"]}]
+    assert sent["context"] == context[0]["text"]
 
 
 def test_chapter_aliases_resolve_before_partial_checkpoints_and_stay_stable_on_repair(tmp_path, monkeypatch):

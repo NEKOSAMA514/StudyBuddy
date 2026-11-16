@@ -184,11 +184,11 @@ def test_writing_evidence_is_compact_without_changing_local_material(operation, 
                     {"id": "E1", "kind": "speech", "text": "原始知识"},
                     {"id": "E7", "kind": "frame", "text": "画面原文", "nearby_speech_id": "E1"}]
         if extracted and sent_chapter["chapter_id"] == "C1":
-            expected_context = ([{"id": "F1", "text": "画面原文"}] if operation == "chapters" else
+            expected_context = ("画面原文" if operation == "chapters" else
                                 [{"id": "E7", "kind": "frame", "text": "画面原文"}])
             assert sent_chapter["context"] == expected_context
         else:
-            assert sent_chapter["context"] == []
+            assert sent_chapter["context"] == ("" if operation == "chapters" else [])
         assert {key: sent_chapter[key] for key in ("title", "core_question", "topics", "start_anchor_id")} == {
             key: data[key] for key in ("title", "core_question", "topics", "start_anchor_id")}
     assert json.dumps(payload, ensure_ascii=False) == before and coordinator.path(operation, payload) == cache

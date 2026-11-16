@@ -178,19 +178,8 @@ def _frame_markers(markers):
     return f"[{','.join(markers)}]" if markers else ""
 
 
-def _pack_chapter_group(records, sources, counts, seen_frames):
-    items = sorted(records, key=_start_order)
-    speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
-    blocks = _speech_blocks(speech)
-    for block in blocks:
-        counts["speech"] += 1
-        block["id"] = f'New_S{counts["speech"]}'
-        sources[block["id"]] = block["fragments"]
-
+def _chapter_frame_texts(items, speech, seen_frames):
     speech_at = _overlap_lookup(speech)
-    blocks_at = _overlap_lookup(blocks)
-    appearances, disappearances = defaultdict(list), defaultdict(list)
-    before_block, ordered = defaultdict(list), []
     previous_end, previous_lines = None, Counter()
     for item in items:
         if item["kind"] != "frame" or item["id"] in seen_frames:
@@ -210,18 +199,33 @@ def _pack_chapter_group(records, sources, counts, seen_frames):
                 remaining = _without_repeated_lines(lines, current, previous_lines, gap, preserve_details=True)
                 text = "".join(remaining).strip("\r\n") or text
         previous_end, previous_lines = end if timed else None, current
-        counts["frame"] += 1
-        number = counts["frame"]
+        yield item, text
+
+
+def _pack_chapter_primary(records, sources, seen_frames, chapter_end):
+    items = sorted(records, key=_start_order)
+    speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
+    blocks = _speech_blocks(speech)
+    for number, block in enumerate(blocks, 1):
+        block["id"] = f"New_S{number}"
+        sources[block["id"]] = block["fragments"]
+
+    blocks_at = _overlap_lookup(blocks)
+    appearances, disappearances = defaultdict(list), defaultdict(list)
+    before_block, ordered = defaultdict(list), []
+    for number, (item, text) in enumerate(_chapter_frame_texts(items, speech, seen_frames), 1):
+        start, end = item.get("start_seconds"), item.get("end_seconds")
         identifier = f"F{number}"
         frame = {"id": identifier, "text": text}
         sources[identifier] = [item]
-        overlapping = blocks_at(start, end) if timed else []
+        overlapping = blocks_at(start, end) if start is not None and end is not None else []
         if overlapping:
             first, last = overlapping[0], overlapping[-1]
             begin = _closest_fragment(first, start)
-            finish = _closest_fragment(last, end, ending=True)
             appearances[begin["id"]].append(f"+{number}")
-            disappearances[finish["id"]].append((end, f"-{number}"))
+            if chapter_end is None or end < chapter_end:
+                finish = _closest_fragment(last, end, ending=True)
+                disappearances[finish["id"]].append((end, f"-{number}"))
             before_block[first["id"]].append(frame)
         else:
             ordered.append((_start_order(item), [frame]))
@@ -238,13 +242,47 @@ def _pack_chapter_group(records, sources, counts, seen_frames):
     return [record for _, group in sorted(ordered, key=lambda entry: entry[0]) for record in group]
 
 
+def split_chapter_context(chapter):
+    """将章首仍可见的画面与其余章前材料分开。"""
+    start = chapter.get("start_seconds")
+    crossing, preceding = [], []
+    for item in chapter.get("context", []):
+        frame_start, frame_end = item.get("start_seconds"), item.get("end_seconds")
+        if (item["kind"] == "frame" and start is not None and frame_start is not None and frame_end is not None
+                and frame_start < start <= frame_end):
+            crossing.append(item)
+        else:
+            preceding.append(item)
+    return crossing, preceding
+
+
+def _chapter_context_text(records, seen_frames):
+    items = sorted(records, key=_start_order)
+    speech = [item for item in items if item["kind"] == "speech" and item["text"].strip()]
+    frames = {item["id"]: text for item, text in _chapter_frame_texts(items, speech, seen_frames)}
+    parts, previous_kind = [], None
+    for item in items:
+        kind = item["kind"]
+        text = item["text"].strip() if kind == "speech" else frames.pop(item["id"], "")
+        if not text:
+            continue
+        if parts:
+            parts.append(" " if previous_kind == kind == "speech" else "\n")
+        parts.append(text)
+        previous_kind = kind
+    return "".join(parts)
+
+
 def pack_chapter_material(chapter):
     """组装正文发送副本，按章返回短编号与原始依据的映射。"""
     sent = {key: value for key, value in chapter.items() if key not in {"start_seconds", "end_seconds"}}
-    sources, counts, seen_frames = {}, Counter(), set()
-    for key in ("primary", "context"):
-        if key in chapter:
-            sent[key] = _pack_chapter_group(chapter[key], sources, counts, seen_frames)
+    sources, seen_frames = {}, set()
+    crossing, preceding = split_chapter_context(chapter)
+    if "primary" in chapter or crossing:
+        sent["primary"] = _pack_chapter_primary([*crossing, *chapter.get("primary", [])], sources, seen_frames,
+                                                chapter.get("end_seconds"))
+    if "context" in chapter:
+        sent["context"] = _chapter_context_text(preceding, seen_frames)
     return sent, sources
 
 

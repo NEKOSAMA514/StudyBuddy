@@ -13,7 +13,7 @@ from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
 from ..analysis.budgets import OUTPUT_TOKENS, OUTPUT_BUDGET_RATIO, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import outline_text_length, deduplicate_ocr, pack_chapter_material
+from .model_input import outline_text_length, deduplicate_ocr, pack_chapter_material, split_chapter_context
 from .segments import FLOW_VERSION, split_segments, preceding_context, outline_measure
 from ..errors import AppError, TaskPaused
 
@@ -502,6 +502,8 @@ class DetailedVideoGeneration:
         issues, repairs = [], []
         for chapter, draft in zip(chapters, drafts):
             primary = {item["id"] for item in chapter["primary"]}
+            crossing, _ = split_chapter_context(chapter)
+            citable = primary | {item["id"] for item in crossing}
             allowed = primary | {item["id"] for item in chapter["context"]}
             for raw in draft["issues"]:
                 try:
@@ -510,7 +512,7 @@ class DetailedVideoGeneration:
                     self.diagnostic("invalid_source_issue", "忽略无法解析的辅助存疑项。", chapter_id=chapter["chapter_id"])
                     continue
                 ids = [i for i in issue["evidence_ids"] if i in allowed]
-                if set(ids) != set(issue["evidence_ids"]) or not primary.intersection(ids):
+                if set(ids) != set(issue["evidence_ids"]) or not citable.intersection(ids):
                     self.diagnostic("invalid_issue_reference", "存疑来源无效，正文检查点保留。", chapter_id=chapter["chapter_id"])
                     if not issue["critical"]:
                         continue

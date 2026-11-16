@@ -152,6 +152,7 @@ def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anch
     evidence = [{"id": f"s{i}", "kind": "speech" if i % 2 == 0 else "frame",
                  "start_seconds": seconds, "end_seconds": seconds, "text": f"原文{i}"}
                 for i, seconds in enumerate(times)]
+    evidence[3]["end_seconds"] = 120
     coordinator, model, _, _ = flow(tmp_path, evidence, duration=300)
     plans = [{"title": f"第{i}章", "core_question": f"问题{i}", "topics": [f"子主题{i}"],
               "start_anchor_id": f"E{index + 1}"} for i, index in enumerate([0, 4, 6, 8])]
@@ -162,11 +163,22 @@ def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anch
         assert chapter["previous_chapter_outline"] == ({key: plans[index - 1][key] for key in ("title", "core_question", "topics")} if index else {})
         sent = json.loads(model.messages("chapters", {"chapters": [chapter]})[-1]["content"])["chapters"][0]
         assert "start_seconds" not in json.dumps(sent)
+        assert sent["context"] == ["", "原文2", "原文4\n原文5", "原文6\n原文7"][index]
         _, sources = pack_chapter_material(chapter)
-        for scope in ("primary", "context"):
-            assert sorted(original["id"] for item in sent[scope] for original in sources[item["id"]]) == sorted(
-                item["id"] for item in chapter[scope])
+        expected_primary = {item["id"] for item in chapter["primary"]}
+        if index == 1:
+            expected_primary.add("E4")
+            assert sent["primary"][0] == {"id": "F1", "text": "原文3"}
+        assert {original["id"] for item in sent["primary"] for original in sources[item["id"]]} == expected_primary
     assert [item for c in chapters for item in c["primary"]] == coordinator.evidence
+
+    request = {"chapters": [chapters[1]]}
+    response = {"chapters": [{"chapter_id": "C2", "summary": "摘要", "markdown": "正文", "issues": [
+        {"kind": "source_issue", "quote": "原文3", "evidence_ids": ["F1"], "reason": "等待核对", "critical": False}]}]}
+    drafts = coordinator.validate("chapters", request, response)["chapters"]
+    assert drafts[0]["issues"][0]["evidence_ids"] == ["E4"]
+    issues = asyncio.run(coordinator.source_issues(request["chapters"], drafts))
+    assert [(issue["evidence_ids"], issue["quote"]) for issue in issues] == [(["s3"], "原文3")]
 
 
 def test_minute_context_and_previous_outline_cross_segments_without_owning_old_evidence(tmp_path):
