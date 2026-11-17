@@ -146,7 +146,8 @@ def test_video_ocr_ranks_a_track_across_its_windows_once():
     assert list(rank([early, long, late])) == [long, early, late]
 
 
-@pytest.mark.parametrize("case", ["jitter", "partial", "digit_changed", "extended", "disappeared"])
+@pytest.mark.parametrize("case", ["jitter", "partial", "full_fragment", "occluded_fragment", "changed_fragment",
+                                 "different_height", "digit_changed", "extended", "disappeared"])
 def test_video_ocr_keeps_unchanged_lines_during_detection(case):
     from io import BytesIO
     from app.recognition.video_ocr import TextRegions
@@ -180,6 +181,14 @@ def test_video_ocr_keeps_unchanged_lines_during_detection(case):
     elif case == "partial":
         region = partial
         boxes = [polygon(0, 0, 62, 13)]
+    elif case in {"full_fragment", "occluded_fragment", "changed_fragment"}:
+        boxes = [polygon(104, 12, 166, 29)]
+        if case == "occluded_fragment":
+            frame[12:30, :104] = 0
+        elif case == "changed_fragment":
+            frame[13:28, 117:128] = 255
+    elif case == "different_height":
+        boxes = [polygon(104, 21, 166, 29)]
     elif case == "digit_changed":
         frame[13:28, 90:101] = 255
     elif case == "extended":
@@ -192,8 +201,10 @@ def test_video_ocr_keeps_unchanged_lines_during_detection(case):
 
     active = [(track.first, track.last) for track in tracker.active]
     finished = [(candidate.first, candidate.last) for candidate in tracker.candidates]
-    if case in {"jitter", "partial"}:
+    if case in {"jitter", "partial", "full_fragment"}:
         assert active == [(0, 1)] and finished == []
+    elif case == "different_height":
+        assert active == [(1, 1), (0, 1)] and finished == []
     else:
         assert active == ([] if case == "disappeared" else [(1, 1)])
         assert finished == [(0, 0)]
@@ -289,7 +300,7 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     current = extraction_config(settings)
     assert uses_line_ocr(current)
     for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
-                    "extract-v7-video-line-ocr"):
+                    "extract-v7-video-line-ocr", "extract-v8-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)

@@ -305,12 +305,19 @@ class TextRegions:
             self.reference[top:bottom, left:right] = current[top:bottom, left:right]
             if detected is None:
                 continue
-            partial = [(box, track) for box, track in previous if intersection(box, region) and not covers(region, box)]
+            overlapping = [(old, track) for old, track in previous if intersection(old, region)]
             for polygon in detected.astype(np.float32) + np.float32([left, top]):
                 box = bounds(polygon)
-                # 局部检测可能只返回已确认仍在显示的旧行的一截。
-                if not any(covers(old, box, BOX_JITTER_PIXELS) and still_visible(track) for old, track in partial):
-                    boxes.append((box, polygon))
+                width = box[2] - box[0]
+                # 整行仍可见时，过滤局部截断框和全覆盖重检返回的同行短框。
+                if any(covers(old, box, BOX_JITTER_PIXELS)
+                       and (not covers(region, old) or (
+                           old[2] - old[0] - width > 2 * BOX_JITTER_PIXELS
+                           and old[0] <= box[0] and box[2] <= old[2]
+                           and max(abs(box[1] - old[1]), abs(box[3] - old[3])) <= BOX_JITTER_PIXELS))
+                       and still_visible(track) for old, track in overlapping):
+                    continue
+                boxes.append((box, polygon))
         added, started = [], []
         for box, polygon in boxes:
             if min(box[2] - box[0], box[3] - box[1]) < 2 or any(overlap(box, other) >= .70 for other in added):
