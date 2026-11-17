@@ -102,7 +102,7 @@ def test_batching_splits_on_actual_input_characters(tmp_path, monkeypatch, exces
     chapters = coordinator.assign({"content_type": CONTENT_TYPES["课程或教材"], "chapters": plan(coordinator.anchors), "video_summary": "主题"})
     monkeypatch.setitem(model.settings.llm_output_tokens, "chapters", 2500)
     payload = coordinator.input_payload("chapters", {"chapters": chapters, "video_summary": "主题"})
-    model.settings.llm_input_text_limit = model.input_characters("chapters", payload) - excess
+    model.settings.llm_input_text_limit = model.input_characters("chapters", payload) + model.repair_input_reserve - excess
     asyncio.run(coordinator.writing(chapters, "主题"))
     batches = [p["chapters"] for op, p in model.inputs if op == "chapters"]
     assert list(map(len, batches)) == expected

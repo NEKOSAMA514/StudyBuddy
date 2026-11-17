@@ -32,7 +32,7 @@ def context_before(processed, source):
 # 按来源字符与实际请求预算规划简洁片段，前文不计入主要覆盖范围。
 def plan(sources, model, limit, video_title):
     return plan_segments(sources, lambda primary, context: payload_for(video_title, primary, context),
-                         lambda p: model.input_characters("concise", p), limit, context_before)
+                         lambda p: model.input_characters("concise", p), limit - model.repair_input_reserve, context_before)
 
 
 def validate_result(result, evidence, duration):

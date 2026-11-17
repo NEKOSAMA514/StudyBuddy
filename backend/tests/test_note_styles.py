@@ -369,8 +369,9 @@ def test_concise_continuation_type_change_repairs_only_current_segment(tmp_path,
         async with ModelClient(settings(llm_input_text_limit=5500)) as model:
             source = [{"id": str(i), "kind": "speech", "text": "原文" * 500, "start_seconds": i * 200, "end_seconds": i * 200 + 10} for i in range(2)]
             single = {"video_title": "材料", "primary": [{**source[0], "start_offset": 0, "end_offset": 1000}], "context": []}
-            model.settings.llm_input_text_limit = max(model.input_characters("concise", single),
-                *(model.input_characters("concise", {**single, "content_type": value}) for value in CONTENT_TYPES.values())) + 300
+            largest = max(model.input_characters("concise", single),
+                          *(model.input_characters("concise", {**single, "content_type": value}) for value in CONTENT_TYPES.values()))
+            model.settings.llm_input_text_limit = largest + 300 + model.repair_input_reserve
             gen = ConciseVideoGeneration("repair", model, model.settings, tmp_path, source, 400, asyncio.Event(),
                 lambda: None, lambda _: None, {}, lambda _: None, "材料")
             result = await gen.run()

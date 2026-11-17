@@ -10,6 +10,7 @@ from .model_input import deduplicate_ocr, evidence_request_text, nearby_speech_i
 class ModelClient(BaseModelClient):
     schemas = SCHEMAS
     missing_key_message = "本地识别已保留。请打开「模型设置」填写当前 API 的密钥，再重试任务。"
+    repair_input_reserve = 512
 
     def messages(self, operation, payload):
         if operation == "chapters" and "chapters" in payload:

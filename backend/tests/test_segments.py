@@ -108,7 +108,7 @@ def test_segment_cut_counts_repeated_context_and_content_type():
         ["frame0", "frame1", "frame2"], ["frame3"], ["frame4"]]
     payload = {"evidence": parts[1]["primary"], "context": evidence[1:3],
                "video_title": title, "content_type": longest_type}
-    assert model.input_characters("outline", payload) == limit
+    assert model.input_characters("outline", payload) + model.repair_input_reserve == limit
 
 
 def test_same_time_records_stay_together_and_silence_has_no_empty_request():
@@ -133,7 +133,7 @@ def test_dense_material_reserves_actual_preceding_minute_context(small_outline_b
     _, parts = split_segments(dense, 600, 15000, outline_overhead(model))
     for part in parts:
         payload = {"evidence": part["primary"], "context": preceding_context(dense, part["start_seconds"])}
-        assert model.input_characters("outline", payload) <= 15000 or len(part["primary"]) == 1
+        assert model.input_characters("outline", payload) + model.repair_input_reserve <= 15000 or len(part["primary"]) == 1
     assert [item for part in parts for item in part["primary"]] == dense
 
 

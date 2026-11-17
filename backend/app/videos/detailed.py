@@ -68,7 +68,8 @@ class DetailedVideoGeneration:
 
     def fits(self, operation, payload, reserve=0):
         payload = self.input_payload(operation, payload)
-        return self.model.input_characters(operation, payload) + reserve <= self.settings.llm_input_text_limit
+        size = self.model.input_characters(operation, payload)
+        return size + self.model.repair_input_reserve + reserve <= self.settings.llm_input_text_limit
 
     # 用实际请求计量装包，过长材料切片后仍保留来源和时间范围。
     def batches(self, operation, items, payload, reserve=0):

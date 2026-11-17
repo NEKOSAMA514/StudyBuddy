@@ -234,7 +234,8 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     assert "anchors" not in sent
     for key in ("evidence", "primary", "context"):
         if key in payload:
-            assert sent[key] == [{"id": item["id"], "text": item["text"]} for item in payload[key]]
+            assert sent[key] == [{"id": item["id"], "text": item["text"].replace("\n", "")
+                                  if item["kind"] == "frame" else item["text"]} for item in payload[key]]
     assert "start_seconds" not in captured[0][-1]["content"]
     assert "end_seconds" not in captured[0][-1]["content"]
     assert "ocr_texts" not in sent
@@ -262,6 +263,43 @@ def test_planning_repair_budget_counts_complete_messages(monkeypatch):
     assert run_model(model, "generate", "outline", payload,
                      model_validator("outline", lambda value: coordinator.validate("outline", payload, value))) == outline()
     assert len(captured) == 2 and model.input_characters("outline", payload) == message_characters(captured[0])
+
+
+def test_outline_repair_requests_missing_anchors_when_the_previous_output_would_overflow(monkeypatch):
+    from copy import deepcopy
+
+    model = configured()
+    coordinator = generation(model)
+    payload = {"anchors": coordinator.anchor_payload(), "evidence": deepcopy(coordinator.evidence)}
+    capacity = model.settings.llm_input_text_limit - 512
+    payload["evidence"][0]["text"] += "甲" * (capacity - model.input_characters("outline", payload))
+    good = outline()
+    good["chapters"] += [{**good["chapters"][0], "start_anchor_id": identifier} for identifier in ("E2", "E3")]
+    bad = {**deepcopy(good), "video_summary": "上一轮的大纲" * 512}
+    for chapter in bad["chapters"][1:]:
+        chapter["start_anchor_id"] = None
+    outputs, requests = iter((bad, good)), []
+
+    async def post(self, url, **kwargs):
+        requests.append(kwargs["json"]["messages"])
+        return httpx.Response(200, json={"choices": [{"message": {"content": model_content(next(outputs))}}]},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    def validate(value):
+        try:
+            return coordinator.validate("outline", payload, value)
+        except ValueError as error:
+            raise ValueError(str(error) + ("很长的校验细节" * 100)) from error
+
+    assert run_model(model, "generate", "outline", payload, model_validator("outline", validate)) == good
+    assert len(requests) == model.calls == 2
+    assert message_characters(requests[0]) == capacity
+    assert requests[1][:-1] == requests[0]
+    instruction = requests[1][-1]["content"]
+    assert "[null, null]" in instruction and instruction.endswith("并纠正上述问题。")
+    assert message_characters(requests[1]) == model.settings.llm_input_text_limit
 
 
 @pytest.mark.parametrize("operation", ["chapters", "extract"])
@@ -738,9 +776,14 @@ def test_json_repair_preserves_answer_and_messages_without_reasoning(monkeypatch
     assert "不发送的推理" not in json.dumps(requests, ensure_ascii=False)
 
 
+@pytest.mark.parametrize("document", [False, True], ids=["video", "document"])
 @pytest.mark.parametrize("extra", [0, -1], ids=["exact-limit", "one-character-over"])
-def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, extra):
+def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, extra, document):
+    from app.documents.model import DocumentModelClient
+
     model = configured()
+    if document:
+        model = DocumentModelClient(model.settings)
     model.settings.llm_request_interval_seconds = 0
     payload = {"material": "原材料"}
     good = {"title": "已修正", "tags": [], "overview_paragraphs": ["概览"]}
@@ -758,9 +801,14 @@ def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, e
     def validate(value):
         if value["title"] == "错误":
             raise ValueError("wrong_title")
-    if extra == 0:
+    if not extra or not document:
         assert run_model(model, "generate", "overview", payload, model_validator("overview", validate)) == good
-        assert requests[1] == history
+        if extra:
+            assert requests[1][:-1] == history[:-2]
+            assert "wrong_title" in requests[1][-1]["content"]
+            assert message_characters(requests[1]) <= model.settings.llm_input_text_limit
+        else:
+            assert requests[1] == history
         assert model.calls == len(counts) == len(requests) == 2
     else:
         with pytest.raises(AppError) as error:

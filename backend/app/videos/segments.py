@@ -7,14 +7,14 @@ from .model_input import evidence_request_text
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v15-clipped-ocr-lines"
+FLOW_VERSION = "video-flow-v16-reserve-repair-input"
 
 
 def outline_overhead(model, video_title=""):
     payload = {"evidence": [], "context": []}
     if video_title:
         payload["video_title"] = video_title
-    return model.input_characters("outline", payload)
+    return model.input_characters("outline", payload) + model.repair_input_reserve
 
 
 # 只取章节开始前的有限时间窗口，作为前文而不改变主要证据归属。

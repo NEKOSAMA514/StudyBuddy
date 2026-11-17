@@ -272,7 +272,7 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
 
 
 
-def test_input_budget_uses_only_deduplicated_material(tmp_path, monkeypatch):
+def test_input_budget_uses_deduplicated_material_and_reserves_repair(tmp_path, monkeypatch):
     model = ModelClient(Settings())
     coordinator = DetailedVideoGeneration("budget", model, model.settings, tmp_path, subtitle_materials(), 10,
                                  asyncio.Event(), lambda: None, lambda stage: None, {})
@@ -282,7 +282,7 @@ def test_input_budget_uses_only_deduplicated_material(tmp_path, monkeypatch):
         patch.setattr("app.videos.model_input._without_spoken_lines", lambda text, spoken, normalized_speech: text)
         full_size = model.input_characters("chapters", payload)
     assert compressed_size < full_size
-    model.settings.llm_input_text_limit = compressed_size
+    model.settings.llm_input_text_limit = compressed_size + model.repair_input_reserve
     assert coordinator.fits("chapters", payload)
     model.settings.llm_input_text_limit -= 1
     assert not coordinator.fits("chapters", payload)
