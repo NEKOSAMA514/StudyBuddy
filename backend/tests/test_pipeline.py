@@ -48,6 +48,7 @@ def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, 
 
     video, task_id, pipeline, recognizer = prepare(client, app, video_file)
     whole = "加入硝基苯试剂并充分搅拌，观察沉淀的转化"
+    sent_whole = "加入硝基苯试剂并充分搅拌,观察沉淀的转化"
     part = "观察沉淀的转化"
     full_box = (10, 10, 10 * len(whole) + 10, 30)
     part_box = (10 * whole.index(part) + 10, 10, full_box[2], 30)
@@ -66,7 +67,7 @@ def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, 
             sent = json.loads(self.messages(operation, payload)[-1]["content"])
             requests.append((operation, sent))
             if operation == "chapters":
-                issue = {"kind": "source_issue", "quote": whole, "reason": "需回看", "evidence_ids": ["F1"]}
+                issue = {"kind": "source_issue", "quote": sent_whole, "reason": "需回看", "evidence_ids": ["F1"]}
                 payload = {**payload, "chapters": [{**payload["chapters"][0], "issues": [issue]}]}
             return await super().generate(operation, payload, validate)
 
@@ -79,12 +80,12 @@ def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, 
     assert [payload["evidence"][1]["text"] for operation, payload in requests if operation == "outline"] == [
         f"{part}Grok", f"{part}Grok"]
     assert [payload["chapters"][0]["primary"] for operation, payload in requests if operation == "chapters"] == [
-        f"> [F1] {whole}\n> [F2] Grok", f"> [F1] {whole}\n> [F2] Grok"]
+        f"> [F1] {sent_whole}\n> [F2] Grok", f"> [F1] {sent_whole}\n> [F2] Grok"]
     exported = client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={new_task}&format=json').json()
     assert [frame["text"] for frame in exported["frames"]] == [whole, f"{part}\nGrok", whole]
     result = client.get(f"/api/v1/analyses/{new_task}").json()
     issue = result["source_issues"][0]
-    assert issue["quote"] == whole and issue["evidence_ids"] == [exported["frames"][0]["id"]]
+    assert issue["quote"] == sent_whole and issue["evidence_ids"] == [exported["frames"][0]["id"]]
     assert issue["start_seconds"] == issue["end_seconds"] == .25
 
 

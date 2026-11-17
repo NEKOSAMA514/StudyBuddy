@@ -385,6 +385,7 @@ class Pipeline:
                 try:
                     self.checkpoint(task_id)
                     async with self.model_factory(settings) as model:
+                        model.material_dir = folder / "note-materials" / task_id
                         model.diagnostics = self.diagnostics
                         model.activity = activity
                         model.check_stop = lambda: self.checkpoint(task_id)

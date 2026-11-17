@@ -7,7 +7,7 @@ from .model_input import evidence_request_text
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v16-reserve-repair-input"
+FLOW_VERSION = "video-flow-v17-ocr-symbols"
 
 
 def outline_overhead(model, video_title=""):

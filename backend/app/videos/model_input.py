@@ -4,6 +4,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 from itertools import accumulate
+from string import punctuation
 
 
 OCR_REPEAT_SECONDS = 2
@@ -13,6 +14,9 @@ SPEECH_BLOCK_SECONDS = 60
 MIN_OCR_TEXT_MATCH = 5
 NEGATIONS = "不没未无非别勿否"
 SIGNIFICANT_HAN = NEGATIONS + "正负〇零一二三四五六七八九十百千万亿两半"
+# 同一个标点或符号的全角变体逐个对应 ASCII。
+OCR_SYMBOLS = {ord(symbol) + 0xFEE0: symbol for symbol in punctuation}
+OCR_SENTENCE_END = re.compile(r"(?<=。)|(?<=[\u3400-\u9fff][!?])|(?<=[!?])(?=[\u3400-\u9fff])")
 
 
 def ocr_request_text(text):
@@ -23,16 +27,16 @@ def evidence_request_text(item):
     return ocr_request_text(item["text"]) if item.get("kind") == "frame" else item["text"]
 
 
-def find_original_quote(quote, sources):
+def quote_source_text(item):
+    text = evidence_request_text(item)
+    return text.translate(OCR_SYMBOLS) if item.get("kind") == "frame" else text
+
+
+def find_source_quote(quote, sources):
     for item in sources:
-        text = item["text"]
-        if quote in text:
-            return quote
-        start = evidence_request_text(item).find(quote)
-        if start >= 0:
-            # 发送时删去的换行在引用中还原，以便校验真实原文。
-            offsets = [index for index, char in enumerate(text) if char not in "\r\n"]
-            return text[offsets[start]:offsets[start + len(quote) - 1] + 1]
+        candidate = ocr_request_text(quote).translate(OCR_SYMBOLS) if item.get("kind") == "frame" else quote
+        if candidate and candidate in quote_source_text(item):
+            return candidate
     return None
 
 
@@ -101,17 +105,18 @@ def deduplicate_ocr(payload):
             if item["kind"] != "frame":
                 retained.append(item)
                 continue
-            identity = (item["id"], item["text"])
+            frame_text = item["text"].translate(OCR_SYMBOLS)
+            identity = (item["id"], frame_text)
             if key == "context" and identity in primary_frames:
                 continue
             if key != "context":
                 primary_frames.add(identity)
             start = item.get("start_seconds")
             gap = start - previous_time if start is not None and previous_time is not None else float("inf")
-            spoken = [record["text"] for record in overlapping.get(item["id"], [])]
+            spoken = [record["text"].translate(OCR_SYMBOLS) for record in overlapping.get(item["id"], [])]
             normalized_speech = [_normalized(text) for text in spoken]
             visible = []
-            for line in item["text"].splitlines(keepends=True):
+            for line in frame_text.splitlines(keepends=True):
                 text = line.strip()
                 if spoken and len(plain := _normalized(text)) >= 6:
                     # 数字和公式只作原文匹配，保留符号与小数点。
@@ -196,7 +201,7 @@ def _spoken_duplicate(raw, plain, spoken, normalized_speech):
     literal = _requires_literal_match(raw)
     if len(plain) < (12 if literal else MIN_OCR_TEXT_MATCH):
         return False
-    candidate = raw.rstrip("。！？") if literal else plain
+    candidate = re.sub(r"。+$|(?<=[\u3400-\u9fff])[!?]+$", "", raw) if literal else plain
     phrase = spoken if literal else normalized_speech
     prefix = r"(?<![\d.+−正负-])" if literal and (candidate[0].isdigit() or candidate[0] == ".") else ""
     suffix = r"(?![\d.+−%‰]|[,，:：-]\d)" if literal and (candidate[-1].isdigit() or candidate[-1] in ".,，:：") else ""
@@ -207,7 +212,7 @@ def _spoken_duplicate(raw, plain, spoken, normalized_speech):
 
 
 def _ocr_text_parts(text):
-    return [part for line in text.splitlines(keepends=True) for part in re.split(r"(?<=[。！？])", line) if part]
+    return [part for line in text.splitlines(keepends=True) for part in OCR_SENTENCE_END.split(line) if part]
 
 
 def _short_ocr_label(raw):
@@ -244,7 +249,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
     speech_texts = {}
     for block in speech_blocks:
         merged = " ".join(fragment["text"] for fragment in block["fragments"])
-        spoken = "".join(merged.split())
+        spoken = "".join(merged.split()).translate(OCR_SYMBOLS)
         speech_texts[block["fragments"][0]["id"]] = (spoken, _speech_comparison_text(spoken))
     previous_parts = {}
     available = {item["id"] for item in items} - seen_frames if clipped_lines else set()
@@ -254,7 +259,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
         seen_frames.add(item["id"])
         start, end = item.get("start_seconds"), item.get("end_seconds")
         timed = start is not None and end is not None
-        text = item["text"]
+        text = item["text"].translate(OCR_SYMBOLS)
         if clips := clipped_lines.get(item["id"]):
             # 前后完整读数必须同时在这一组材料中，跨章或仅在章前的读数不能替代。
             removed = {line for line, before, after in clips if before in available and after in available}
@@ -278,7 +283,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
                 if (len(_normalized(part)) < MIN_OCR_TEXT_MATCH
                         or _short_ocr_label("".join(part.split()))):
                     continue
-                # 画面之间用整行原文比较，数值或运算符不同的行会分别保留。
+                # 画面之间用统一符号后的整行比较，数值或运算符不同的行分别保留。
                 key = (block_id, part)
                 previous = previous_parts.get(key)
                 # 逐字出现的字幕会重复带上此前的整句，即使其间插入了名牌等画面。

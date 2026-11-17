@@ -17,6 +17,9 @@ from app.errors import AppError
 from .fakes import run_model, model_content
 
 
+MATERIAL_PUNCTUATION = str.maketrans("：，；", ":,;")
+
+
 def materials():
     common = "终点前：Ag+与SCN−形成白色沉淀，操作时应保持规定的酸度。\r\n"
     return [{"id": f"E{i + 1}", "kind": "frame", "start_seconds": i, "end_seconds": i,
@@ -48,10 +51,13 @@ def test_deduplication_preserves_speech_differences_and_independent_chapter_mate
             assert [item["id"] for item in chapter["primary"]] == ["S1", "E2", "E3"]
         records = chapters[0]["primary"] + chapters[0]["context"]
     assert next(item for item in records if item["id"] == "S1") == speech
-    assert {item["id"]: item["text"] for item in records if item["kind"] == "frame"} == {
+    expected = {
         "E2": evidence[1]["text"].rstrip(),
         "E3": evidence[2]["text"].splitlines()[-1],
         "E4": evidence[3]["text"].rstrip() if operation != "outline" else evidence[3]["text"].splitlines()[-1],
+    }
+    assert {item["id"]: item["text"] for item in records if item["kind"] == "frame"} == {
+        identifier: text.translate(MATERIAL_PUNCTUATION) for identifier, text in expected.items()
     }
     assert payload == before and deduplicate_ocr(payload) == compact
     assert len(json.dumps(compact, ensure_ascii=False).encode()) < len(json.dumps(payload, ensure_ascii=False).encode())
@@ -162,7 +168,7 @@ def test_duplicate_subtitle_is_removed_instead_of_encoded(operation):
     sent = json.loads(ModelClient(Settings()).messages(operation, payload)[-1]["content"])
     assert "ocr_texts" not in sent
     records = (sent["chapters"][0] if operation == "chapters" else sent.get("chapter", sent))["primary"]
-    table = "积分表：A 14；B 12"
+    table = "积分表:A 14;B 12"
     detail = "注意 Fe3+ 与 0.01mL。AgCl / AgC1。"
     if operation == "chapters":
         assert records.splitlines() == ["[New_S1]", f"> [F1] {table}{detail}", evidence[0]["text"]]
@@ -221,14 +227,20 @@ def test_caption_punctuation_is_ignored_but_formula_and_decimal_differences_rema
     speech = "第十回合地图中间刷出星星往后每二十回合刷一批。实验结果 Fe2+ 与 0.1mL。"
     evidence = [{"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 2, "text": speech},
                 {"id": "E1", "kind": "frame", "start_seconds": 1, "end_seconds": 1,
-                 "text": "第十回合，地图中间刷出星星，往后每二十回合刷一批\n实验结果 Fe3+ 与 0.01mL。"}]
+                 "text": "第十回合，地图中间刷出星星，往后每二十回合刷一批\n实验结果 Fe3＋ 与 0．01mL。\n实验结果 Fe2＋ 与 0．1mL。"}]
     assert deduplicate_ocr({"evidence": evidence})["evidence"] == [
         evidence[0], {**evidence[1], "text": "实验结果 Fe3+ 与 0.01mL。"}]
+    sent, _ = pack_chapter_material({"primary": evidence})
+    assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
+        "> [F1] 实验结果 Fe3+ 与 0.01mL。",
+    ]
 
 
 @pytest.mark.parametrize("operation", ["chapters", "extract"])
 def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, monkeypatch, operation):
-    model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
+    model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False,
+                                 summary_prompt="保留实验条件"))
+    model.material_dir = tmp_path / "materials"
     evidence = materials()
     coordinator = DetailedVideoGeneration("compressed", model, model.settings, tmp_path, evidence, 10,
                                  asyncio.Event(), lambda: None, lambda stage: None, {})
@@ -249,14 +261,17 @@ def test_actual_requests_budget_and_repair_use_deduplicated_material(tmp_path, m
     if operation != "chapters":
         assert requests[1][-2] == {"role": "assistant", "content": model_content({})}
     sent = json.loads(requests[0][-1]["content"])
+    saved = list(model.material_dir.glob("*.json"))
+    assert len(saved) == 1 and json.loads(saved[0].read_text("utf-8")) == sent
     sent_chapter = sent["chapters"][0] if operation == "chapters" else sent["chapter"]
     if operation == "chapters":
         frames = [coordinator.evidence[0]["text"].replace("\r", "").replace("\n", "")]
         frames.extend(row["text"].splitlines()[-1] for row in coordinator.evidence[1:3])
         assert sent_chapter == {
             "chapter_id": "C1",
-            "primary": "\n".join(f"> [F{index}] {text}" for index, text in enumerate(frames, 1)),
-            "context": coordinator.evidence[3]["text"].replace("\r", "").replace("\n", ""),
+            "primary": "\n".join(f"> [F{index}] {text.translate(MATERIAL_PUNCTUATION)}"
+                                 for index, text in enumerate(frames, 1)),
+            "context": coordinator.evidence[3]["text"].translate(MATERIAL_PUNCTUATION).replace("\r", "").replace("\n", ""),
         }
     else:
         expected = deduplicate_ocr(chapter)
@@ -290,6 +305,48 @@ def test_input_budget_uses_deduplicated_material_and_reserves_repair(tmp_path, m
 
 def timed_record(identifier, kind, start, end, text):
     return {"id": identifier, "kind": kind, "start_seconds": start, "end_seconds": end, "text": text}
+
+
+@pytest.mark.parametrize("operation", ["chapters", "extract", "concise"])
+def test_ocr_normalizes_symbols_before_deduplication_and_sending(operation):
+    original = "（提示）ＡｇＳＣＮ会吸附Ag＋，用１．５ｍＬ试剂处理AgCl。"
+    corrected = "(提示)ＡｇＳＣＮ会吸附Ag+,用１.５ｍＬ试剂处理AgCl。"
+    new_line = "观察溶液颜色的变化。"
+    different_term = corrected.replace("AgCl", "AgC1").replace("会吸附", "会及附")
+    changed_quantity = corrected.replace("１.５", "１５")
+    changed_charge = corrected.replace("Ag+", "Ag-")
+    records = [
+        timed_record(f"E{index}", "frame", index, index, text)
+        for index, text in enumerate((original, f"{corrected}\n{new_line}",
+                                      different_term, changed_quantity, changed_charge))
+    ]
+    before = deepcopy(records)
+    chapter = {"chapter_id": "C1", "primary": records, "context": []}
+    payload = ({"chapters": [chapter]} if operation == "chapters" else
+               {"chapter": chapter} if operation == "extract" else payload_for("视频", records, []))
+
+    sent = json.loads(ModelClient(Settings()).messages(operation, payload)[-1]["content"])
+    if operation == "chapters":
+        lines = [line.split("] ", 1)[1] for line in sent["chapters"][0]["primary"].splitlines()]
+    else:
+        lines = [row["text"] for row in sent.get("chapter", sent)["primary"]]
+    assert lines == [corrected, new_line, different_term, changed_quantity, changed_charge]
+    assert records == before
+
+
+def test_chapter_normalizes_sentence_marks_and_keeps_distinct_formulas():
+    exclamation = "仔细观察实验现象！继续翻到下一页。"
+    reread = exclamation.replace("！", "!")
+    formulas = ("取AgCl₂样品继续观察。", "取AgCl2样品继续观察。")
+    records = [timed_record(f"E{index}", "frame", index, index, text)
+               for index, text in enumerate((exclamation, reread, *formulas))]
+
+    sent, sources = pack_chapter_material({"primary": records})
+
+    assert sent["primary"].splitlines() == [
+        f"> [F1] {reread}", f"> [F2] {formulas[0]}", f"> [F3] {formulas[1]}",
+    ]
+    assert list(sources.values()) == [[records[0]], [records[2]], [records[3]]]
 
 
 def test_clipped_ocr_keeps_the_fragment_when_the_complete_line_is_in_another_chapter():
@@ -495,7 +552,8 @@ def test_chapter_deduplicates_identical_formula_lines_and_keeps_value_changes():
     sent, sources = pack_chapter_material({"primary": records})
 
     assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
-        f"> [F1] {formula}", "> [F2] 观察沉淀转化", f"> [F3] {changed}", f"> [F4] {formula}",
+        f"> [F1] {formula.replace('，', ',')}", "> [F2] 观察沉淀转化",
+        f"> [F3] {changed.replace('，', ',')}", f"> [F4] {formula.replace('，', ',')}",
     ]
     assert [sources[f"F{i}"] for i in range(1, 5)] == [[first], [clipped], [different], [later]]
     assert records == before
@@ -643,12 +701,13 @@ def test_outline_counts_every_record_with_flattened_ocr_during_repair(monkeypatc
 def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkpoints(tmp_path, monkeypatch, repair_quote):
     from app.videos.notes import notes_text, notes_markdown
     evidence = materials()
-    label = evidence[-1]["text"].splitlines()[-1]
-    raw_quote = "AgCl /\r\n AgC1"
+    label = "AgCl / AgC1;1-4mL;Fe3+;0;第4次。"
+    raw_quote = "AgCl ／\r\n AgC1"
     sent_quote = "AgCl / AgC1"
     evidence[-1]["text"] = evidence[-1]["text"].replace(sent_quote, raw_quote)
     before = deepcopy(evidence)
     model = ModelClient(Settings(llm_key="fake", free_tier_confirmed=True, llm_stream=False))
+    model.material_dir = tmp_path / "note-materials" / "roundtrip"
     coordinator = DetailedVideoGeneration("roundtrip", model, model.settings, tmp_path, evidence, 10,
                                  asyncio.Event(), lambda: None, lambda stage: None, {})
     requests = []
@@ -656,6 +715,7 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
         sent = json.loads(kwargs["json"]["messages"][-1]["content"])
         requests.append(sent)
         if "evidence" in sent:
+            assert "AgCl ／ AgC1" in sent["evidence"][-1]["text"]
             value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": "滴定", "core_question": "如何操作", "topics": ["反应与条件"],
                                    "start_anchor_id": "E1"}], "video_summary": "介绍滴定。"}
         elif "chapters" in sent:
@@ -663,7 +723,7 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
             quote = "错误引文" if repair_quote else sent_quote
             value = {"chapters": [{'chapter_id': 'C1', 'summary': '摘要', "markdown": '**实验条件**：1-4mL。', "issues": [{'kind': 'source_issue', 'quote': quote, 'reason': '字母不清', 'evidence_ids': ['F4']}]}]}
         elif "repairs" in sent:
-            assert sent["sources"][0]["text"] == evidence[-1]["text"].replace("\r", "").replace("\n", "")
+            assert sent_quote in sent["sources"][0]["text"] and "／" not in sent["sources"][0]["text"]
             value = {"repairs": [{"chapter_id": "C1", "block_index": 0, "quote": sent_quote}]}
         else:
             value = {"title": "滴定", "tags": [], "overview_paragraphs": ["实验内容。"]}
@@ -684,5 +744,7 @@ def test_ocr_deduplication_preserves_citation_time_exports_and_successful_checkp
     assert block["evidence_ids"] == ["E1", "E2", "E3", "E4"] and issue["evidence_ids"] == ["E4"]
     assert (block["start_seconds"], block["end_seconds"], block["timestamp_basis"]) == (0, 10, "frame")
     assert "start_seconds" not in issue
-    assert issue["quote"] == raw_quote
+    assert issue["quote"] == sent_quote
+    saved = list(model.material_dir.glob("chapters-*.json"))
+    assert len(saved) == 1 and json.loads(saved[0].read_text("utf-8")) == requests[1]
     assert "1-4mL" in notes_text("实验", 10, result) and "AgC1" in notes_markdown("实验", 10, result)

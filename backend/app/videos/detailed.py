@@ -13,7 +13,7 @@ from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
 from ..analysis.budgets import OUTPUT_TOKENS, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import find_original_quote, pack_chapter_material, split_chapter_context
+from .model_input import find_source_quote, pack_chapter_material, split_chapter_context
 from .segments import FLOW_VERSION, split_segments, preceding_context, outline_overhead
 from ..errors import AppError, TaskPaused
 
@@ -156,7 +156,7 @@ class DetailedVideoGeneration:
                             if originals is None:
                                 identifiers.append(identifier)
                                 continue
-                            matches = [item["id"] for item in originals if quote and quote in item["text"]]
+                            matches = [item["id"] for item in originals if quote and find_source_quote(quote, (item,))]
                             identifiers.extend(matches or (item["id"] for item in originals))
                         issue["evidence_ids"] = list(dict.fromkeys(identifiers))
         elif operation == "issue_quotes":
@@ -167,7 +167,7 @@ class DetailedVideoGeneration:
                 raise ValueError("issue_quote_repairs_must_match_request_order")
             sources = {i["id"]: i for i in payload["sources"]}
             for item, request in zip(repairs, expected):
-                quote = find_original_quote(item["quote"], (sources[i] for i in request["evidence_ids"]))
+                quote = find_source_quote(item["quote"], (sources[i] for i in request["evidence_ids"]))
                 if quote is None:
                     raise ValueError("issue_quote_must_be_original_text")
                 item["quote"] = quote
@@ -538,7 +538,7 @@ class DetailedVideoGeneration:
                 issues.append(issue)
                 quote = issue.get("quote")
                 if quote:
-                    issue["quote"] = find_original_quote(quote, (self.original[i] for i in ids))
+                    issue["quote"] = find_source_quote(quote, (self.original[i] for i in ids))
                     if issue["quote"] is None:
                         repairs.append({"chapter_id": chapter["chapter_id"], "block_index": len(issues) - 1,
                                         "quote": quote, "reason": issue["reason"], "evidence_ids": ids})
@@ -561,7 +561,7 @@ class DetailedVideoGeneration:
         cleaned, seen = [], set()
         for issue in issues:
             quote = issue.get("quote")
-            invalid = quote and not any(quote in self.original[i]["text"] for i in issue["evidence_ids"])
+            invalid = quote and find_source_quote(quote, (self.original[i] for i in issue["evidence_ids"])) is None
             if invalid or not quote:
                 if not issue["critical"]:
                     continue

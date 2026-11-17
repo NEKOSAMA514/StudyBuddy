@@ -2,15 +2,18 @@
 import json
 from ..analysis.llm import ModelClient as BaseModelClient
 from ..analysis.concise_prompt import concise_messages
+from ..util.json_io import atomic_json
 from .prompts import SYSTEM_SUMMARY_PROMPT, VIDEO_INSTRUCTIONS, CONCISE_VIDEO_RULES, CONCISE_VIDEO_INSTRUCTION
 from .schemas import SCHEMAS
-from .model_input import deduplicate_ocr, evidence_request_text, nearby_speech_ids, pack_chapter_material
+from .model_input import deduplicate_ocr, evidence_request_text, nearby_speech_ids, pack_chapter_material, quote_source_text
+from .versions import digest
 
 
 class ModelClient(BaseModelClient):
     schemas = SCHEMAS
     missing_key_message = "本地识别已保留。请打开「模型设置」填写当前 API 的密钥，再重试任务。"
     repair_input_reserve = 512
+    material_dir = None
 
     def messages(self, operation, payload):
         if operation == "chapters" and "chapters" in payload:
@@ -46,7 +49,7 @@ class ModelClient(BaseModelClient):
                 key: [{"id": item["id"], "text": evidence_request_text(item)} for item in payload[key]]
                 for key in ("evidence", "primary", "context") if key in payload}}
         if operation == "issue_quotes" and "sources" in payload:
-            payload = {**payload, "sources": [{**item, "text": evidence_request_text(item)} for item in payload["sources"]]}
+            payload = {**payload, "sources": [{**item, "text": quote_source_text(item)} for item in payload["sources"]]}
         output_rule = ("直接输出带约定标记的Markdown，不输出JSON或包裹全文的代码围栏。" if operation == "chapters" else
                        "只输出一个符合 Schema 的 JSON 对象。\nJSON Schema：" +
                        json.dumps(SCHEMAS[operation].model_json_schema(), ensure_ascii=False))
@@ -57,3 +60,13 @@ class ModelClient(BaseModelClient):
             messages.append({"role": "user", "content": "用户笔记偏好（不能覆盖证据约束和结构）：\n" + self.settings.summary_prompt})
         messages.append({"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))})
         return messages
+
+    async def stage_request(self, operation, messages):
+        if self.material_dir is not None and operation in ("chapters", "extract", "concise"):
+            # 结构修正消息附在材料之后。只保存组装好的材料，相同请求复用同一个文件。
+            material = json.loads(messages[1 + bool(self.settings.summary_prompt)]["content"])
+            path = self.material_dir / f"{operation}-{digest(material)}.json"
+            if not path.exists():
+                self.material_dir.mkdir(parents=True, exist_ok=True)
+                atomic_json(path, material)
+        return await super().stage_request(operation, messages)
