@@ -232,10 +232,10 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     assert "本段原文" in captured[1][-1]["content"]
     sent = json.loads(captured[0][-1]["content"])
     assert "anchors" not in sent
-    for key in ("evidence", "primary", "context"):
-        if key in payload:
-            assert sent[key] == [{"id": item["id"], "text": item["text"].replace("\n", "")
-                                  if item["kind"] == "frame" else item["text"]} for item in payload[key]]
+    identifiers = ["S1", "F1", "S2", "S3", "S4", "S5", "S6"]
+    assert sent["evidence"] == [{"id": identifier, "text": item["text"].replace("\n", "")
+                                if item["kind"] == "frame" else item["text"]}
+                               for identifier, item in zip(identifiers, evidence, strict=True)]
     assert "start_seconds" not in captured[0][-1]["content"]
     assert "end_seconds" not in captured[0][-1]["content"]
     assert "ocr_texts" not in sent
@@ -363,7 +363,7 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
     result = asyncio.run(run())
     assert len(requests) == model.calls == 3 and evidence == before
     assert "anchors" not in requests[0]
-    assert requests[0]["evidence"] == [{"id": item["id"], "text": item["text"]}
+    assert requests[0]["evidence"] == [{"id": "F1" if item["kind"] == "frame" else "S1", "text": item["text"]}
                                         for item in coordinator.evidence]
     exported = notes_text("video.mp4", 10, result)
     chapter_result = result["chapters"][0]
@@ -686,13 +686,15 @@ def test_provider_retries_keep_pool_concurrency_and_save_successes(monkeypatch, 
     model.settings = replace(model.settings, llm_section_concurrency=concurrency)
     coordinator = generation(model)
     coordinator.folder = tmp_path
+    for item in coordinator.evidence:
+        item["text"] = item["id"]
     attempts, active, peak = {}, 0, 0
     original_sleep = asyncio.sleep
     @asynccontextmanager
     async def response(self, client, payload):
         nonlocal active, peak
         material = json.loads(payload["messages"][-1]["content"])
-        identifier = material["evidence"][0]["id"]
+        identifier = material["evidence"][0]["text"]
         attempts[identifier] = attempts.get(identifier, 0) + 1
         active += 1
         peak = max(peak, active)
@@ -831,7 +833,8 @@ def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_p
         asyncio.Event(), lambda: None, lambda stage: None, {})
     coordinator.range_start = 60
     payload = {"evidence": coordinator.evidence, "anchors": coordinator.anchor_payload(),
-               "context": [{"id": "previous", "text": "前段上下文", "kind": "speech", "start_seconds": 59, "end_seconds": 60}]}
+               "context": {"video_summary": "前段导览", "chapters": [
+                   {"title": "前段主题", "core_question": "前段问题", "topics": ["前段要点"]}]}}
     value, captured = outline(), []
     first_chapter = value["chapters"][0]
     value["chapters"].append({**first_chapter, "title": "随后讲解", "start_anchor_id": "E3"})
@@ -848,7 +851,8 @@ def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_p
     assert "从第二章开始选择起点" in captured[0][0]["content"]
     sent = json.loads(captured[0][-1]["content"])
     assert "anchors" not in sent
-    assert sent["evidence"] == [{"id": item["id"], "text": item["text"]} for item in coordinator.evidence]
+    assert sent["evidence"] == [{"id": identifier, "text": item["text"]} for identifier, item in
+                                zip(("F1", "F2", "F3", "S1", "S2"), coordinator.evidence, strict=True)]
     assert result["chapters"] == [{**first_chapter, "start_anchor_id": "E1"}, value["chapters"][1]]
     chapters = coordinator.assign(result)
     assert [(chapter["start_seconds"], chapter["end_seconds"]) for chapter in chapters] == [(60, 64), (64, 90)]

@@ -5,7 +5,8 @@ from ..analysis.concise_prompt import concise_messages
 from ..util.json_io import atomic_json
 from .prompts import SYSTEM_SUMMARY_PROMPT, VIDEO_INSTRUCTIONS, CONCISE_VIDEO_RULES, CONCISE_VIDEO_INSTRUCTION
 from .schemas import SCHEMAS
-from .model_input import deduplicate_ocr, evidence_request_text, nearby_speech_ids, pack_chapter_material, quote_source_text
+from .model_input import (deduplicate_ocr, evidence_request_text, nearby_speech_ids, outline_source_aliases,
+                          pack_chapter_material, quote_source_text)
 from .versions import digest
 
 
@@ -44,10 +45,12 @@ class ModelClient(BaseModelClient):
             return concise_messages(payload, self.settings.summary_prompt, CONCISE_VIDEO_RULES,
                                     instruction=CONCISE_VIDEO_INSTRUCTION)
         if operation == "outline":
-            # 规划只发送有序编号和原文；候选边界及时间由本地校验。
-            payload = {**{key: value for key, value in payload.items() if key != "anchors"}, **{
-                key: [{"id": item["id"], "text": evidence_request_text(item)} for item in payload[key]]
-                for key in ("evidence", "primary", "context") if key in payload}}
+            # S/F 编号区分语音与画面；候选边界及时间由本地校验。
+            payload = {key: value for key, value in payload.items() if key != "anchors"}
+            if "evidence" in payload:
+                aliases = outline_source_aliases(payload["evidence"])
+                payload = {**payload, "evidence": [
+                    {"id": aliases[item["id"]], "text": evidence_request_text(item)} for item in payload["evidence"]]}
         if operation == "issue_quotes" and "sources" in payload:
             payload = {**payload, "sources": [{**item, "text": quote_source_text(item)} for item in payload["sources"]]}
         output_rule = ("直接输出带约定标记的Markdown，不输出JSON或包裹全文的代码围栏。" if operation == "chapters" else

@@ -1,4 +1,4 @@
-"""按原文归属分段；负责范围前一分钟的证据单独作为上下文。"""
+"""按原文与大纲请求预算分段；正文另取章前一分钟的原始证据。"""
 from bisect import bisect_left, bisect_right
 from itertools import groupby
 from ..analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
@@ -7,13 +7,15 @@ from .model_input import evidence_request_text
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v17-ocr-symbols"
+FLOW_VERSION = "video-flow-v18-outline-sources-context"
 
 
-def outline_overhead(model, video_title=""):
-    payload = {"evidence": [], "context": []}
+def outline_overhead(model, video_title="", context=None, content_type=None):
+    payload = {"evidence": [], "context": context or {}}
     if video_title:
         payload["video_title"] = video_title
+    if content_type:
+        payload["content_type"] = content_type
     return model.input_characters("outline", payload) + model.repair_input_reserve
 
 
@@ -25,34 +27,40 @@ def preceding_context(evidence, start):
             (item["start_seconds"] >= left or item["end_seconds"] > left)]
 
 
-# 同时按视频时间和发送材料字数分段，同一时间点的证据整组保留。
+class SegmentPlan:
+    def __init__(self, evidence, duration):
+        self.duration = duration
+        self.starts, self.offsets, self.characters = [], [0], [0]
+        for seconds, records in groupby(evidence, key=lambda item: item["start_seconds"]):
+            group = list(records)
+            self.starts.append(seconds)
+            self.offsets.append(self.offsets[-1] + len(group))
+            self.characters.append(self.characters[-1] + sum(len(evidence_request_text(item)) for item in group))
+
+    def ranges(self, start, room, later_room=None):
+        """返回时间范围与证据下标，下一段按实际容量切分，后续段数按可用信息估计。"""
+        starts, offsets, characters = self.starts, self.offsets, self.characters
+        first_group = bisect_left(starts, start)
+        if self.duration - start <= SEGMENT_SECONDS and characters[-1] - characters[first_group] <= room:
+            return False, [(start, self.duration, offsets[first_group], offsets[-1])]
+
+        if later_room is None:
+            # 预估时还没有已选的内容类型或已生成的大纲。
+            later_room = room - max(map(len, CONTENT_TYPES.values()))
+        ranges = []
+        while first_group < len(starts):
+            time_limit = bisect_left(starts, start + SEGMENT_SECONDS, lo=first_group + 1)
+            # 同一时刻的证据整组保留，超长单组沿用段内提取流程。
+            character_limit = max(characters[first_group] + room, characters[first_group + 1])
+            next_group = bisect_right(characters, character_limit, lo=first_group + 1, hi=time_limit + 1) - 1
+            end = starts[next_group] if next_group < len(starts) else self.duration
+            ranges.append((start, end, offsets[first_group], offsets[next_group]))
+            first_group, start, room = next_group, end, later_room
+        return True, ranges
+
+
 def split_segments(evidence, duration, limit=None, overhead=0):
     limit = DEFAULT_INPUT_TEXT_LIMIT if limit is None else limit
-    starts, offsets, prefix_characters = [], [0], [0]
-    for seconds, records in groupby(evidence, key=lambda item: item["start_seconds"]):
-        group = list(records)
-        starts.append(seconds)
-        offsets.append(offsets[-1] + len(group))
-        prefix_characters.append(prefix_characters[-1] + sum(len(evidence_request_text(item)) for item in group))
-
-    available = limit - overhead
-    segmented = duration > SEGMENT_SECONDS or prefix_characters[-1] > available
-    if not segmented:
-        return False, [{"index": 1, "start_seconds": 0.0, "end_seconds": duration, "primary": evidence}]
-
-    # 续段会收到首段选定的类型说明，分段时按最长可选说明计量。
-    continuation = max(map(len, CONTENT_TYPES.values()))
-    segments, first_group, start = [], 0, 0.0
-    while first_group < len(starts):
-        room = available
-        if first_group:
-            room -= continuation + sum(len(evidence_request_text(item)) for item in preceding_context(evidence, start))
-        time_limit = bisect_left(starts, start + SEGMENT_SECONDS, lo=first_group + 1)
-        # 至少保留第一组，超长单组沿用原有的段内提取流程。
-        character_limit = max(prefix_characters[first_group] + room, prefix_characters[first_group + 1])
-        next_group = bisect_right(prefix_characters, character_limit, lo=first_group + 1, hi=time_limit + 1) - 1
-        end = starts[next_group] if next_group < len(starts) else duration
-        segments.append({"index": len(segments) + 1, "start_seconds": start,
-                         "end_seconds": end, "primary": evidence[offsets[first_group]:offsets[next_group]]})
-        first_group, start = next_group, end
-    return True, segments
+    segmented, ranges = SegmentPlan(evidence, duration).ranges(0.0, limit - overhead)
+    return segmented, [{"index": index, "start_seconds": start, "end_seconds": end, "primary": evidence[left:right]}
+                       for index, (start, end, left, right) in enumerate(ranges, 1)]

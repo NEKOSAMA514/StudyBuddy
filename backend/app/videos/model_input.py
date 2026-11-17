@@ -27,6 +27,16 @@ def evidence_request_text(item):
     return ocr_request_text(item["text"]) if item.get("kind") == "frame" else item["text"]
 
 
+def outline_source_aliases(records):
+    """为当前大纲请求分配来源编号，保留本地证据编号的映射。"""
+    counts, aliases = Counter(), {}
+    for item in records:
+        prefix = "F" if item.get("kind") == "frame" else "S"
+        counts[prefix] += 1
+        aliases[item["id"]] = f"{prefix}{counts[prefix]}"
+    return aliases
+
+
 def quote_source_text(item):
     text = evidence_request_text(item)
     return text.translate(OCR_SYMBOLS) if item.get("kind") == "frame" else text

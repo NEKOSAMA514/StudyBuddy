@@ -66,7 +66,7 @@ def clock(monkeypatch):
 
 def coordinator(model, folder):
     evidence = [{"id": f"real-{i}", "kind": "speech", "start_seconds": i,
-                 "end_seconds": i + 1, "text": "原始知识"} for i in range(7)]
+                 "end_seconds": i + 1, "text": f"E{i + 1}"} for i in range(7)]
     return DetailedVideoGeneration("paced", model, model.settings, folder, evidence, 10,
                           asyncio.Event(), lambda: None, lambda stage: None, {})
 
@@ -129,7 +129,7 @@ def test_new_jobs_and_retries_share_spacing_slots_checkpoints_and_usage(monkeypa
     @asynccontextmanager
     async def response(self, client, payload):
         nonlocal active, peak
-        identifier = json.loads(payload["messages"][-1]["content"])["evidence"][0]["id"]
+        identifier = json.loads(payload["messages"][-1]["content"])["evidence"][0]["text"]
         attempts[identifier] = attempts.get(identifier, 0) + 1
         sends.append((identifier, clock.now))
         active += 1
@@ -236,7 +236,7 @@ def test_stop_cancels_send_wait_retry_wait_and_http_without_losing_success(monke
 
     @asynccontextmanager
     async def response(self, client, payload):
-        identifier = json.loads(payload["messages"][-1]["content"])["evidence"][0]["id"]
+        identifier = json.loads(payload["messages"][-1]["content"])["evidence"][0]["text"]
         try:
             if identifier == "E1":
                 yield httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(outline_result(identifier))}}],

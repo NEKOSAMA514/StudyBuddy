@@ -669,7 +669,8 @@ def test_outline_counts_every_record_with_flattened_ocr_during_repair(monkeypatc
     evidence.append({"id": "S1", "kind": "speech", "start_seconds": 0, "end_seconds": 1,
                      "text": "对比 Fe2+、Fe3+，\n注意 0.1 与 0.01 的区别。"})
     payload = {"anchors": [{"id": "S1", "start_seconds": 0}], "evidence": evidence,
-               "context": [evidence[0]]}
+               "context": {"video_summary": "前段概述", "chapters": [
+                   {"title": "前段主题", "core_question": "前段问题", "topics": ["前段要点"]}]}}
     before = deepcopy(payload)
     good = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": "滴定", "core_question": "如何操作", "topics": ["反应与条件"],
                            "start_anchor_id": "S1"}], "video_summary": "介绍滴定。"}
@@ -685,15 +686,13 @@ def test_outline_counts_every_record_with_flattened_ocr_during_repair(monkeypatc
     sent = json.loads(requests[0][-1]["content"])
     assert "ocr_texts" not in sent
     assert "anchors" not in sent
-    assert sent == {
-        key: [{"id": item["id"], "text": item["text"].replace("\r", "").replace("\n", "")
-               if item["kind"] == "frame" else item["text"]} for item in payload[key]]
-        for key in ("evidence", "context")
-    }
-    overhead = model.input_characters("outline", {"evidence": [], "context": []})
+    assert sent == {"context": payload["context"], "evidence": [
+        {"id": identifier, "text": item["text"].replace("\r", "").replace("\n", "")
+         if item["kind"] == "frame" else item["text"]}
+        for identifier, item in zip(("F1", "F2", "F3", "F4", "S1"), evidence, strict=True)]}
+    overhead = model.input_characters("outline", {"evidence": [], "context": payload["context"]})
     assert model.input_characters("outline", payload) == message_characters(requests[0])
-    assert message_characters(requests[0]) == overhead + sum(
-        len(item["text"]) for key in ("evidence", "context") for item in sent[key])
+    assert message_characters(requests[0]) == overhead + sum(len(item["text"]) for item in sent["evidence"])
     assert payload == before
 
 

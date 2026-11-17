@@ -92,7 +92,7 @@ def test_unique_ocr_still_counts_towards_segment_budget():
     assert [item for part in parts for item in part["primary"]] == evidence
 
 
-def test_segment_cut_counts_repeated_context_and_content_type():
+def test_segment_estimate_counts_content_type_without_raw_minute_context():
     repeated = "画面原文\r\n" * 30
     evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
                  "end_seconds": seconds, "text": text}
@@ -105,10 +105,10 @@ def test_segment_cut_counts_repeated_context_and_content_type():
     limit = overhead + len(longest_type) + 3 * len("画面原文" * 30)
     segmented, parts = split_segments(evidence, 1800, limit, overhead)
     assert segmented and [[item["id"] for item in part["primary"]] for part in parts] == [
-        ["frame0", "frame1", "frame2"], ["frame3"], ["frame4"]]
-    payload = {"evidence": parts[1]["primary"], "context": evidence[1:3],
+        ["frame0", "frame1", "frame2"], ["frame3", "frame4"]]
+    payload = {"evidence": parts[1]["primary"], "context": {},
                "video_title": title, "content_type": longest_type}
-    assert model.input_characters("outline", payload) + model.repair_input_reserve == limit
+    assert model.input_characters("outline", payload) + model.repair_input_reserve <= limit
 
 
 def test_same_time_records_stay_together_and_silence_has_no_empty_request():
@@ -120,7 +120,7 @@ def test_same_time_records_stay_together_and_silence_has_no_empty_request():
     assert [(part["start_seconds"], part["end_seconds"]) for part in parts] == [(0, 3000), (3000, 7200)]
 
 
-def test_dense_material_reserves_actual_preceding_minute_context(small_outline_budget):
+def test_dense_material_estimates_outline_without_raw_minute_context(small_outline_budget):
     evidence = [{**sources(1)[0], "id": f"s{i}", "text": "原" * size,
                  "start_seconds": i * 100, "end_seconds": i * 100 + 1}
                 for i, size in enumerate([5000, 5000, 5000, 10000, 3000, 1000])]
@@ -132,7 +132,7 @@ def test_dense_material_reserves_actual_preceding_minute_context(small_outline_b
     model = FakeModel(Settings())
     _, parts = split_segments(dense, 600, 15000, outline_overhead(model))
     for part in parts:
-        payload = {"evidence": part["primary"], "context": preceding_context(dense, part["start_seconds"])}
+        payload = {"evidence": part["primary"], "context": {}}
         assert model.input_characters("outline", payload) + model.repair_input_reserve <= 15000 or len(part["primary"]) == 1
     assert [item for part in parts for item in part["primary"]] == dense
 
@@ -197,9 +197,11 @@ def test_minute_context_and_previous_outline_cross_segments_without_owning_old_e
     outline = [p for op, p in model.inputs if op == "outline"][1]
     chapter = [p["chapters"][0] for op, p in model.inputs if op == "chapters"][1]
     assert [item["id"] for item in outline["evidence"]] == ["E5"]
-    assert [item["id"] for item in outline["context"]] == ["E3", "E4"]
+    assert outline["context"] == {"video_summary": "视频介绍 TCP 慢启动与拥塞窗口增长。", "chapters": [
+        {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}]}
     assert [item["id"] for item in outline["anchors"]] == ["E5"]
-    assert chapter["primary"] == outline["evidence"] and chapter["context"] == outline["context"]
+    assert chapter["primary"] == outline["evidence"]
+    assert [item["id"] for item in chapter["context"]] == ["E3", "E4"]
     assert chapter["previous_chapter_outline"] == {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}
     assert result["chapters"][1]["evidence_ids"] == ["s4"]
     assert len(snapshots) == 2 and evidence == before
@@ -285,7 +287,8 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
     for op, payload in model.inputs[2:-1]:
         assert "previous_context" not in payload
         if op == "outline":
-            assert payload["context"] == []
+            assert payload["context"] == {"video_summary": "视频介绍 TCP 慢启动与拥塞窗口增长。", "chapters": [
+                {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}]}
             assert set(i["id"] for i in payload["anchors"]) <= set(i["id"] for i in payload["evidence"])
             assert coordinator.model.input_characters(op, payload) <= 15000
         else:

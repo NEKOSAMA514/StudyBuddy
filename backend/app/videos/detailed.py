@@ -13,8 +13,8 @@ from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
 from ..analysis.budgets import OUTPUT_TOKENS, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import find_source_quote, pack_chapter_material, split_chapter_context
-from .segments import FLOW_VERSION, split_segments, preceding_context, outline_overhead
+from .model_input import find_source_quote, outline_source_aliases, pack_chapter_material, split_chapter_context
+from .segments import FLOW_VERSION, SegmentPlan, preceding_context, outline_overhead
 from ..errors import AppError, TaskPaused
 
 logger = logging.getLogger("studybuddy")
@@ -33,6 +33,7 @@ class DetailedVideoGeneration:
         self.outline_ready = outline_ready
         self.range_start, self.range_end, self.chapter_offset = 0.0, duration, 0
         self.boundary, self.previous_chapter_outline = [], {}
+        self.previous_segment_outline = {}
         self.phase_update = lambda phase: None
         self.outline_digest = None
         ordered = sorted(evidence, key=lambda e: (e["start_seconds"], e["end_seconds"], e["id"]))
@@ -131,6 +132,10 @@ class DetailedVideoGeneration:
                 raise ValueError("content_type_must_match_planned_video_type")
             anchors = payload["anchors"]
             chapters = value["chapters"]
+            aliases = {alias: original for original, alias in outline_source_aliases(payload.get("evidence", [])).items()}
+            for chapter in chapters:
+                identifier = chapter["start_anchor_id"]
+                chapter["start_anchor_id"] = aliases.get(identifier, identifier)
             chapters[0]["start_anchor_id"] = anchors[0]["id"]
             times = {item["id"]: item["start_seconds"] for item in anchors}
             ids = [item["start_anchor_id"] for item in chapters]
@@ -349,7 +354,7 @@ class DetailedVideoGeneration:
     async def planning(self):
         evidence = self.evidence
         self.prepared = None
-        payload = {"anchors": self.anchor_payload(), "evidence": evidence, "context": self.boundary}
+        payload = {"anchors": self.anchor_payload(), "evidence": evidence, "context": self.previous_segment_outline}
         if not self.fits("outline", payload):
             # 不能再按证据记录分段时，在段内提取；原文及独立上下文仍完整保留。
             chapter = {"chapter_id": f"C{self.chapter_offset + 1}", "title": "当前片段",
@@ -625,38 +630,57 @@ class DetailedVideoGeneration:
         self.content_type = None
         all_evidence, base = self.all_evidence, self.base_common
         self.common = base
-        overhead = outline_overhead(self.model, self.video_title)
-        segmented, segments = split_segments(all_evidence, self.duration, self.settings.llm_input_text_limit, overhead)
-        logger.info("task=%s source_characters=%s segments=%s",
-                    base["task_id"], sum(len(item["text"]) for item in all_evidence), len(segments))
-        manifest = [{**{key: segment[key] for key in ("index", "start_seconds", "end_seconds")},
-                     "evidence_ids": [item["id"] for item in segment["primary"]]} for segment in segments]
-        manifest_path = self.path("segments", manifest)
-        if manifest_path.exists():
-            if json.loads(manifest_path.read_text(encoding="utf-8")) != manifest:
-                raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
-        else:
-            atomic_json(manifest_path, manifest)
+        manifest_path = self.path("segments", {"end_seconds": self.duration,
+                                              "evidence_ids": [item["id"] for item in all_evidence]})
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
+        plan = SegmentPlan(all_evidence, self.duration)
+        limit = self.settings.llm_input_text_limit
+        base_overhead = outline_overhead(self.model, self.video_title)
         generation_key = digest(base)
         records, body, issues = [], [], []
         self.previous_chapter_outline = {}
+        self.previous_segment_outline = {}
+        next_start = 0.0
+        segmented, total = False, 1
         guides = []
 
         def progress(segment, completed, phase):
             if segmented:
                 self.segment_update({"generation_key": generation_key, "current": segment["index"],
-                    "completed": completed, "total": len(segments), "start_seconds": segment["start_seconds"],
+                    "completed": completed, "total": total, "start_seconds": segment["start_seconds"],
                     "end_seconds": segment["end_seconds"], "phase": phase})
 
-        for segment, description in zip(segments, manifest):
+        while next_start < self.duration:
             self.check()
+            # 上一段返回后，按完整大纲的实际长度选择下一段；后续段数仅作估计。
+            overhead, later_room = base_overhead, None
+            if records:
+                overhead = outline_overhead(self.model, self.video_title, self.previous_segment_outline, self.content_type)
+                if overhead >= limit:
+                    raise AppError("model_input_budget", "上一段大纲占满输入空间，请提高生成输入上限后重新生成笔记。")
+                later_room = limit - base_overhead - len(self.content_type)
+            split, pending = plan.ranges(next_start, limit - overhead, later_room)
+            segmented = segmented or split
+            total = len(records) + len(pending)
+            if not records:
+                logger.info("task=%s source_characters=%s segments=%s",
+                            base["task_id"], sum(len(item["text"]) for item in all_evidence), total)
+            start, end, left, right = pending[0]
+            self.evidence = all_evidence[left:right]
+            segment = {"index": len(records) + 1, "start_seconds": start, "end_seconds": end}
+            description = {**segment, "evidence_ids": [item["id"] for item in self.evidence]}
+            if len(records) < len(manifest):
+                if manifest[len(records)] != description:
+                    raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
+            else:
+                manifest.append(description)
+                atomic_json(manifest_path, manifest)
             self.range_start, self.range_end = segment["start_seconds"], segment["end_seconds"]
             self.chapter_offset = len(body)
-            self.evidence = segment["primary"]
             self.anchors = self.evidence
             self.boundary = preceding_context(all_evidence, self.range_start)
             self.common = {**base, "segment": description, "context": digest(self.boundary),
-                           "previous_outline": digest(self.previous_chapter_outline)}
+                           "previous_outline": digest(self.previous_segment_outline)}
             self.outline_digest = None
             cache = self.path("segment", description)
             self.phase_update = lambda phase, s=segment: progress(s, s["index"] - 1, phase)
@@ -685,8 +709,12 @@ class DetailedVideoGeneration:
             records.append(record)
             body.extend(record["chapters"])
             issues.extend(record["source_issues"])
-            self.previous_chapter_outline = {key: value for key, value in record["outline"]["chapters"][-1].items()
-                                             if key in {"title", "core_question", "topics"}}
+            self.previous_segment_outline = {
+                "video_summary": record["outline"]["video_summary"],
+                "chapters": [{key: chapter[key] for key in ("title", "core_question", "topics")}
+                             for chapter in record["outline"]["chapters"]],
+            }
+            self.previous_chapter_outline = self.previous_segment_outline["chapters"][-1]
             if segmented:
                 guides.append({"index": segment["index"], "start_seconds": self.range_start,
                                "end_seconds": self.range_end, "first_chapter_id": record["chapters"][0]["chapter_id"],
@@ -695,13 +723,16 @@ class DetailedVideoGeneration:
             self.publish({"format_version": FORMAT_VERSION, "note_style": "detailed", "content_type": self.content_type, "title": "", "tags": [], "overview_paragraphs": [],
                           "chapters": list(body), "segment_guides": list(guides), "source_issues": list(issues), "complete": False,
                           "covered_until_seconds": self.range_end, "completed_segments": segment["index"],
-                          "total_segments": len(segments), "generation_key": generation_key,
+                          "total_segments": total, "generation_key": generation_key,
                           "evidence_ids": list(dict.fromkeys(i for chapter in body for i in chapter["evidence_ids"]))})
+            next_start = self.range_end
+        if len(manifest) != len(records):
+            raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
         self.check()
         self.common, self.evidence = base, all_evidence
         self.boundary = []
         self.outline_digest = digest([record["outline"] for record in records])
-        progress(segments[-1], len(segments), "overview")
+        progress(segment, len(records), "overview")
         self.update("finalizing")
         tick = time.monotonic()
         try:
@@ -710,5 +741,5 @@ class DetailedVideoGeneration:
             self.timings["finalizing"] = round(time.monotonic() - tick, 3)
         return {"format_version": FORMAT_VERSION, "note_style": "detailed", "content_type": self.content_type, **metadata, "chapters": body, "source_issues": issues,
                 "segment_guides": guides,
-                "complete": True, "covered_until_seconds": self.duration, "completed_segments": len(segments),
-                "total_segments": len(segments), "generation_key": generation_key}
+                "complete": True, "covered_until_seconds": self.duration, "completed_segments": len(records),
+                "total_segments": len(records), "generation_key": generation_key}

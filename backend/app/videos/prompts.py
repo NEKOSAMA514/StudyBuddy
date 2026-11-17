@@ -30,8 +30,9 @@ outline = """规划当前片段的章节，返回chapters、主题导览video_su
 3. 每章title概括主题，core_question明确本章要回答的问题，topics只列关键子主题短语。各章分工清楚，避免重复或过细拆分
 4. 大纲简短、具体，只做导航，不提前展开结论、数据、案例经过或引文；正文阶段会读取原始证据
 5. 本段首章的start_anchor_id由程序填写，可省略。从第二章开始选择起点，start_anchor_id必须使用本段evidence中对应主题实际开始处的编号，各章起点时间严格递增
-6. evidence是当前负责的原文；context是此前一分钟的原始证据，只辅助理解，不作为章节起点或独立展开的材料。只规划当前evidence的新增内容，承接前文而不重复，保留新增条件、例外和不同观点
-7. 最后依据chapters的title、core_question和topics，用简短的video_summary概括当前片段的核心议题、讲解目的及主线关系，体现主次，不逐章复述或展开细节"""
+6. evidence按原片顺序排列，S开头的编号代表语音转录（speech），F开头的编号代表画面文字（frame），两类各自编号，不能按数字大小重排。依据讲解目标实际转变划章；
+7. context是上一段的完整大纲，包含video_summary及各章title、core_question、topics，首段为空。用它判断已讲内容与当前新增内容，只为当前evidence选择章节起点。跨段继续同一问题时承接其新增解释、条件、例外和不同观点，不重新介绍前段内容，不因请求分段就当作新主题
+8. 最后依据chapters的title、core_question和topics，用简短的video_summary概括当前片段的核心议题、讲解目的及主线关系，体现主次，不逐章复述或展开细节"""
 
 
 # 超长章节的信息提取
