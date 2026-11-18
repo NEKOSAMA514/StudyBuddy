@@ -43,7 +43,7 @@ def test_outline_speech_and_frame_ids_restore_boundaries_after_repair(tmp_path, 
     sent = json.loads(captured[0][-1]["content"])
     assert sent["evidence"] == [
         {"id": "F1", "text": "标题"}, {"id": "S1", "text": "语音原文"},
-        {"id": "F2", "text": "新画面第二行"}, {"id": "S2", "text": "下一个问题"}]
+        {"id": "F2", "text": "新画面 第二行"}, {"id": "S2", "text": "下一个问题"}]
     assert "anchors" not in sent and "start_seconds" not in captured[0][-1]["content"]
     assert [chapter["start_anchor_id"] for chapter in result["chapters"]] == ["E1", "E3", "E4"]
     assert coordinator.validate("outline", payload, result) == result

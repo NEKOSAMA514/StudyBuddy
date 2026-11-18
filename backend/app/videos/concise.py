@@ -78,7 +78,7 @@ class ConciseVideoGeneration:
         self.duration, self.timings, self.publish, self.title = duration, timings, publish, video_title
         self.build = lambda primary, context: payload_for(video_title, primary, context)
         self.key = digest({"source": self.sources, "title": video_title, "style": "concise", "prompt": PROMPT_VERSION,
-            "input_format": "id-kind-text-nearby-speech-v2",
+            "input_format": "id-kind-text-nearby-speech-v3",
             "model": settings.llm_model, "base": settings.llm_base_url, "profile": settings.llm_profile_id,
             "provider": settings.llm_provider, "stream": settings.llm_stream, "json": settings.llm_json_mode,
             "summary_prompt": settings.summary_prompt, "input_limit": settings.llm_input_text_limit,

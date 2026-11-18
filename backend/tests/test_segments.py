@@ -52,7 +52,7 @@ def test_segment_trigger_boundaries(seconds, characters, segmented):
     evidence = sources(2)
     evidence[1].update(kind="frame", start_seconds=600, end_seconds=601)
     evidence[0]["text"] = "甲" * (characters // 2)
-    evidence[1]["text"] = "乙\r\n" + "乙" * (characters - characters // 2 - 1)
+    evidence[1]["text"] = "乙\r\n" + "乙" * (characters - characters // 2 - 2)
     actual, parts = split_segments(evidence, seconds)
     assert actual is segmented
     assert [item["id"] for part in parts for item in part["primary"]] == ["s0", "s1"]
@@ -73,7 +73,7 @@ def test_repeated_ocr_counts_in_outline_and_preserves_chemical_changes(tmp_path)
     result = asyncio.run(coordinator.run())
     outlines = [json.loads(model.messages(op, payload)[-1]["content"]) for op, payload in model.inputs if op == "outline"]
     assert [item["text"] for outline in outlines for item in outline["evidence"]] == [
-        item["text"].replace("\n", "") for item in original]
+        item["text"].replace("\n", " ") for item in original]
     assert [(chapter["start_seconds"], chapter["end_seconds"], chapter["timestamp_basis"])
             for chapter in result["chapters"]] == [(0, 130, "frame"), (130, 650, "frame")]
     assert [item for chapter in result["chapters"] for item in chapter["evidence_ids"]] == [i["id"] for i in evidence]

@@ -46,7 +46,7 @@ def current_notes(result):
     return bool(result and result.get("format_version") == FORMAT_VERSION and result.get("chapters"))
 
 
-def ground_chapters(chapters, issues, evidence, duration, *, start=0.0, end=None):
+def ground_chapters(chapters, issues, evidence, duration, *, start=0.0, end=None, legacy_ocr_line_join=False):
     end = duration if end is None else end
     if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration):
         raise AppError("invalid_timestamp", "笔记覆盖范围无效。")
@@ -67,6 +67,6 @@ def ground_chapters(chapters, issues, evidence, duration, *, start=0.0, end=None
     for issue in issues:
         ground_timestamps(issue["evidence_ids"], evidence, duration)
         if issue["chapter_id"] not in seen or issue.get("quote") and find_source_quote(
-                issue["quote"], (evidence[i] for i in issue["evidence_ids"])) is None:
+                issue["quote"], (evidence[i] for i in issue["evidence_ids"]), legacy_ocr_line_join=legacy_ocr_line_join) is None:
             raise AppError("invalid_evidence", "存疑原文与对应证据不一致。")
     return result

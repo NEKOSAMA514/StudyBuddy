@@ -7,7 +7,7 @@ from .model_input import evidence_request_text
 
 SEGMENT_SECONDS = 1200
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v18-outline-sources-context"
+FLOW_VERSION = "video-flow-v19-ocr-evidence-accuracy"
 
 
 def outline_overhead(model, video_title="", context=None, content_type=None):

@@ -233,7 +233,7 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     sent = json.loads(captured[0][-1]["content"])
     assert "anchors" not in sent
     identifiers = ["S1", "F1", "S2", "S3", "S4", "S5", "S6"]
-    assert sent["evidence"] == [{"id": identifier, "text": item["text"].replace("\n", "")
+    assert sent["evidence"] == [{"id": identifier, "text": item["text"].replace("\n", " ")
                                 if item["kind"] == "frame" else item["text"]}
                                for identifier, item in zip(identifiers, evidence, strict=True)]
     assert "start_seconds" not in captured[0][-1]["content"]

@@ -26,7 +26,7 @@ def _ocr_line_endings(text):
 
 
 def ocr_request_text(text):
-    return text.replace("\r", "").replace("\n", "")
+    return _ocr_line_endings(text).replace("\n", " ")
 
 
 def evidence_request_text(item):
@@ -44,14 +44,18 @@ def outline_source_aliases(records):
 
 
 def quote_source_text(item):
-    text = evidence_request_text(item)
-    return text.translate(OCR_SYMBOLS) if item.get("kind") == "frame" else text
+    text = item["text"]
+    return _ocr_line_endings(text).translate(OCR_SYMBOLS) if item.get("kind") == "frame" else text
 
 
-def find_source_quote(quote, sources):
+def find_source_quote(quote, sources, *, legacy_ocr_line_join=False):
     for item in sources:
-        candidate = ocr_request_text(quote).translate(OCR_SYMBOLS) if item.get("kind") == "frame" else quote
-        if candidate and candidate in quote_source_text(item):
+        candidate, source = quote, quote_source_text(item)
+        if item.get("kind") == "frame":
+            candidate = _ocr_line_endings(quote).translate(OCR_SYMBOLS)
+            if legacy_ocr_line_join:
+                candidate, source = candidate.replace("\n", ""), source.replace("\n", "")
+        if candidate and candidate in source:
             return candidate
     return None
 
