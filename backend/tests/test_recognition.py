@@ -241,10 +241,14 @@ def test_video_ocr_splits_small_changes_at_the_first_changed_sample(before, afte
 
 @pytest.mark.parametrize(("case", "starts", "reads"), [
     ("growing", [2], 1),
-    ("number", [0, 1, 2], 4),
+    ("one_sample", [2], 1),
+    ("short_label", [0, 2], 2),
+    ("long_lived", [0, 4], 2),
+    ("number", [0, 1, 2], 3),
+    ("formula", [0, 1, 2], 3),
+    ("no_punctuation", [0, 1, 2], 3),
     ("low_confidence", [0, 1], 4),
     ("changed_prefix", [0, 1, 2], 3),
-    ("one_sample", [0, 1, 2], 3),
 ])
 def test_video_ocr_checks_growing_line_before_reading_crops(monkeypatch, case, starts, reads):
     import av
@@ -256,10 +260,14 @@ def test_video_ocr_checks_growing_line_before_reading_crops(monkeypatch, case, s
         return SimpleNamespace(boxes=np.array([[[left, top], [right, top], [right, bottom], [left, bottom]]]))
 
     # 模拟同一行在相邻采样快速变宽，常规 IoU 匹配无法把它并为一条。
-    widths = [49, 82, 135] if case == "one_sample" else [49, 82, 135, 135]
+    widths = [49 if case == "short_label" else 78, 130, 210]
+    if case == "long_lived":
+        widths = [78, 78, *widths]
+    if case != "one_sample":
+        widths.append(210)
     samples = []
     for seconds, right in enumerate(widths):
-        frame = np.zeros((64, 192, 3), dtype=np.uint8)
+        frame = np.zeros((64, 256, 3), dtype=np.uint8)
         frame[13:28, 22:right:3] = 255
         if case == "changed_prefix" and seconds >= 2:
             frame[13:28, 24:41] = 255
@@ -272,23 +280,72 @@ def test_video_ocr_checks_growing_line_before_reading_crops(monkeypatch, case, s
         texts, scores = [], []
         for image in images:
             width = image.shape[1]
-            if width > 80:
-                texts.append("开始讲解这个现象的原因" + ("12" if case == "number" else ""))
+            if width > 150:
+                suffix = {"number": "，数值12", "formula": "，x+y", "no_punctuation": ""}.get(case, "。")
+                texts.append("开始讲解这个现象的原因" + suffix)
             else:
                 texts.append("开始讲解" if width < 40 else "开始讲解这个")
-            scores.append(.89 if case == "low_confidence" and width > 80 else .99)
+            scores.append(.89 if case == "low_confidence" and width > 150 else .99)
         return SimpleNamespace(txts=texts, scores=scores)
 
     monkeypatch.setattr(video_ocr, "alignment", lambda *_: (0, 0))
-    monkeypatch.setattr(video_ocr, "changed_regions", lambda *_: [(0, 0, 192, 64)])
+    class Small:
+        rec_image_shape = (3, 48, 320)
+        rec_batch_num = 6
+
+        def __call__(self, inputs):
+            return recognize(inputs.img)
+
+    monkeypatch.setattr(video_ocr, "changed_regions", lambda *_: [(0, 0, 256, 64)])
     engine = SimpleNamespace(_load_det_model=lambda: detect, cls_and_rotate=lambda images: (images, None),
-                             recognize_txt=recognize)
+                             _load_rec_model=Small, recognize_txt=recognize)
     rows = video_ocr.recognize_lines(samples, lambda: engine, lambda: None, lambda _: None)
     assert len(batches) == reads
     assert [row["start_seconds"] for row in rows] == starts
-    if case == "growing":
-        assert rows == [{"text": "开始讲解这个现象的原因", "start_seconds": 2, "end_seconds": 3,
+    if case in {"growing", "one_sample"}:
+        assert rows == [{"text": "开始讲解这个现象的原因。", "start_seconds": 2, "end_seconds": len(samples) - 1,
                          "confidence": pytest.approx(99)}]
+
+
+def test_video_ocr_keeps_model_padding_when_widest_crops_are_skipped():
+    from app.recognition.video_ocr import recognize_crop_batch
+
+    calls = []
+
+    class Small:
+        rec_image_shape = (3, 8, 16)
+        rec_batch_num = 2
+
+        def __call__(self, inputs):
+            widths = [image.shape[1] for image in inputs.img]
+            calls.append((self.rec_image_shape[-1], widths))
+            return SimpleNamespace(txts=list(map(str, widths)), scores=[.99] * len(widths))
+
+    model = Small()
+    engine = SimpleNamespace(_load_rec_model=lambda: model)
+    batch = [SimpleNamespace(shape=(8, w, 3)) for w in (60, 24, 40, 80)]
+    active = batch[:2]
+    images = [np.zeros(item.shape, np.uint8) for item in active]
+    assert [text for _, text, _ in recognize_crop_batch(engine, batch, active, images)] == ["60", "24"]
+    assert calls == [(40, [24]), (80, [60])]
+    assert model.rec_image_shape == (3, 8, 16)
+
+
+@pytest.mark.parametrize("light", [False, True])
+def test_video_ocr_compares_prefix_ink_in_the_original_frame(light):
+    from app.recognition.video_ocr import prefix_ink_unchanged
+
+    old = np.zeros((16, 40), dtype=np.uint8)
+    old[4:12, 3:22:4] = 255
+    extended = old.copy()
+    extended[4:12, 25:36:4] = 255
+    changed = extended.copy()
+    changed[4:12, 11] = 0
+    if not light:
+        old, extended, changed = (255 - image for image in (old, extended, changed))
+    polygon = np.array([[1, 1], [26, 1], [26, 14], [1, 14]])
+    assert prefix_ink_unchanged(polygon, old, extended)
+    assert not prefix_ink_unchanged(polygon, old, changed)
 
 
 def test_paraformer_uses_original_sample_offsets(monkeypatch):
@@ -327,7 +384,8 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     current = extraction_config(settings)
     assert uses_line_ocr(current)
     for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
-                    "extract-v7-video-line-ocr", "extract-v8-video-line-ocr"):
+                    "extract-v7-video-line-ocr", "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
+                    "extract-v10-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)

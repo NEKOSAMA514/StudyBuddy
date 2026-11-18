@@ -1,6 +1,7 @@
 """跟踪视频文字区域，从每条轨迹的清晰裁剪中识别文字。"""
 from bisect import bisect_right
 from collections import Counter, defaultdict, deque
+from copy import copy
 from dataclasses import dataclass
 from itertools import zip_longest
 import logging
@@ -12,6 +13,7 @@ import zlib
 
 import cv2
 import numpy as np
+from rapidocr.ch_ppocr_rec.typings import TextRecInput
 from rapidocr.utils.process_img import get_rotate_crop_image
 
 from .extraction import VIDEO_OCR_CONFIDENCE
@@ -202,6 +204,26 @@ def extends_right(old_box, box, before, after):
     return np.count_nonzero(changed) >= max(12, changed.size * .04)
 
 
+def prefix_ink_unchanged(polygon, before, after):
+    height, width = before.shape
+    left, top, right, bottom = clipped_box(polygon, width, height)
+    if right - left < 10 or bottom - top < 5:
+        return False
+    old, new = (image[top:bottom, left:right] for image in (before, after))
+    threshold, _ = cv2.threshold(old, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    ink, new_ink = old > threshold, new > threshold
+    if ink.mean() > .5:
+        ink, new_ink = ~ink, ~new_ink
+    if not .04 <= ink.mean() <= .42 or np.count_nonzero(ink) < 12:
+        return False
+    if abs(old[ink].mean() - old[~ink].mean()) < 55:
+        return False
+    # 只忽略最右笔画以外的留白，字内新增或消失的笔画都要比较。
+    end = np.flatnonzero(ink.any(axis=0))[-1] + 1
+    changes = (ink[:, :end] != new_ink[:, :end]) & (cv2.absdiff(old[:, :end], new[:, :end]) >= 24)
+    return np.count_nonzero(changes) <= 2
+
+
 class TextRegions:
     def __init__(self, detector, crops):
         self.detector = detector
@@ -373,7 +395,7 @@ class TextRegions:
             matches = [candidate for (box, old), candidate in previous_crops
                        if int(old.last + 1e-6) == last_sample
                        and extends_right(box, track.best_box, last_frame, current)
-                       and still_visible(old)]
+                       and (still_visible(old) or prefix_ink_unchanged(old.polygon, last_frame, current))]
             children.update(id(candidate) for candidate in matches)
             if len(matches) == 1:
                 links.append((track, matches[0]))
@@ -428,56 +450,93 @@ def rank(candidates):
             break
 
 
+def recognize_crop_batch(engine, batch, active, images):
+    if len(active) == len(batch):
+        result = engine.recognize_txt(images)
+        return zip(active, result.txts, result.scores, strict=True)
+
+    # Small 按宽高比分组，用同组最宽裁剪决定补宽。筛掉图像时保留原分组的输入宽度。
+    model = engine._load_rec_model()
+    channels, height, nominal_width = model.rec_image_shape
+    ratios = np.array([candidate.shape[1] / candidate.shape[0] for candidate in batch])
+    order = np.argsort(ratios)
+    by_id = {id(candidate): image for candidate, image in zip(active, images, strict=True)}
+    recognized = {}
+    for start in range(0, len(order), model.rec_batch_num):
+        group = order[start:start + model.rec_batch_num]
+        kept = [index for index in group if id(batch[index]) in by_id]
+        if not kept:
+            continue
+        group_images = [by_id[id(batch[index])] for index in kept]
+        width = max(nominal_width, int(height * ratios[group[-1]]))
+        if width > max(nominal_width, int(height * ratios[kept[-1]])):
+            # 只复制识别器的预处理参数，推理会话仍然共享。
+            padded = copy(model)
+            padded.rec_image_shape = (channels, height, width)
+            result = padded(TextRecInput(img=group_images))
+        else:
+            result = engine.recognize_txt(group_images)
+        for index, text, score in zip(kept, result.txts, result.scores, strict=True):
+            recognized[id(batch[index])] = (text, score)
+    return ((candidate, *recognized[id(candidate)]) for candidate in active)
+
+
 def read_crops(engine, crops, candidates, check_stop, skipped=frozenset()):
     records, used = [], 0
     pending = deque(candidates)
     while pending:
         check_stop()
         batch = [pending.popleft() for _ in range(min(BATCH_SIZE, len(pending)))]
-        if skipped:
-            # 过滤前切分批次，避免整段剩余裁剪向前补位。
-            batch = [candidate for candidate in batch if id(candidate) not in skipped]
-            if not batch:
-                continue
+        active = [candidate for candidate in batch if id(candidate) not in skipped]
+        if not active:
+            continue
         images = []
-        for candidate in batch:
+        for candidate in active:
             crops.seek(candidate.offset)
             pixels = zlib.decompress(crops.read(candidate.length))
             images.append(np.frombuffer(pixels, dtype=np.uint8).reshape(candidate.shape).copy())
         images, _ = engine.cls_and_rotate(images)
-        result = engine.recognize_txt(images)
         retries = []
-        for candidate, text, score in zip(batch, result.txts, result.scores, strict=True):
+        for candidate, text, score in recognize_crop_batch(engine, batch, active, images):
             if text.strip() and float(score) >= VIDEO_OCR_CONFIDENCE:
                 records.append((candidate, text.strip(), float(score)))
             elif candidate.alternate is not None:
                 retries.append(candidate.alternate)
-        used += len(batch)
+        used += len(active)
         pending.extendleft(reversed(retries))
     return records, used
 
 
 def read_candidates(engine, crops, candidates, check_stop):
+    def short_lived_line(candidate):
+        left, top, right, bottom = candidate.box
+        return candidate.last - candidate.first <= 1.05 and right - left >= 2.8 * (bottom - top)
+
     parents = {id(candidate.prefix) for candidate in candidates if candidate.prefix is not None}
     growing = [candidate for candidate in candidates if id(candidate) not in parents
-               and candidate.samples >= 2 and candidate.prefix is not None and candidate.prefix.prefix is not None]
+               and candidate.prefix is not None and short_lived_line(candidate.prefix)]
     if not growing:
         return read_crops(engine, crops, candidates, check_stop)
 
-    # 只先读连续扩展后稳定下来的裁剪。数值、公式和低置信度保留原读取顺序。
-    preferred, used = read_crops(engine, crops, growing, check_stop)
+    terminals = {id(candidate) for candidate in growing}
+    preferred, used = read_crops(engine, crops, candidates, check_stop,
+                                 {id(candidate) for candidate in candidates if id(candidate) not in terminals})
     accepted = {id(record[0]): record for record in preferred}
     selected, skipped = [], set()
     for candidate in growing:
         record = accepted.get(id(candidate)) or accepted.get(id(candidate.alternate))
         if record is None:
             continue
-        text = record[1]
-        if len(text) < 6 or any(char.isnumeric() or char in "%/^_{}[]\\-()" or
-                                 unicodedata.category(char) in ("Sm", "Sc") for char in text):
-            continue
         selected.append(record)
-        while candidate is not None:
+        skipped.add(id(candidate))
+        text = record[1]
+        if len(text) < 6 or not any(char in "，。！？；：、…,.!?;:" for char in text):
+            continue
+        if any(char.isnumeric() or char in "%/^_{}[]\\-()" or unicodedata.category(char) in ("Sm", "Sc")
+               for char in text):
+            continue
+        candidate = candidate.prefix
+        while candidate is not None and short_lived_line(candidate):
             skipped.add(id(candidate))
             candidate = candidate.prefix
 
