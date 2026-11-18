@@ -2,7 +2,6 @@
 import re
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
-from difflib import SequenceMatcher
 from itertools import accumulate, groupby
 from string import punctuation
 
@@ -13,7 +12,6 @@ SPEECH_LINK_SECONDS = 1
 SPEECH_BLOCK_SECONDS = 60
 MIN_OCR_TEXT_MATCH = 5
 NEGATIONS = "不没未无非别勿否"
-SIGNIFICANT_HAN = NEGATIONS + "正负〇零一二三四五六七八九十百千万亿两半"
 FORMULA_SYMBOLS = r"+-−±×÷=<>≤≥≠%‰\^_{}[]()/*°℃℉"
 EXPRESSION_DELIMITERS = ".,:。!?;；、…“”‘’\"'"
 # AgCl 等只含字母的式子也需要完整匹配。
@@ -229,21 +227,6 @@ def _speech_comparison_text(text):
     return re.sub(r"(?<![A-Za-z0-9])[.·]|[.·](?![A-Za-z0-9])", "", _normalized(text).replace("…", ""))
 
 
-def _one_ocr_edit(candidate, phrase):
-    middle = len(candidate) // 2
-    if candidate[:middle] not in phrase and candidate[middle:] not in phrase:
-        return False
-    # 整分钟转录可以有前文和后文，只检查候选句内部的一处差异。
-    edits = [edit for edit in SequenceMatcher(None, candidate, phrase, autojunk=False).get_opcodes()
-             if edit[0] != "equal" and not (edit[0] == "insert" and edit[1] in (0, len(candidate)))]
-    if len(edits) != 1:
-        return False
-    _, left, right, start, end = edits[0]
-    changed = candidate[left:right] + phrase[start:end]
-    return (0 < left <= right < len(candidate) and max(right - left, end - start) == 1
-            and all("\u3400" <= char <= "\u9fff" and char not in SIGNIFICANT_HAN for char in changed))
-
-
 def _spoken_duplicate(raw, plain, spoken, normalized_speech):
     literal = _requires_literal_match(raw)
     if len(plain) < (12 if literal else MIN_OCR_TEXT_MATCH):
@@ -251,9 +234,7 @@ def _spoken_duplicate(raw, plain, spoken, normalized_speech):
     if literal:
         candidate = re.sub(r"。+$|(?<=[\u3400-\u9fff])[!?]+$", "", raw.strip())
         return _literal_in_speech(candidate, spoken)
-    if plain in normalized_speech and re.search(rf"(?<![{NEGATIONS}]){re.escape(plain)}", normalized_speech):
-        return True
-    return len(plain) >= 16 and _one_ocr_edit(plain, normalized_speech)
+    return plain in normalized_speech and bool(re.search(rf"(?<![{NEGATIONS}]){re.escape(plain)}", normalized_speech))
 
 
 def _ocr_text_parts(text):

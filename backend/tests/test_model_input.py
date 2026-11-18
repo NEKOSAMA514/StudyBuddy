@@ -318,6 +318,7 @@ def timed_record(identifier, kind, start, end, text):
     ("0.5 V 是这次实验的参考电压", "电压显示为 - 0.5 V 是这次实验的参考电压", True),
     ("这次测量所需的样品体积为10 mL", "实验条件：这次测量所需的样品体积为10 mL。", False),
     ("本次实验生成的沉淀主要含有AgCl", "本次实验生成的沉淀主要含有AgClO", True),
+    ("请把反应容器放在常温油浴中缓慢搅拌", "请把反应容器放在常温水浴中缓慢搅拌", True),
 ])
 def test_sent_ocr_preserves_differences_from_speech(operation, ocr, speech, retained):
     frame = timed_record("F1", "frame", 1, 2, ocr)
@@ -495,15 +496,16 @@ def test_chapter_filter_keeps_labels_values_and_context_separate():
     assert sent["context"] == context[0]["text"]
 
 
-def test_chapter_filter_matches_merged_speech_across_visual_line_breaks():
+def test_chapter_filter_matches_exact_prose_across_visual_line_breaks():
     outside = "这句话只出现在相邻的语音块里。"
     quantity = "试验要求把溶液浓度保持在0.01"
     visual = "附加提醒是先保存副本。"
+    different = "这份补充资料可以帮助橙理完整的复习笔记。"
     long_line = "我们还要提前核对每份申请所需要提交的全部"
     frame = timed_record("E4", "frame", 60, 62,
                          "本章、需要说明怎样\n整理这份原始材料。\n"
                          f"{long_line}\n证明材料。\n"
-                         f"这份补充资料可以帮助橙理完整的复习笔记。{visual}\n"
+                         f"{different}{visual}\n"
                          f"{quantity}\n能仅凭画面判定整道题目的答案。\n{outside}")
     chapter = {"primary": [
         timed_record("E1", "speech", 31, 32, "本章需要说明怎样"),
@@ -517,7 +519,7 @@ def test_chapter_filter_matches_merged_speech_across_visual_line_breaks():
     before = deepcopy(chapter)
     sent, sources = pack_chapter_material(chapter)
     assert [line for line in sent["primary"].splitlines() if line.startswith("> ")] == [
-        f"> [F1] {visual}{quantity}能仅凭画面判定整道题目的答案。{outside}",
+        f"> [F1] {different}{visual}{quantity}能仅凭画面判定整道题目的答案。{outside}",
     ]
     assert sources["F1"] == [frame] and chapter == before
 
