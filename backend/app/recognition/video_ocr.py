@@ -155,7 +155,7 @@ def changed_regions(reference, current, tracks, dx, dy):
     tiles = (integral_sum(integral, x[:-1], y[:-1, None], x[1:], y[1:, None]) >= 7).astype(np.uint8)
     for track in tracks:
         left, top, right, bottom = clipped_box(track.polygon, width, height)
-        if right > left and bottom > top and integral_sum(integral, left, top, right, bottom) >= 4:
+        if right > left and bottom > top and integral_sum(integral, left, top, right, bottom) >= 2:
             tiles[top // TILE_SIZE:(bottom - 1) // TILE_SIZE + 1,
                   left // TILE_SIZE:(right - 1) // TILE_SIZE + 1] = 1
     _, _, stats, _ = cv2.connectedComponentsWithStats(tiles, connectivity=8)
@@ -174,17 +174,17 @@ def changed_regions(reference, current, tracks, dx, dy):
 
 
 def line_signature(crop):
-    return resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 24)
+    return resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 240, 24)
 
 
 def same_line(before, after):
     difference = cv2.absdiff(before, after)
-    columns = np.percentile(difference.reshape(24, 10, 12), 85, axis=(0, 2))
+    columns = np.percentile(difference.reshape(difference.shape[0], 10, -1), 85, axis=(0, 2))
     if difference.mean() > 13 or columns.max() > 38:
         return False
     # 局部像素差用于区分仅有个别字符变化的文字。
     changed = (difference >= 33).astype(np.uint8)
-    return cv2.boxFilter(changed, cv2.CV_16U, (7, 5), normalize=False).max() < 12
+    return cv2.boxFilter(changed, cv2.CV_16U, (7, 5), normalize=False).max() < 3
 
 
 def extends_right(old_box, box, before, after):

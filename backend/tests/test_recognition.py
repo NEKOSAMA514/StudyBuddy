@@ -212,6 +212,33 @@ def test_video_ocr_keeps_unchanged_lines_during_detection(case):
         assert scans[-1][1] >= 167 - 18
 
 
+@pytest.mark.parametrize(("before", "after"), [("2.50 V", "2.60 V"), ("2.50 V", "2,50 V"), ("-2.50 V", "+2.50 V")])
+def test_video_ocr_splits_small_changes_at_the_first_changed_sample(before, after):
+    from io import BytesIO
+    import av
+    import cv2
+    from app.recognition.video_ocr import TextRegions
+
+    def frame(value):
+        image = np.full((1080, 1920, 3), 255, dtype=np.uint8)
+        cv2.putText(image, "Reference measurement: the measured output voltage is " + value,
+                    (50, 300), cv2.FONT_HERSHEY_SIMPLEX, .8, (0, 0, 0), 2, cv2.LINE_AA)
+        return av.VideoFrame.from_ndarray(image, format="bgr24")
+
+    def detect(image):
+        y, x = np.nonzero(image[:, :, 0] < 180)
+        left, top = max(x.min() - 2, 0), max(y.min() - 2, 0)
+        right, bottom = min(x.max() + 3, image.shape[1]), min(y.max() + 3, image.shape[0])
+        return SimpleNamespace(boxes=np.array([[[left, top], [right, top], [right, bottom], [left, bottom]]]))
+
+    tracker = TextRegions(detect, BytesIO())
+    start, changed = frame(before), frame(after)
+    for seconds, image in ((0, start), (1, changed), (2, changed), (30, changed)):
+        tracker.observe(seconds, image)
+    assert [(item.first, item.last) for item in tracker.candidates] == [(0, 0)]
+    assert [(item.first, item.last) for item in tracker.active] == [(1, 30)]
+
+
 @pytest.mark.parametrize(("case", "starts", "reads"), [
     ("growing", [2], 1),
     ("number", [0, 1, 2], 4),
