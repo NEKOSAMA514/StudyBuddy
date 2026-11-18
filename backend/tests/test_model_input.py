@@ -308,6 +308,35 @@ def timed_record(identifier, kind, start, end, text):
 
 
 @pytest.mark.parametrize("operation", ["chapters", "extract", "concise"])
+@pytest.mark.parametrize(("ocr", "speech", "retained"), [
+    ("这次测量所需的样品质量为10", "这次测量所需的样品质量为100", True),
+    ("这次测量所需的样品质量为10", "这次测量所需的样品质量为10.0", True),
+    ("这次测量所需的样品质量为10", "这次测量所需的样品质量为10%", True),
+    ("这次测量所需的样品质量为10", "这次测量所需的样品质量为10 mL", True),
+    ("这次测量所需的样品体积为10", "这次测量所需的样品体积为10毫升", True),
+    ("这次测量所需的样品体积为10 mL", "这次测量所需的样品体积为10 mL/min", True),
+    ("0.5 V 是这次实验的参考电压", "电压显示为 - 0.5 V 是这次实验的参考电压", True),
+    ("这次测量所需的样品体积为10 mL", "实验条件：这次测量所需的样品体积为10 mL。", False),
+    ("本次实验生成的沉淀主要含有AgCl", "本次实验生成的沉淀主要含有AgClO", True),
+])
+def test_sent_ocr_preserves_differences_from_speech(operation, ocr, speech, retained):
+    frame = timed_record("F1", "frame", 1, 2, ocr)
+    records = [timed_record("S1", "speech", 0, 3, speech), frame]
+    chapter = {"primary": records, "context": []}
+    payload = ({"chapters": [chapter]} if operation == "chapters" else
+               {"chapter": chapter} if operation == "extract" else payload_for("视频", records, []))
+    before = deepcopy(payload)
+    sent = json.loads(ModelClient(Settings()).messages(operation, payload)[-1]["content"])
+    if operation == "chapters":
+        visible = [line for line in sent["chapters"][0]["primary"].splitlines() if line.startswith("> [F")]
+        assert visible == ([f"> [F1] {ocr}"] if retained else [])
+    else:
+        visible = [item["text"] for item in sent.get("chapter", sent)["primary"] if item["kind"] == "frame"]
+        assert visible == ([ocr] if retained else [])
+    assert payload == before
+
+
+@pytest.mark.parametrize("operation", ["chapters", "extract", "concise"])
 def test_ocr_normalizes_symbols_before_deduplication_and_sending(operation):
     original = "（提示）ＡｇＳＣＮ会吸附Ag＋，用１．５ｍＬ试剂处理AgCl。"
     corrected = "(提示)ＡｇＳＣＮ会吸附Ag+,用１.５ｍＬ试剂处理AgCl。"

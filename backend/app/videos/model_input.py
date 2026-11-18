@@ -3,7 +3,7 @@ import re
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
-from itertools import accumulate
+from itertools import accumulate, groupby
 from string import punctuation
 
 
@@ -14,9 +14,17 @@ SPEECH_BLOCK_SECONDS = 60
 MIN_OCR_TEXT_MATCH = 5
 NEGATIONS = "不没未无非别勿否"
 SIGNIFICANT_HAN = NEGATIONS + "正负〇零一二三四五六七八九十百千万亿两半"
+FORMULA_SYMBOLS = r"+-−±×÷=<>≤≥≠%‰\^_{}[]()/*°℃℉"
+EXPRESSION_DELIMITERS = ".,:。!?;；、…“”‘’\"'"
+# AgCl 等只含字母的式子也需要完整匹配。
+ELEMENT_SEQUENCE = re.compile(r"(?<![A-Za-z])(?:[A-Z][a-z]?){2,}(?![A-Za-z])")
 # 同一个标点或符号的全角变体逐个对应 ASCII。
 OCR_SYMBOLS = {ord(symbol) + 0xFEE0: symbol for symbol in punctuation}
 OCR_SENTENCE_END = re.compile(r"(?<=。)|(?<=[\u3400-\u9fff][!?])|(?<=[!?])(?=[\u3400-\u9fff])")
+
+
+def _ocr_line_endings(text):
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def ocr_request_text(text):
@@ -81,7 +89,31 @@ def _normalized(text):
 
 
 def _requires_literal_match(text):
-    return any(char.isdigit() for char in text) or re.search(r'[+\-−=<>%\\^_{}\[\]()/]', text)
+    return any(char.isdigit() or char in FORMULA_SYMBOLS for char in text) or ELEMENT_SEQUENCE.search(text) is not None
+
+
+def _expression_edge(char):
+    return (char.isdigit() or char in FORMULA_SYMBOLS + "." or
+            (char.isalpha() and not "\u3400" <= char <= "\u9fff"))
+
+
+def _literal_in_speech(candidate, speech):
+    if candidate not in speech:
+        return False
+    starts_expression = _expression_edge(candidate[0])
+    ends_expression = _expression_edge(candidate[-1]) or candidate[-1] in ",:"
+    pattern = rf"(?<![{NEGATIONS}]){re.escape(candidate)}"
+    for match in re.finditer(pattern, speech):
+        before = speech[:match.start()].rpartition("\n")[2].rstrip()
+        after = speech[match.end():].partition("\n")[0].lstrip()
+        # 空格、千位分隔和单位可能仍属于同一表达式，只有明确的边界才允许去重。
+        if starts_expression and before and (
+                _expression_edge(before[-1]) or before.endswith(("正", "负")) or re.search(r"\d[^\S\r\n]*[,:]$", before)):
+            continue
+        if ends_expression and after and (after[0] not in EXPRESSION_DELIMITERS or re.match(r"[.,:][^\S\r\n]*\d", after)):
+            continue
+        return True
+    return False
 
 
 def _without_repeated_lines(lines, current, previous, gap):
@@ -123,7 +155,8 @@ def deduplicate_ocr(payload):
                 primary_frames.add(identity)
             start = item.get("start_seconds")
             gap = start - previous_time if start is not None and previous_time is not None else float("inf")
-            spoken = [record["text"].translate(OCR_SYMBOLS) for record in overlapping.get(item["id"], [])]
+            spoken = [_ocr_line_endings(record["text"]).translate(OCR_SYMBOLS)
+                      for record in overlapping.get(item["id"], [])]
             normalized_speech = [_normalized(text) for text in spoken]
             visible = []
             for line in frame_text.splitlines(keepends=True):
@@ -133,8 +166,12 @@ def deduplicate_ocr(payload):
                     literal = _requires_literal_match(text)
                     candidate, voices = (text, spoken) if literal else (plain, normalized_speech)
                     # 短标签碰巧出现在同期口播时，仍保留对应画面。
-                    repeated = (candidate in voices if len(plain) < 12 else
-                                any(candidate in voice for voice in voices))
+                    if len(plain) < 12:
+                        repeated = candidate in voices
+                    elif literal:
+                        repeated = any(_literal_in_speech(candidate, voice) for voice in voices)
+                    else:
+                        repeated = any(candidate in voice for voice in voices)
                     if repeated:
                         continue
                 visible.append(line)
@@ -211,18 +248,21 @@ def _spoken_duplicate(raw, plain, spoken, normalized_speech):
     literal = _requires_literal_match(raw)
     if len(plain) < (12 if literal else MIN_OCR_TEXT_MATCH):
         return False
-    candidate = re.sub(r"。+$|(?<=[\u3400-\u9fff])[!?]+$", "", raw) if literal else plain
-    phrase = spoken if literal else normalized_speech
-    prefix = r"(?<![\d.+−正负-])" if literal and (candidate[0].isdigit() or candidate[0] == ".") else ""
-    suffix = r"(?![\d.+−%‰]|[,，:：-]\d)" if literal and (candidate[-1].isdigit() or candidate[-1] in ".,，:：") else ""
-    pattern = prefix + rf"(?<![{NEGATIONS}])" + re.escape(candidate) + suffix
-    if candidate in phrase and re.search(pattern, phrase):
+    if literal:
+        candidate = re.sub(r"。+$|(?<=[\u3400-\u9fff])[!?]+$", "", raw.strip())
+        return _literal_in_speech(candidate, spoken)
+    if plain in normalized_speech and re.search(rf"(?<![{NEGATIONS}]){re.escape(plain)}", normalized_speech):
         return True
-    return not literal and len(plain) >= 16 and _one_ocr_edit(plain, phrase)
+    return len(plain) >= 16 and _one_ocr_edit(plain, normalized_speech)
 
 
 def _ocr_text_parts(text):
-    return [part for line in text.splitlines(keepends=True) for part in OCR_SENTENCE_END.split(line) if part]
+    return [(row, part) for row, line in enumerate(text.split("\n"))
+            for part in OCR_SENTENCE_END.split(line) if part or not line]
+
+
+def _join_ocr_parts(parts):
+    return "\n".join("".join(text for _, text in line) for _, line in groupby(parts, key=lambda part: part[0]))
 
 
 def _short_ocr_label(raw):
@@ -232,9 +272,8 @@ def _short_ocr_label(raw):
 def _without_spoken_lines(text, spoken, normalized_speech):
     longest = len(normalized_speech) + 1
     parts = _ocr_text_parts(text)
-    compact = ["".join(part.split()) for part in parts]
     # 独立成行的短词可能是角色或图表名牌，保留它们的出现位置。
-    labels = [_short_ocr_label(raw) for raw in compact]
+    labels = [_short_ocr_label("".join(part.split())) for _, part in parts]
     retained = []
     index = 0
     while index < len(parts):
@@ -242,7 +281,10 @@ def _without_spoken_lines(text, spoken, normalized_speech):
         for end in range(index, len(parts)):
             if labels[end]:
                 break
-            raw += compact[end]
+            row, part = parts[end]
+            raw += part
+            if row != parts[index][0] and _requires_literal_match(raw):
+                break
             plain = _speech_comparison_text(raw)
             if len(plain) > longest:
                 break
@@ -251,15 +293,14 @@ def _without_spoken_lines(text, spoken, normalized_speech):
         if last_match == index:
             retained.append(parts[index])
         index = max(index + 1, last_match)
-    return "".join(retained).strip("\r\n")
+    return _join_ocr_parts(retained).strip("\n")
 
 
 def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
     blocks_at = _overlap_lookup(speech_blocks)
     speech_texts = {}
     for block in speech_blocks:
-        merged = " ".join(fragment["text"] for fragment in block["fragments"])
-        spoken = "".join(merged.split()).translate(OCR_SYMBOLS)
+        spoken = _ocr_line_endings("\n".join(fragment["text"] for fragment in block["fragments"])).translate(OCR_SYMBOLS)
         speech_texts[block["fragments"][0]["id"]] = (spoken, _speech_comparison_text(spoken))
     previous_parts = {}
     available = {item["id"] for item in items} - seen_frames if clipped_lines else set()
@@ -269,7 +310,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
         seen_frames.add(item["id"])
         start, end = item.get("start_seconds"), item.get("end_seconds")
         timed = start is not None and end is not None
-        text = item["text"].translate(OCR_SYMBOLS)
+        text = _ocr_line_endings(item["text"]).translate(OCR_SYMBOLS)
         if clips := clipped_lines.get(item["id"]):
             # 前后完整读数必须同时在这一组材料中，跨章或仅在章前的读数不能替代。
             removed = {line for line, before, after in clips if before in available and after in available}
@@ -289,7 +330,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
         if timed:
             parts = _ocr_text_parts(text)
             repeated = set()
-            for part, count in Counter(part.strip() for part in parts).items():
+            for part, count in Counter(part.strip() for _, part in parts).items():
                 if (len(_normalized(part)) < MIN_OCR_TEXT_MATCH
                         or _short_ocr_label("".join(part.split()))):
                     continue
@@ -301,7 +342,7 @@ def _chapter_frame_texts(items, speech_blocks, seen_frames, clipped_lines):
                     repeated.add(part)
                 previous_parts[key] = (start, end, count)
             if repeated:
-                text = "".join(part for part in parts if part.strip() not in repeated).strip("\r\n")
+                text = _join_ocr_parts((row, part) for row, part in parts if part.strip() not in repeated).strip("\n")
         if text.strip():
             yield item, ocr_request_text(text)
 
