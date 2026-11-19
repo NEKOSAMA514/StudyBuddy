@@ -179,6 +179,22 @@ class Pipeline:
         stage = "checking"
         total = time.monotonic()
         tick = total
+
+        def advance_stage(next_stage):
+            nonlocal stage, tick
+            boundary = time.monotonic()
+            timings[stage] = round(boundary - tick, 3)
+            stage, tick = next_stage, boundary
+            self.update(task_id, stage=stage, warnings=warnings, timings=timings)
+
+        def finish_timings():
+            if "total" in timings:
+                return
+            end = time.monotonic()
+            if stage in {"checking", "transcribing", "ocr", "concise"} and stage not in timings:
+                timings[stage] = round(end - tick, 3)
+            timings["total"] = round(end - total, 3)
+
         try:
             if shutdown is not None and shutdown.is_set():
                 return
@@ -222,9 +238,7 @@ class Pipeline:
             recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
             evidence = []
             clipped_lines = {}
-            stage = "transcribing"
-            self.update(task_id, stage=stage)
-            tick = time.monotonic()
+            advance_stage("transcribing")
             speech = self.read_subtitles(task_id, config, settings, folder, video.duration, warnings, activity)
             self.update(task_id, config=dict(config))
             self.checkpoint(task_id)
@@ -266,15 +280,12 @@ class Pipeline:
                     evidence.append({"id": f"{video.id}-{signature}-speech-{index}", "kind": "speech",
                                      "start_seconds": start, "end_seconds": min(end, video.duration),
                                      "text": item["text"], "image_name": None, "confidence": None})
-            timings[stage] = round(time.monotonic() - tick, 3)
             self.persist_evidence(video.id, evidence)
             save_transcript(folder, signature, evidence, filename=video.filename, duration=video.duration,
                             transcript_source=config.get("transcript_source"))
             self.checkpoint(task_id)
 
-            stage = "ocr"
-            self.update(task_id, stage=stage, warnings=warnings, timings=timings)
-            tick = time.monotonic()
+            advance_stage("ocr")
             failures = 0
             cache_hits = 0
             ocr_log = None
@@ -359,7 +370,6 @@ class Pipeline:
                 activity("preparing", message=f"有 {failures} 张画面识别失败，其余结果已保留", level="warning", error=ocr_log)
             if cache_hits:
                 activity("cached", message=f"复用 {cache_hits} 张画面的文字识别结果")
-            timings[stage] = round(time.monotonic() - tick, 3)
             evidence.sort(key=lambda e: (e["start_seconds"], e["kind"]))
             if not evidence:
                 raise AppError("no_evidence", "没有识别到有效语音或画面文字，不能生成有依据的总结。")
@@ -368,6 +378,11 @@ class Pipeline:
                 warnings.append("没有提取到有效画面文字，本次总结仅依据讲解文本。")
             elif kinds == {"frame"} and video.audio_codec:
                 warnings.append("本次总结仅依据抽样画面文字，不能代表未识别的语音内容。")
+            if settings.note_style == "concise":
+                advance_stage("concise")
+            else:
+                timings[stage] = round(time.monotonic() - tick, 3)
+
             def result_values(notes, usage, calls):
                 return {**notes, "recognition": {**extraction,
                         **({"frame_interval": video.duration / config["frame_count"]} if "frame_count" in config else {}),
@@ -446,7 +461,7 @@ class Pipeline:
                         if settings.note_style == "concise":
                             from .concise import ConciseVideoGeneration
                             generation = ConciseVideoGeneration(task_id, model, settings, folder, evidence, video.duration,
-                                stopped, lambda: self.checkpoint(task_id), update_model_stage, timings, publish_notes,
+                                stopped, lambda: self.checkpoint(task_id), update_model_stage, publish_notes,
                                 config["video_title"])
                         else:
                             generation = DetailedVideoGeneration(task_id, model, settings, folder, evidence, video.duration,
@@ -474,17 +489,18 @@ class Pipeline:
 
             notes, usage, calls = asyncio.run(generate_notes())
             self.checkpoint(task_id)
-            timings["total"] = round(time.monotonic() - total, 3)
             result = result_values(notes, usage, calls)
             with self.sessions() as session:
                 result["notes_revision"] = (session.get(Task, task_id).result or {}).get("notes_revision", 0) + 1
+            finish_timings()
             self.update(task_id, status="succeeded", stage="completed", result=result, warnings=warnings, timings=timings)
             self.cleanup_checkpoints(task_id)
             logger.info("task=%s status=succeeded duration=%.2f", task_id, timings["total"])
         except (TaskPaused, TaskInterrupted):
-            timings["total"] = round(time.monotonic() - total, 3)
+            finish_timings()
             self.finish_stop(task_id, warnings, timings)
         except Exception as exc:
+            finish_timings()
             with self.sessions() as session:
                 stopping = session.get(Task, task_id).status == "stopping"
             if stopping:
@@ -496,14 +512,11 @@ class Pipeline:
             error = exc if isinstance(exc, AppError) else AppError("processing_failed", "处理失败；已保存的证据不会删除，请检查环境后重试。")
             reference = self.diagnostics.record(error.code, error.message, exc, task_id=task_id, stage=stage,
                                                 asr_engine=settings.asr_engine, ocr_engine=settings.ocr_engine, llm_model=settings.llm_model)
-            timings["total"] = round(time.monotonic() - total, 3)
             self.update(task_id, status="failed", error={"code": error.code, "message": error.message, **reference}, warnings=warnings, timings=timings)
             logger.warning("task=%s status=failed stage=%s code=%s", task_id, stage, error.code)
         finally:
             if claimed:
-                if stage in {"transcribing", "ocr"} and stage not in timings:
-                    timings[stage] = round(time.monotonic() - tick, 3)
-                timings["total"] = round(time.monotonic() - total, 3)
+                finish_timings()
                 try:
                     with self.sessions.begin() as session:
                         task = session.get(Task, task_id)

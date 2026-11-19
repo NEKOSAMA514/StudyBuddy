@@ -62,7 +62,7 @@ def test_video_timestamp_repair_and_resume_keep_compact_input_and_exports(tmp_pa
         original = deepcopy(evidence)
         async with ModelClient(settings) as model:
             gen = ConciseVideoGeneration("time", model, settings, tmp_path, evidence, 10, asyncio.Event(),
-                lambda: None, lambda _: None, {}, lambda _: None, "课程")
+                lambda: None, lambda _: None, lambda _: None, "课程")
             result = await gen.run()
             assert len(concise_calls) == 2
             assert f"[{label}](#video-time-{target})" in result["chapters"][0]["markdown"]

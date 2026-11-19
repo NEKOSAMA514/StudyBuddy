@@ -44,10 +44,10 @@ def test_preview_matches_actual_generation_and_is_read_only(tmp_path, style, lim
     assert {p.name: p.read_bytes() for p in folder.iterdir()} == before
     async def run():
         async with FakeModel(settings) as model:
-            args = ("task", model, settings, tmp_path / style, evidence, video.duration, asyncio.Event(), lambda: None, lambda _: None, {})
+            args = ("task", model, settings, tmp_path / style, evidence, video.duration, asyncio.Event(), lambda: None, lambda _: None)
             (tmp_path / style).mkdir()
             gen = (ConciseVideoGeneration(*args, lambda _: None, "课程") if style == "concise"
-                   else DetailedVideoGeneration(*args, video_title="课程"))
+                   else DetailedVideoGeneration(*args, timings={}, video_title="课程"))
             return await gen.run()
     result = asyncio.run(run())
     assert info["estimated_segments"] == result["total_segments"]

@@ -253,9 +253,10 @@ def test_all_cached_generation_emits_no_request_activity(tmp_path, monkeypatch, 
             config = task_config(settings, "目录", preview(material, settings, "目录"))
             factory = ConciseDocumentGeneration if style == "concise" else DetailedDocumentGeneration
             return factory("cache", tmp_path, config, material, model, asyncio.Event(), lambda: None, lambda *a: None, lambda value: None)
-        factory = ConciseVideoGeneration if style == "concise" else DetailedVideoGeneration
-        return factory("cache", model, settings, tmp_path, evidence, 10, asyncio.Event(), lambda: None, lambda *a: None, {},
-                       publish=lambda value: None, video_title="目录")
+        args = ("cache", model, settings, tmp_path, evidence, 10, asyncio.Event(), lambda: None, lambda *a: None)
+        if style == "concise":
+            return ConciseVideoGeneration(*args, publish=lambda value: None, video_title="目录")
+        return DetailedVideoGeneration(*args, timings={}, publish=lambda value: None, video_title="目录")
     first = asyncio.run(flow().run())
     assert first["chapters"]
     async def forbidden(*args, **kwargs):

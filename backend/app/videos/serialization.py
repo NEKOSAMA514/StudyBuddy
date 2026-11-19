@@ -16,7 +16,7 @@ SEGMENT_STEPS = (*STEPS[:3],
 STAGE_LABELS = {"queued": "等待处理", "checking": "检查视频", "transcribing": "识别讲解语音",
                 "ocr": "提取画面文字", "planning": "规划视频章节", "summarizing": "生成章节正文",
                 "segments": "逐段生成笔记", "finalizing": "生成整体概览与校验引用", "completed": "分析完成"}
-TIMING_LABELS = {"transcribing": "识别讲解语音", "ocr": "提取画面文字", "planning": "规划视频章节",
+TIMING_LABELS = {"checking": "检查视频", "transcribing": "识别讲解语音", "ocr": "提取画面文字", "planning": "规划视频章节",
                  "summarizing": "生成章节正文", "finalizing": "生成整体概览与校验引用", "total": "本次总耗时"}
 
 

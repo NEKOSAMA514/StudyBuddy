@@ -151,7 +151,7 @@ def test_one_call_video_type_complete_and_no_hard_length_limit(tmp_path, concise
         async with ModelClient(settings()) as model:
             evidence = [{"id": "s1", "kind": "speech", "text": "材料原文", "start_seconds": 0, "end_seconds": 10}]
             gen = ConciseVideoGeneration("test", model, model.settings, tmp_path, evidence, 7200, asyncio.Event(), lambda: None,
-                                         lambda _: None, {}, lambda _: None, "材料")
+                                         lambda _: None, lambda _: None, "材料")
             result = await gen.run()
             assert len(concise_calls) == 1 and result["total_segments"] == 1
             assert result["content_type"] == CONTENT_TYPES[selected]
@@ -172,7 +172,7 @@ def test_concise_video_sends_compact_material_and_keeps_local_sources(tmp_path, 
                 "image_name": None, "confidence": None} for i in range(145)]
             original = deepcopy(evidence)
             result = await ConciseVideoGeneration("compact", model, model.settings, tmp_path, evidence, 600,
-                asyncio.Event(), lambda: None, lambda _: None, {}, lambda _: None, "材料").run()
+                asyncio.Event(), lambda: None, lambda _: None, lambda _: None, "材料").run()
             assert len(concise_calls) == result["total_segments"] == 1
             body, payload = concise_calls[0]
             assert payload["primary"] == [{"id": f"E{i + 1}", "kind": item["kind"], "text": item["text"]}
@@ -200,6 +200,95 @@ def test_concise_video_compact_ids_match_context_and_primary():
     assert (primary, context) == original
 
 
+@pytest.mark.parametrize("planning_fails", [False, True])
+def test_video_concise_stage_includes_material_preparation(client, app, video_file, monkeypatch, planning_fails):
+    from types import SimpleNamespace
+    from app.videos import concise, pipeline as video_pipeline
+    from .fakes import FakeModel
+
+    video = upload_video(client, video_file)
+    task_id = client.post(f'/api/v1/videos/{video["id"]}/analyses', json={"note_style": "concise"}).json()["task_id"]
+    runner = Pipeline(app.state.pipeline.get_settings, app.state.sessions, app.state.diagnostics, FakeRecognizer, FakeModel)
+    elapsed = 0
+    monkeypatch.setattr(video_pipeline, "time", SimpleNamespace(monotonic=lambda: elapsed))
+    persist, plan = runner.persist_evidence, concise.plan
+
+    def persist_with_delay(video_id, evidence):
+        nonlocal elapsed
+        with app.state.sessions() as session:
+            stage = session.get(Task, task_id).stage.split(":")[0]
+        elapsed += {"transcribing": 7, "ocr": 20}[stage]
+        return persist(video_id, evidence)
+
+    def plan_with_delay(*args):
+        nonlocal elapsed
+        with app.state.sessions() as session:
+            task = session.get(Task, task_id)
+            assert task.stage == "concise"
+            assert task.timings["ocr"] == 20
+        elapsed += 50
+        if planning_fails:
+            raise AppError("model_input_budget", "test")
+        return plan(*args)
+
+    monkeypatch.setattr(runner, "persist_evidence", persist_with_delay)
+    monkeypatch.setattr(concise, "plan", plan_with_delay)
+    runner.run(task_id)
+    result = client.get(f"/api/v1/tasks/{task_id}").json()
+    assert result["status"] == ("failed" if planning_fails else "succeeded"), result
+    assert result["timings"] == {"checking": 0, "transcribing": 7, "ocr": 20, "concise": 50, "total": 77}
+
+
+def test_single_segment_video_measures_the_complete_material_once(monkeypatch):
+    from app.videos.concise import plan
+
+    sources = [{"id": f"speech-{i}", "kind": "speech", "start_seconds": i, "end_seconds": i + 1,
+                "text": "操作说明。"} for i in range(30)]
+    model = ModelClient(settings())
+    measured = []
+    input_characters = model.input_characters
+
+    def measure(operation, payload):
+        measured.append((len(payload["primary"]), payload.get("content_type")))
+        return input_characters(operation, payload)
+
+    monkeypatch.setattr(model, "input_characters", measure)
+    segments = plan(sources, model, 25000, "课程")
+    assert segments == [{"primary": [{**s, "start_offset": 0, "end_offset": len(s["text"])} for s in sources],
+                         "context": []}]
+    assert measured[:-1] == [(0, kind) for kind in (None, *CONTENT_TYPES.values())]
+    assert measured[-1][0] == len(sources)
+
+
+def test_concise_video_packs_repeated_ocr_at_the_budget_boundary():
+    from app.analysis.concise_material import validate_contexts, validate_coverage
+    from app.videos.concise import payload_for, plan
+
+    model = ModelClient(settings(summary_prompt="保留实验数值"))
+    title = "实验演示"
+    def sizes(primary, context):
+        payload = payload_for(title, primary, context)
+        return [model.input_characters("concise", {**payload, **variant})
+                for variant in [{}, *({"content_type": t} for t in CONTENT_TYPES.values())]]
+
+    fixed = sizes([], [])
+    sources = [{"id": f"F{i}", "kind": "frame", "start_seconds": i, "end_seconds": i + 1,
+                "text": "先读出电压表上的读数。\r\n2.50 V"} for i in range(30)]
+    for i in range(30, 50):
+        sources.append({"id": f"S{i}", "kind": "speech", "start_seconds": i, "end_seconds": i + 1,
+                        "text": f"第{i}次实验的读数需要单独记录。"})
+    limit = max(fixed) + 80 + model.repair_input_reserve
+    segments = plan(sources, model, limit, title)
+    assert len(segments) > 1 and len(segments[0]["primary"]) > 30
+    assert segments[1]["context"]
+    validate_coverage(sources, segments, complete=True)
+    validate_contexts(sources, segments)
+    for segment in segments:
+        actual = sizes(segment["primary"], segment["context"])
+        assert max(actual) + model.repair_input_reserve <= limit
+        assert len({size - overhead for size, overhead in zip(actual, fixed)}) == 1
+
+
 def test_split_same_speech_pause_resume_preserves_manifest_and_cursor(tmp_path, concise_calls, monkeypatch):
     async def run():
         async with ModelClient(settings(llm_input_text_limit=5500)) as model:
@@ -211,7 +300,7 @@ def test_split_same_speech_pause_resume_preserves_manifest_and_cursor(tmp_path, 
                 stopped.set()
             def make(stop, callback):
                 return ConciseVideoGeneration("partial", model, model.settings, tmp_path, evidence, 600, stop,
-                    lambda: None, lambda _: None, {}, callback, "材料")
+                    lambda: None, lambda _: None, callback, "材料")
             with pytest.raises(TaskPaused):
                 await make(stopped, publish).run()
             first = drafts[0]
@@ -373,7 +462,7 @@ def test_concise_continuation_type_change_repairs_only_current_segment(tmp_path,
                           *(model.input_characters("concise", {**single, "content_type": value}) for value in CONTENT_TYPES.values()))
             model.settings.llm_input_text_limit = largest + 300 + model.repair_input_reserve
             gen = ConciseVideoGeneration("repair", model, model.settings, tmp_path, source, 400, asyncio.Event(),
-                lambda: None, lambda _: None, {}, lambda _: None, "材料")
+                lambda: None, lambda _: None, lambda _: None, "材料")
             result = await gen.run()
             assert changed and result["total_segments"] == 2 and result["content_type"] == CONTENT_TYPES["课程或教材"]
             assert len(concise_calls) == result["total_segments"] + 1
