@@ -136,6 +136,24 @@ def test_video_ocr_reads_all_tracks_after_a_slow_recognition_batch(monkeypatch):
     assert [row["start_seconds"] for row in rows] == list(range(count))
 
 
+@pytest.mark.parametrize("corners", [
+    [(2, 4), (19, 4), (19, 9), (2, 9)],
+    [(1, 1), (5, 1), (5, 16), (1, 16)],
+    [(16, 11), (22, 11), (22, 20), (16, 20)],
+    [(2.5, 4), (19.5, 4), (19.5, 9), (2.5, 9)],
+    [(1, 3), (15, 4), (14, 10), (0, 9)],
+    [(-1, 0), (12, 0), (12, 5), (-1, 5)],
+])
+def test_video_line_crop_matches_perspective_pixels(corners):
+    from app.recognition.video_ocr import get_rotate_crop_image, line_crop
+
+    frame = np.random.default_rng(17).integers(0, 256, (20, 22, 3), dtype=np.uint8)
+    points = np.array(corners, dtype=np.float32)
+    crop = line_crop(frame, points)
+    np.testing.assert_array_equal(crop, get_rotate_crop_image(frame, points))
+    assert not np.shares_memory(frame, crop)
+
+
 def test_video_ocr_ranks_a_track_across_its_windows_once():
     from app.recognition.video_ocr import Candidate, rank
 

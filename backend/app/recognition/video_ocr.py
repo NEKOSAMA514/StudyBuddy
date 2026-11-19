@@ -65,6 +65,17 @@ def resize(image, width, height):
     return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
 
 
+def line_crop(image, points):
+    # 水平整数框的透视变换只是平移；复制裁剪，避免候选一直引用整帧。
+    (left, top), (right, top_right_y), (bottom_right_x, bottom), (bottom_left_x, bottom_left_y) = points
+    if (left == bottom_left_x and right == bottom_right_x and top == top_right_y and bottom == bottom_left_y and
+            0 <= left < right <= image.shape[1] and 0 <= top < bottom <= image.shape[0] and
+            all(value.is_integer() for value in (left, right, top, bottom))):
+        crop = image[int(top):int(bottom), int(left):int(right)].copy()
+        return np.rot90(crop) if crop.shape[0] >= 1.5 * crop.shape[1] else crop
+    return get_rotate_crop_image(image, points)
+
+
 def alignment(previous, current):
     """只接受能明显降低像素差的平移。"""
     height, width = current.shape
@@ -149,7 +160,9 @@ def integral_sum(integral, x, y, right, bottom):
 
 def changed_regions(reference, current, tracks, dx, dy):
     height, width = current.shape
-    changed = (cv2.absdiff(reference, current) >= 18).astype(np.uint8)
+    _, changed = cv2.threshold(cv2.absdiff(reference, current), 17, 1, cv2.THRESH_BINARY)
+    if not (dx or dy) and cv2.countNonZero(changed) == 0:
+        return []
     coherent = cv2.boxFilter(changed, cv2.CV_16U, (3, 3), normalize=False)
     integral = cv2.integral((changed & (coherent >= 2)).astype(np.uint8))
     x = np.r_[np.arange(0, width, TILE_SIZE), width]
@@ -181,11 +194,12 @@ def line_signature(crop):
 
 def same_line(before, after):
     difference = cv2.absdiff(before, after)
-    columns = np.percentile(difference.reshape(difference.shape[0], 10, -1), 85, axis=(0, 2))
-    if difference.mean() > 13 or columns.max() > 38:
+    if cv2.mean(difference)[0] > 13:
         return False
-    # 局部像素差用于区分仅有个别字符变化的文字。
-    changed = (difference >= 33).astype(np.uint8)
+    # 每个 7×5 邻域最多允许 2 个差异像素，比 24×24 分栏的 85 分位检查更严格。
+    _, changed = cv2.threshold(difference, 32, 1, cv2.THRESH_BINARY)
+    if cv2.countNonZero(changed) == 0:
+        return True
     return cv2.boxFilter(changed, cv2.CV_16U, (7, 5), normalize=False).max() < 3
 
 
@@ -297,7 +311,7 @@ class TextRegions:
         def still_visible(track):
             key = id(track)
             if key not in checked:
-                crop = get_rotate_crop_image(native, track.polygon * scale)
+                crop = line_crop(native, track.polygon * scale)
                 checked[key] = min(crop.shape[:2]) >= 2 and same_line(track.signature, line_signature(crop))
             return checked[key]
 
@@ -344,7 +358,7 @@ class TextRegions:
         for box, polygon in boxes:
             if min(box[2] - box[0], box[3] - box[1]) < 2 or any(overlap(box, other) >= .70 for other in added):
                 continue
-            crop = get_rotate_crop_image(native, polygon * scale)
+            crop = line_crop(native, polygon * scale)
             if min(crop.shape[:2]) < 2:
                 continue
             added.append(box)
