@@ -5,6 +5,8 @@ import json
 import logging
 import time
 from collections import deque
+from contextlib import nullcontext
+from copy import copy
 from .versions import PROMPT_VERSION, digest
 from ..analysis.checkpoints import checkpoint_path
 from ..util.json_io import atomic_json
@@ -25,6 +27,8 @@ class DetailedVideoGeneration:
                  publish=lambda result: None, segment_update=lambda progress: None, video_title="",
                  outline_ready=lambda summary: None, clipped_lines=None):
         self.model, self.settings, self.folder = model, settings, folder
+        self.request_slots = asyncio.Semaphore(settings.llm_section_concurrency)
+        self.segment_slots = nullcontext()
         self.stop, self.checkpoint, self.update, self.timings = stop, checkpoint, update, timings
         self.duration = duration
         self.video_title = video_title
@@ -192,6 +196,11 @@ class DetailedVideoGeneration:
         partials = deque()
         partial_ready = asyncio.Event()
 
+        async def generate(operation, payload, validate):
+            async with self.segment_slots, self.request_slots:
+                self.check()
+                return await self.model.generate(operation, payload, validate)
+
         def save_chapters(payload, value):
             for draft in value["chapters"]:
                 request = next(c for c in payload["chapters"] if c["chapter_id"] == draft["chapter_id"])
@@ -315,7 +324,7 @@ class DetailedVideoGeneration:
                                    else [payload["chapter"]["chapter_id"]] if operation == "extract" else [])
                     logger.info("task=%s operation=%s job=%s chapters=%s started=true", self.common["task_id"], operation,
                                 self.path(operation, payload).stem, chapter_ids)
-                    active[asyncio.create_task(self.model.generate(operation, payload, validate))] = (index, time.monotonic())
+                    active[asyncio.create_task(generate(operation, payload, validate))] = (index, time.monotonic())
                 if failure is None and active:
                     partial_wait = asyncio.create_task(partial_ready.wait())
                     try:
@@ -586,18 +595,41 @@ class DetailedVideoGeneration:
         evidence = {item["id"]: item for item in self.original.values()}
         return ground_chapters(result, issues, evidence, self.duration, start=self.range_start, end=self.range_end)
 
-    async def generate_segment(self, preview=False):
+    async def take_next_outline(self):
+        if self.next_outline is None:
+            return None
+        task, slots = self.next_outline
+        # 前段已发布，超长材料的多个提取请求现在可以使用全部并发名额。
+        for _ in range(self.settings.llm_section_concurrency - 1):
+            slots.release()
+        result = await task
+        self.next_outline = None
+        return result
+
+    async def generate_segment(self, preview, start_next_outline):
         for stage in ("planning", "summarizing"):
             self.phase_update(stage)
             self.update(stage if stage == "planning" else f"summarizing:0/{len(chapters)}")
             tick = time.monotonic()
             try:
                 if stage == "planning":
-                    outline = await self.planning()
+                    prepared = await self.take_next_outline()
+                    if prepared is None:
+                        outline = await self.planning()
+                    else:
+                        outline, self.prepared = prepared
+                        self.content_type = outline["content_type"]
                     self.outline_digest = digest(outline)
                     chapters = self.assign(outline)
                     if preview:
                         self.outline_ready(outline["video_summary"])
+                    elif self.range_end < self.duration and self.settings.llm_section_concurrency > 1:
+                        following = copy(self)
+                        following.segment_slots = asyncio.Semaphore(1)
+                        task = asyncio.create_task(start_next_outline(following, outline))
+                        self.next_outline = task, following.segment_slots
+                        # 让下一段先领取一个请求名额，避免被当前段的整批正文排在后面。
+                        await asyncio.sleep(0)
                 else:
                     drafts = await self.writing(chapters, outline["video_summary"])
                     self.phase_update("issues")
@@ -626,6 +658,17 @@ class DetailedVideoGeneration:
 
     # 按时间分段接续已保存记录，发布分段正文后再汇总整体导览。
     async def run(self):
+        self.request_slots = asyncio.Semaphore(self.settings.llm_section_concurrency)
+        self.next_outline = None
+        try:
+            return await self.run_segments()
+        finally:
+            if self.next_outline is not None:
+                task, _ = self.next_outline
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def run_segments(self):
         self.check()
         self.content_type = None
         all_evidence, base = self.all_evidence, self.base_common
@@ -650,41 +693,58 @@ class DetailedVideoGeneration:
                     "completed": completed, "total": total, "start_seconds": segment["start_seconds"],
                     "end_seconds": segment["end_seconds"], "phase": phase})
 
-        while next_start < self.duration:
+        def outline_context(outline):
+            return {"video_summary": outline["video_summary"],
+                    "chapters": [{key: chapter[key] for key in ("title", "core_question", "topics")}
+                                 for chapter in outline["chapters"]]}
+
+        def configure_segment(flow, index, next_start, chapter_offset, previous):
             self.check()
-            # 上一段返回后，按完整大纲的实际长度选择下一段；后续段数仅作估计。
             overhead, later_room = base_overhead, None
-            if records:
-                overhead = outline_overhead(self.model, self.video_title, self.previous_segment_outline, self.content_type)
+            if previous:
+                overhead = outline_overhead(self.model, self.video_title, previous, flow.content_type)
                 if overhead >= limit:
                     raise AppError("model_input_budget", "上一段大纲占满输入空间，请提高生成输入上限后重新生成笔记。")
-                later_room = limit - base_overhead - len(self.content_type)
+                later_room = limit - base_overhead - len(flow.content_type)
             split, pending = plan.ranges(next_start, limit - overhead, later_room)
+            start, end, left, right = pending[0]
+            flow.evidence = flow.anchors = all_evidence[left:right]
+            description = {"index": index, "start_seconds": start, "end_seconds": end,
+                           "evidence_ids": [item["id"] for item in flow.evidence]}
+            if index <= len(manifest) and manifest[index - 1] != description:
+                raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
+            flow.range_start, flow.range_end, flow.chapter_offset = start, end, chapter_offset
+            flow.previous_segment_outline = previous
+            flow.previous_chapter_outline = previous["chapters"][-1] if previous else {}
+            flow.boundary = preceding_context(all_evidence, start)
+            flow.common = {**base, "segment": description, "context": digest(flow.boundary),
+                           "previous_outline": digest(previous)}
+            flow.outline_digest = None
+            return description, split, index - 1 + len(pending)
+
+        async def start_next_outline(following, outline):
+            # 段内来源、缓存键和提取结果各自独立；模型客户端和请求名额与当前正文共用。
+            description, _, _ = configure_segment(following, following.common["segment"]["index"] + 1,
+                following.range_end, following.chapter_offset + len(outline["chapters"]), outline_context(outline))
+            if following.path("segment", description).exists():
+                return None
+            next_outline = await following.planning()
+            return next_outline, following.prepared
+
+        while next_start < self.duration:
+            index = len(records) + 1
+            segment, split, total = configure_segment(self, index, next_start, len(body), self.previous_segment_outline)
             segmented = segmented or split
-            total = len(records) + len(pending)
             if not records:
                 logger.info("task=%s source_characters=%s segments=%s",
                             base["task_id"], sum(len(item["text"]) for item in all_evidence), total)
-            start, end, left, right = pending[0]
-            self.evidence = all_evidence[left:right]
-            segment = {"index": len(records) + 1, "start_seconds": start, "end_seconds": end}
-            description = {**segment, "evidence_ids": [item["id"] for item in self.evidence]}
-            if len(records) < len(manifest):
-                if manifest[len(records)] != description:
-                    raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
-            else:
-                manifest.append(description)
+            if index > len(manifest):
+                manifest.append(segment)
                 atomic_json(manifest_path, manifest)
-            self.range_start, self.range_end = segment["start_seconds"], segment["end_seconds"]
-            self.chapter_offset = len(body)
-            self.anchors = self.evidence
-            self.boundary = preceding_context(all_evidence, self.range_start)
-            self.common = {**base, "segment": description, "context": digest(self.boundary),
-                           "previous_outline": digest(self.previous_segment_outline)}
-            self.outline_digest = None
-            cache = self.path("segment", description)
+            cache = self.path("segment", segment)
             self.phase_update = lambda phase, s=segment: progress(s, s["index"] - 1, phase)
             if cache.exists():
+                await self.take_next_outline()
                 record = json.loads(cache.read_text(encoding="utf-8"))
                 record["outline"] = self.validate("outline", self.input_payload("outline", {"anchors": self.anchor_payload()}), record["outline"])
                 self.content_type = record["outline"]["content_type"]
@@ -704,17 +764,12 @@ class DetailedVideoGeneration:
                 logger.info("task=%s segment=%s cached=true", base["task_id"], segment["index"])
                 emit(self.model, "cached", message=f"复用已完成的第 {segment['index']} 段笔记")
             else:
-                record = await self.generate_segment(preview=not segmented)
+                record = await self.generate_segment(not segmented, start_next_outline)
                 atomic_json(cache, record)
             records.append(record)
             body.extend(record["chapters"])
             issues.extend(record["source_issues"])
-            self.previous_segment_outline = {
-                "video_summary": record["outline"]["video_summary"],
-                "chapters": [{key: chapter[key] for key in ("title", "core_question", "topics")}
-                             for chapter in record["outline"]["chapters"]],
-            }
-            self.previous_chapter_outline = self.previous_segment_outline["chapters"][-1]
+            self.previous_segment_outline = outline_context(record["outline"])
             if segmented:
                 guides.append({"index": segment["index"], "start_seconds": self.range_start,
                                "end_seconds": self.range_end, "first_chapter_id": record["chapters"][0]["chapter_id"],

@@ -239,7 +239,8 @@ def test_extraction_batches_use_their_own_minute_context_and_keep_previous_outli
     assert fragments == {"E3": "甲" * 3000, "E4": "乙" * 3000}
 
 
-def test_oversized_single_record_is_extracted_inside_its_segment_without_loss(tmp_path, small_outline_budget):
+@pytest.mark.parametrize("large_record", [0, 1])
+def test_oversized_single_record_is_extracted_inside_its_segment_without_loss(tmp_path, small_outline_budget, large_record):
     class Model(RecordingModel):
         async def generate(self, operation, payload, validate):
             if operation == "extract":
@@ -248,13 +249,15 @@ def test_oversized_single_record_is_extracted_inside_its_segment_without_loss(tm
                 return validate({"facts": [{"text": "提取的重要解释与结论。"}], "issues": []})
             return await super().generate(operation, payload, validate)
     evidence = sources(2)
-    evidence[0]["text"] = "完整原文" * 5000 + "末尾条件"
+    evidence[large_record]["text"] = "完整原文" * 5000 + "末尾条件"
     coordinator, model, snapshots, _ = flow(tmp_path, evidence, Model, duration=2400)
     model.settings.llm_input_text_limit = 15000
     result = asyncio.run(coordinator.run())
     fragments = [item["text"] for op, payload in model.inputs if op == "extract"
                  for item in payload["chapter"]["primary"]]
-    assert "".join(fragments) == evidence[0]["text"]
+    assert "".join(fragments) == evidence[large_record]["text"]
+    bodies = [chapter for op, payload in model.inputs if op == "chapters" for chapter in payload["chapters"]]
+    assert "facts" in bodies[large_record] and "facts" not in bodies[1 - large_record]
     assert [chapter["evidence_ids"] for chapter in result["chapters"]] == [["s0"], ["s1"]]
     assert len(snapshots) == 2
     outline_inputs = [payload for op, payload in model.inputs if op == "outline"]
@@ -268,7 +271,9 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
     coordinator, model, snapshots, progress = flow(tmp_path, evidence)
     original = deepcopy(evidence)
     result = asyncio.run(coordinator.run())
-    assert [op for op, _ in model.inputs] == ["outline", "chapters"] * 3 + ["overview"]
+    assert [op for op, _ in model.inputs].count("outline") == 3
+    assert [op for op, _ in model.inputs].count("chapters") == 3
+    assert len(model.inputs) == 7 and model.inputs[-1][0] == "overview"
     assert [len(value["chapters"]) for value in snapshots] == [1, 2, 3]
     assert all(not value["complete"] for value in snapshots)
     assert [len(value["segment_guides"]) for value in snapshots] == [1, 2, 3]
@@ -284,14 +289,20 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
     assert [(c["start_seconds"], c["end_seconds"]) for c in result["chapters"]] == [(0, 1200), (1200, 2400), (2400, 3600)]
     assert [c["evidence_ids"] for c in result["chapters"]] == [["s0"], ["s1"], ["s2"]]
     assert all(c["timestamp_basis"] == kind for c in result["chapters"])
-    for op, payload in model.inputs[2:-1]:
+    for op, payload in model.inputs[:-1]:
         assert "previous_context" not in payload
         if op == "outline":
+            if payload["anchors"][0]["id"] == "E1":
+                assert payload["context"] == {}
+                continue
             assert payload["context"] == {"video_summary": "视频介绍 TCP 慢启动与拥塞窗口增长。", "chapters": [
                 {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}]}
             assert set(i["id"] for i in payload["anchors"]) <= set(i["id"] for i in payload["evidence"])
             assert coordinator.model.input_characters(op, payload) <= 15000
         else:
+            if payload["chapters"][0]["chapter_id"] == "C1":
+                assert payload["chapters"][0]["previous_chapter_outline"] == {}
+                continue
             assert payload["chapters"][0]["previous_chapter_outline"] == {
                 "title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}
     assert set(model.inputs[-1][1]) == {"video_summaries", "content_type"}
@@ -322,7 +333,7 @@ def test_each_segment_passes_its_own_summary_to_writing_without_extra_calls(tmp_
             return await super().generate(operation, payload, validate)
     coordinator, model, _, _ = flow(tmp_path, model_type=Model)
     result = asyncio.run(coordinator.run())
-    assert [op for op, _ in model.inputs] == ["outline", "chapters"] * 3 + ["overview"]
+    assert len(model.inputs) == 7 and model.inputs[-1][0] == "overview"
     expected = ["片段主题E1", "片段主题E2", "片段主题E3"]
     assert [payload["video_summary"] for op, payload in model.inputs if op == "chapters"] == expected
     assert [guide["summary"] for guide in result["segment_guides"]] == expected
@@ -568,7 +579,7 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
                            config.llm_request_interval_seconds))
         async def generate(self, operation, payload, validate):
             starts.append((operation, [c["chapter_id"] for c in payload.get("chapters", [])]))
-            if operation == "outline" and payload["anchors"][0]["start_seconds"] == 1200:
+            if operation == "chapters" and payload["chapters"][0]["chapter_id"] == "C2" and self.fail:
                 public = client.get(f"/api/v1/tasks/{identifier}").json()
                 assert public["notes_state"] == "partial" and "result" not in public
                 assert public["notes_revision"] == 1
@@ -576,7 +587,6 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
                 note = client.get(f"/api/v1/analyses/{identifier}").json()
                 assert len(note["chapters"]) == 1 and note["covered_until_seconds"] == 1200
                 assert note["segment_guides"][0]["first_chapter_id"] == "C1"
-            if operation == "chapters" and payload["chapters"][0]["chapter_id"] == "C2" and self.fail:
                 raise AppError("model_network_error", "模拟第二段正文失败")
             return await super().generate(operation, payload, validate)
     pipeline = Pipeline(lambda snapshot=settings: snapshot, app.state.sessions, app.state.diagnostics, Recognizer, Model)
@@ -619,10 +629,9 @@ def test_completed_files_recover_after_snapshot_publication_failure(tmp_path):
     coordinator.publish = fail
     with pytest.raises(OSError):
         asyncio.run(coordinator.run())
-    calls = model.calls
     coordinator.publish = lambda value: snapshots.append(deepcopy(value))
     assert asyncio.run(coordinator.run())["complete"]
-    assert model.calls == calls + 5 and len(snapshots) == 3
+    assert model.calls == 7 and len(snapshots) == 3
 
 
 def test_corrupt_completed_segment_is_rejected_before_new_model_calls(tmp_path):

@@ -6,7 +6,7 @@ import pytest
 
 from app.analysis.content_types import CONTENT_TYPES
 from app.config import Settings
-from app.errors import TaskPaused
+from app.errors import AppError, TaskPaused
 from app.videos.detailed import DetailedVideoGeneration
 from app.videos.model import ModelClient
 from app.videos.segments import outline_overhead
@@ -129,3 +129,120 @@ def test_next_segment_counts_actual_previous_outline_without_extracting(tmp_path
     assert len(json.loads(next(tmp_path.glob("blocks-v4-segments-*.json")).read_text("utf-8"))) == 3
     calls = model.calls
     assert asyncio.run(coordinator.run()) == result and model.calls == calls
+
+
+@pytest.mark.parametrize("case", ["parallel", "serial", "pause", "outline_error"])
+def test_next_outline_shares_slots_with_current_body_and_resumes_in_order(tmp_path, case):
+    async def run():
+        body_started, outline_started = asyncio.Event(), asyncio.Event()
+        release_body, release_outline = asyncio.Event(), asyncio.Event()
+        stop = asyncio.Event()
+        active, peak, published, requests = 0, 0, [], []
+        first_attempt = True
+
+        class Model(FakeModel):
+            def input_characters(self, operation, payload):
+                if operation == "chapters" and len(payload["chapters"]) > 1:
+                    return 1000000  # 两章分别请求，和下一段大纲竞争并发名额。
+                return super().input_characters(operation, payload)
+
+            async def generate(self, operation, payload, validate):
+                nonlocal active, peak
+                active += 1
+                peak = max(peak, active)
+                try:
+                    if operation == "outline":
+                        ids = [item["id"] for item in payload["anchors"]]
+                        requests.append(ids[0])
+                        if payload["context"]:
+                            assert [c["title"] for c in payload["context"]["chapters"]] == ["E1", "E2"]
+                            outline_started.set()
+                            await release_outline.wait()
+                            if first_attempt and case == "outline_error":
+                                raise AppError("model_network_error", "模拟后续大纲失败")
+                        return validate({"content_type": CONTENT_TYPES["课程或教材"], "video_summary": "本段概要",
+                            "chapters": [{"title": i, "core_question": "问题", "topics": ["要点"],
+                                          "start_anchor_id": i} for i in ids]})
+                    if operation == "chapters":
+                        chapter = payload["chapters"][0]["chapter_id"]
+                        requests.append(chapter)
+                        if chapter in {"C1", "C2"}:
+                            body_started.set()
+                            await release_body.wait()
+                        else:
+                            assert published[-1] == 1
+                    return await super().generate(operation, payload, validate)
+                finally:
+                    active -= 1
+
+        model = Model(Settings(llm_section_concurrency=1 if case == "serial" else 2))
+        model.settings.llm_input_text_limit = outline_overhead(model) + 6000
+        evidence = [{"id": str(i), "kind": "speech", "start_seconds": i * 100, "end_seconds": i * 100 + 1,
+                     "text": "字" * 2500} for i in range(3)]
+        flow = DetailedVideoGeneration("overlap", model, model.settings, tmp_path, evidence, 300, stop,
+            lambda: None, lambda _: None, {}, publish=lambda note: published.append(note["completed_segments"]))
+        task = asyncio.create_task(flow.run())
+        await body_started.wait()
+        if case == "serial":
+            assert not outline_started.is_set()
+            release_body.set()
+        await outline_started.wait()
+        assert published == ([1] if case == "serial" else [])
+        assert active == model.settings.llm_section_concurrency
+        if case == "pause":
+            stop.set()
+            with pytest.raises(TaskPaused):
+                await task
+            assert active == 0 and published == []
+            stop.clear()
+        release_outline.set()
+        release_body.set()
+        if case == "outline_error":
+            with pytest.raises(AppError, match="模拟后续大纲失败"):
+                await task
+            assert active == 0 and published == [1]
+        if case in {"pause", "outline_error"}:
+            first_attempt = False
+            task = asyncio.create_task(flow.run())
+        result = await task
+        assert result["complete"] and [c["chapter_id"] for c in result["chapters"]] == ["C1", "C2", "C3"]
+        assert requests.count("E1") == 1 and requests.count("E3") == (2 if case in {"pause", "outline_error"} else 1)
+        if case != "pause":
+            assert requests.count("C1") == requests.count("C2") == 1
+        assert active == 0 and peak == model.settings.llm_section_concurrency
+
+    asyncio.run(asyncio.wait_for(run(), timeout=10))
+
+
+def test_pending_extraction_can_use_all_slots_after_prior_body_is_published(tmp_path):
+    async def run():
+        first_extract, two_extracts = asyncio.Event(), asyncio.Event()
+        published, extracting = [], 0
+
+        class Model(FakeModel):
+            async def generate(self, operation, payload, validate):
+                nonlocal extracting
+                if operation == "extract":
+                    extracting += 1
+                    try:
+                        first_extract.set()
+                        if extracting == 2:
+                            assert published == [1]
+                            two_extracts.set()
+                        await two_extracts.wait()
+                        return validate({"facts": [{"text": "本段事实"}], "issues": []})
+                    finally:
+                        extracting -= 1
+                if operation == "chapters" and payload["chapters"][0]["chapter_id"] == "C1":
+                    await first_extract.wait()
+                return await super().generate(operation, payload, validate)
+
+        model = Model(Settings(llm_section_concurrency=2, llm_input_text_limit=9000))
+        evidence = [{"id": str(i), "kind": "speech", "start_seconds": i * 100, "end_seconds": i * 100 + 1,
+                     "text": text} for i, text in enumerate(("第一章", "长原文" * 10000))]
+        flow = DetailedVideoGeneration("extraction", model, model.settings, tmp_path, evidence, 300,
+            asyncio.Event(), lambda: None, lambda _: None, {}, publish=lambda note: published.append(note["completed_segments"]))
+        assert (await flow.run())["complete"]
+        assert two_extracts.is_set() and published == [1, 2]
+
+    asyncio.run(asyncio.wait_for(run(), timeout=10))
