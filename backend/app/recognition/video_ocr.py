@@ -17,6 +17,7 @@ from rapidocr.ch_ppocr_rec.typings import TextRecInput
 from rapidocr.utils.process_img import get_rotate_crop_image
 
 from .extraction import VIDEO_OCR_CONFIDENCE
+from .ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match
 
 
 logger = logging.getLogger("studybuddy")
@@ -28,18 +29,22 @@ WINDOW_SECONDS = 24
 BATCH_SIZE = 12
 
 
+@dataclass(frozen=True)
+class LineCrop:
+    image: np.ndarray
+    box: tuple
+    quality: float
+
+
 @dataclass
 class Track:
     first: float
     last: float
     polygon: np.ndarray
     signature: np.ndarray
-    crop: np.ndarray
-    best_box: tuple
-    quality: float
+    best: LineCrop
     samples: int = 1
-    alternate_crop: np.ndarray | None = None
-    alternate_quality: float = -math.inf
+    alternate: LineCrop | None = None
     prefix: "Candidate | None" = None
 
     def observe(self, seconds):
@@ -248,16 +253,19 @@ class TextRegions:
         self.last_full = -math.inf
 
     def finish(self, tracks):
-        def store(track, image, alternate=None, prefix=None):
-            crop = np.ascontiguousarray(image)
+        def store(track, view, alternate=None, prefix=None):
+            crop = np.ascontiguousarray(view.image)
             offset = self.crops.tell()
             length = self.crops.write(zlib.compress(crop, level=1))
-            return Candidate(track.first, track.last, track.best_box, track.quality,
+            return Candidate(track.first, track.last, view.box, view.quality,
                              track.samples, offset, length, crop.shape, alternate, prefix)
 
+        finished = []
         for track in tracks:
-            alternate = store(track, track.alternate_crop) if track.alternate_crop is not None else None
-            self.candidates.append(store(track, track.crop, alternate, track.prefix))
+            alternate = store(track, track.alternate) if track.alternate is not None else None
+            finished.append(store(track, track.best, alternate, track.prefix))
+        self.candidates.extend(finished)
+        return finished
 
     def observe(self, seconds, frame):
         turn = (int(frame.rotation or 0) % 360) // 90
@@ -372,19 +380,19 @@ class TextRegions:
                 old_box, old = previous[index]
                 if same_line(old.signature, signature):
                     old.polygon = polygon
-                    if quality > old.quality:
-                        old.crop, old.best_box, old.quality = crop, box, quality
+                    if quality > old.best.quality:
+                        old.best = LineCrop(crop, box, quality)
                 # 重新裁剪和缩放会放大框边界的轻微抖动。复核成功时沿用原框。
                 elif max(abs(a - b) for a, b in zip(box, old_box)) > BOX_JITTER_PIXELS or not still_visible(old):
                     continue
-                elif quality > old.alternate_quality:
+                elif old.alternate is None or quality > old.alternate.quality:
                     # 清晰度不总等于识别置信度。保留一份不同的裁剪用于低置信重读。
-                    old.alternate_crop, old.alternate_quality = crop, quality
+                    old.alternate = LineCrop(crop, box, quality)
                 _, track = previous.pop(index)
                 track.observe(seconds)
                 break
             if track is None:
-                track = Track(seconds, seconds, polygon, signature, crop, box, quality)
+                track = Track(seconds, seconds, polygon, signature, LineCrop(crop, box, quality))
                 started.append(track)
             keep.append(track)
         ended = []
@@ -396,19 +404,19 @@ class TextRegions:
             else:
                 ended.append((box, track))
         self.active = keep
-        self.finish(track for _, track in ended)
+        finished = self.finish(track for _, track in ended)
         if last_frame is None or not started or not ended:
             return
 
         # 先按旧框覆盖率配对，再比较原字形。只连接相邻采样中一对一的追加。
-        previous_crops = list(zip(ended, self.candidates[-len(ended):], strict=True))
+        previous_crops = list(zip(ended, finished, strict=True))
         links = []
         children = Counter()
         last_sample = int(seconds + 1e-6) - 1
         for track in started:
             matches = [candidate for (box, old), candidate in previous_crops
                        if int(old.last + 1e-6) == last_sample
-                       and extends_right(box, track.best_box, last_frame, current)
+                       and extends_right(box, track.best.box, last_frame, current)
                        and (still_visible(old) or prefix_ink_unchanged(old.polygon, last_frame, current))]
             children.update(id(candidate) for candidate in matches)
             if len(matches) == 1:
@@ -521,6 +529,15 @@ def read_crops(engine, crops, candidates, check_stop, skipped=frozenset()):
     return records, used
 
 
+def _can_skip_caption_prefixes(text):
+    if len(text) < 6 or not any(char in "，。！？；：、…,.!?;:" for char in text):
+        return False
+    normalized = text.translate(OCR_SYMBOLS)
+    if requires_literal_match(normalized):
+        return False
+    return not any(char.isnumeric() or unicodedata.category(char) in ("Sm", "Sc") for char in normalized)
+
+
 def read_candidates(engine, crops, candidates, check_stop):
     def short_lived_line(candidate):
         left, top, right, bottom = candidate.box
@@ -543,11 +560,7 @@ def read_candidates(engine, crops, candidates, check_stop):
             continue
         selected.append(record)
         skipped.add(id(candidate))
-        text = record[1]
-        if len(text) < 6 or not any(char in "，。！？；：、…,.!?;:" for char in text):
-            continue
-        if any(char.isnumeric() or char in "%/^_{}[]\\-()" or unicodedata.category(char) in ("Sm", "Sc")
-               for char in text):
+        if not _can_skip_caption_prefixes(record[1]):
             continue
         candidate = candidate.prefix
         while candidate is not None and short_lived_line(candidate):
@@ -572,8 +585,9 @@ def _same_line_extent(left, right):
 
 
 def _literal_character(char):
+    char = char.translate(OCR_SYMBOLS)
     return (char.isnumeric() or (char.isascii() and char.isalpha())
-            or char in ".,+-/^_()[]%" or unicodedata.category(char) == "Sm")
+            or char in ".," + FORMULA_SYMBOLS or unicodedata.category(char) == "Sm")
 
 
 def _fragment_offset(whole, part):

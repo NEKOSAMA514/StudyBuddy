@@ -3,7 +3,7 @@ import re
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from itertools import accumulate, groupby
-from string import punctuation
+from ..recognition.ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match
 
 
 OCR_REPEAT_SECONDS = 2
@@ -12,12 +12,7 @@ SPEECH_LINK_SECONDS = 1
 SPEECH_BLOCK_SECONDS = 60
 MIN_OCR_TEXT_MATCH = 5
 NEGATIONS = "不没未无非别勿否"
-FORMULA_SYMBOLS = r"+-−±×÷=<>≤≥≠%‰\^_{}[]()/*°℃℉"
 EXPRESSION_DELIMITERS = ".,:。!?;；、…“”‘’\"'"
-# AgCl 等只含字母的式子也需要完整匹配。
-ELEMENT_SEQUENCE = re.compile(r"(?<![A-Za-z])(?:[A-Z][a-z]?){2,}(?![A-Za-z])")
-# 同一个标点或符号的全角变体逐个对应 ASCII。
-OCR_SYMBOLS = {ord(symbol) + 0xFEE0: symbol for symbol in punctuation}
 OCR_SENTENCE_END = re.compile(r"(?<=。)|(?<=[\u3400-\u9fff][!?])|(?<=[!?])(?=[\u3400-\u9fff])")
 
 
@@ -88,10 +83,6 @@ def _speech_at_frames(frames, records, tolerance):
 
 def _normalized(text):
     return re.sub(r'[\s，,。；;：:、！？!?“”"‘’]', "", text)
-
-
-def _requires_literal_match(text):
-    return any(char.isdigit() or char in FORMULA_SYMBOLS for char in text) or ELEMENT_SEQUENCE.search(text) is not None
 
 
 def _expression_edge(char):
@@ -165,7 +156,7 @@ def deduplicate_ocr(payload):
                 text = line.strip()
                 if spoken and len(plain := _normalized(text)) >= 6:
                     # 数字和公式只作原文匹配，保留符号与小数点。
-                    literal = _requires_literal_match(text)
+                    literal = requires_literal_match(text)
                     candidate, voices = (text, spoken) if literal else (plain, normalized_speech)
                     # 短标签碰巧出现在同期口播时，仍保留对应画面。
                     if len(plain) < 12:
@@ -232,7 +223,7 @@ def _speech_comparison_text(text):
 
 
 def _spoken_duplicate(raw, plain, spoken, normalized_speech):
-    literal = _requires_literal_match(raw)
+    literal = requires_literal_match(raw)
     if len(plain) < (12 if literal else MIN_OCR_TEXT_MATCH):
         return False
     if literal:
@@ -268,7 +259,7 @@ def _without_spoken_lines(text, spoken, normalized_speech):
                 break
             row, part = parts[end]
             raw += part
-            if row != parts[index][0] and _requires_literal_match(raw):
+            if row != parts[index][0] and requires_literal_match(raw):
                 break
             plain = _speech_comparison_text(raw)
             if len(plain) > longest:

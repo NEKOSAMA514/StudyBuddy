@@ -77,7 +77,8 @@ def test_video_ocr_tries_alternate_crop_only_for_low_confidence():
         ]
 
 
-@pytest.mark.parametrize("case", ["clipped", "other_row", "one_character", "missing_negation", "split_formula", "reappears"])
+@pytest.mark.parametrize("case", ["clipped", "other_row", "one_character", "missing_negation", "split_formula",
+                                  "split_fullwidth_formula", "reappears"])
 def test_video_ocr_requires_two_matching_full_lines_to_fold_a_crop(case):
     from app.recognition.video_ocr import Candidate, evidence_rows
 
@@ -85,6 +86,8 @@ def test_video_ocr_requires_two_matching_full_lines_to_fold_a_crop(case):
     part = "3mL试剂，慢慢搅拌并观察沉淀" if case == "split_formula" else "慢慢搅拌并观察沉淀"
     if case == "missing_negation":
         whole, part = "不需要搅拌即可观察溶液颜色", "需要搅拌即可观察溶液颜色"
+    if case == "split_fullwidth_formula":
+        whole, part = "按质量比A／B配制溶液并观察沉淀", "B配制溶液并观察沉淀"
     width = 10 * len(whole)
     offset = 10 * whole.index(part)
     top = 40 if case == "other_row" else 10
@@ -228,6 +231,12 @@ def test_video_ocr_keeps_unchanged_lines_during_detection(case):
         assert finished == [(0, 0)]
     if case == "disappeared":
         assert scans[-1][1] >= 167 - 18
+    if case == "jitter":
+        tracker.finish(tracker.active)
+        saved = tracker.candidates[0]
+        assert saved.box == (18, 12, 167, 29)
+        assert saved.alternate.box == (15, 12, 167, 29)
+        assert saved.alternate.quality != saved.quality
 
 
 @pytest.mark.parametrize(("before", "after"), [("2.50 V", "2.60 V"), ("2.50 V", "2,50 V"), ("-2.50 V", "+2.50 V")])
@@ -264,6 +273,8 @@ def test_video_ocr_splits_small_changes_at_the_first_changed_sample(before, afte
     ("long_lived", [0, 4], 2),
     ("number", [0, 1, 2], 3),
     ("formula", [0, 1, 2], 3),
+    ("fullwidth_formula", [0, 1, 2], 3),
+    ("chemical_formula", [0, 1, 2], 3),
     ("no_punctuation", [0, 1, 2], 3),
     ("low_confidence", [0, 1], 4),
     ("changed_prefix", [0, 1, 2], 3),
@@ -299,7 +310,8 @@ def test_video_ocr_checks_growing_line_before_reading_crops(monkeypatch, case, s
         for image in images:
             width = image.shape[1]
             if width > 150:
-                suffix = {"number": "，数值12", "formula": "，x+y", "no_punctuation": ""}.get(case, "。")
+                suffix = {"number": "，数值12", "formula": "，x+y", "fullwidth_formula": "，x／y", "chemical_formula": "，AgCl",
+                          "no_punctuation": ""}.get(case, "。")
                 texts.append("开始讲解这个现象的原因" + suffix)
             else:
                 texts.append("开始讲解" if width < 40 else "开始讲解这个")
@@ -403,7 +415,7 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     assert uses_line_ocr(current)
     for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
                     "extract-v7-video-line-ocr", "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
-                    "extract-v10-video-line-ocr"):
+                    "extract-v10-video-line-ocr", "extract-v11-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)
