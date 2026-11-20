@@ -284,10 +284,7 @@ def parallel_generation(client, app, video_file, monkeypatch):
         async def generate(self, operation, payload, validate):
             if operation == "outline":
                 self.calls += 1
-                starts = []
-                for anchor in payload["anchors"]:
-                    if not starts or anchor["start_seconds"] > starts[-1]["start_seconds"]:
-                        starts.append(anchor)
+                starts = [item for item in payload["evidence"] if item["kind"] == "speech"]
                 value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": str(index), "core_question": "问题", "topics": ["主题"],
                          "start_anchor_id": item["id"]} for index, item in enumerate(starts)],
                          "video_summary": "视频有六个主题。"}
@@ -314,7 +311,7 @@ def parallel_generation(client, app, video_file, monkeypatch):
                     state["halted"] = True
                     raise AppError("invalid_model_output", "测试章节失败")
                 state["finished"].append(index)
-                speech = next(item for item in chapter["primary"] if item["kind"] == "speech")
+                assert any(item["kind"] == "speech" and item["text"] == str(index) for item in chapter["primary"])
                 value = {"chapters": [{'chapter_id': chapter['chapter_id'], 'summary': '章节摘要', "markdown": '正文', "issues": []}]}
                 validate(value)
                 return value

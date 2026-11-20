@@ -88,7 +88,8 @@ def test_progress_contract_has_independent_steps_stage_and_timing_labels(client,
     assert [step["key"] for step in progress["steps"]] == (["checking", "transcribing", "ocr", "segments", "finalizing"]
         if segmented else ["checking", "transcribing", "ocr", "planning", "summarizing", "finalizing"])
     assert set(progress["stage_labels"]) == {"queued", "checking", "transcribing", "ocr", "planning", "summarizing", "segments", "finalizing", "completed"}
-    assert set(progress["timing_labels"]) == {"transcribing", "ocr", "planning", "summarizing", "finalizing", "total"}
+    assert set(progress["timing_labels"]) == {"checking", "transcribing", "ocr", "planning", "summarizing", "finalizing", "total"}
+    assert progress["timing_labels"]["checking"] == "检查视频"
     assert progress["stage_labels"]["completed"] == "分析完成"
     assert progress["timing_labels"]["total"] == "本次总耗时"
     assert (progress["processed"], progress["total"]) == (3, 12)

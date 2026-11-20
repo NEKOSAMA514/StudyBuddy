@@ -158,9 +158,14 @@ def test_subtitle_end_to_end_speech_anchors_dedup_exports_and_resume(client, app
     video, pipeline, recognizer, result = subtitle_pipeline(client, app, video_file, monkeypatch, platform)
     class DeduplicatedModel(FakeModel):
         async def generate(self, operation, payload, validate):
-            if operation == "outline":
+            if operation in {"outline", "chapters"}:
                 sent = json.loads(self.messages(operation, payload)[-1]["content"])
-                assert len(sent["evidence"]) == 1 and sent["evidence"][0]["text"] == result["speech"][0]["text"]
+                subtitle = result["speech"][0]["text"]
+                if operation == "outline":
+                    assert {row["id"]: row["text"] for row in sent["evidence"]} == {
+                        "S1": subtitle, "F1": subtitle, "F2": subtitle}
+                else:
+                    assert sent["chapters"][0]["primary"].splitlines() == ["[New_S1]", subtitle]
             return await super().generate(operation, payload, validate)
     pipeline.model_factory = DeduplicatedModel
     monkeypatch.setattr("app.videos.pipeline.extract_audio", lambda *args: pytest.fail("字幕不得提取音频"))
