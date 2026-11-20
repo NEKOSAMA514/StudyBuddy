@@ -22,7 +22,7 @@ from ..analysis.activity import TaskActivity, in_session, merge_config
 from ..util.json_io import atomic_json
 from ..settings.model_profiles import execution_settings
 from ..recognition.media import Recognizer
-from ..recognition.extraction import (extraction_config, extraction_signature, frame_times, line_ocr_cache_path,
+from ..recognition.extraction import (EXTRACT_VERSION, extraction_config, extraction_signature, frame_times, line_ocr_cache_path,
                                      line_ocr_evidence, ocr_cache_path, recognizer_key, speech_cache_path,
                                      speech_signature, uses_line_ocr)
 from .video_reader import extract_audio, extract_frame, source_path, UniformFrameReader
@@ -559,7 +559,12 @@ class Pipeline:
                 last_update = now
 
         with closing(UniformFrameReader(media, video.media_info)) as reader:
-            rows = recognizer.ocr_video(reader.samples(video.duration, interval, self.shutdown), on_sample)
+            samples = reader.samples(video.duration, interval, self.shutdown)
+            if config["extract_version"] == EXTRACT_VERSION:
+                rows = recognizer.ocr_video(samples, on_sample)
+            else:
+                # 旧任务缺少缓存时，用全读规则重建其原有版本的画面证据。
+                rows = recognizer.ocr_video(samples, on_sample, reduce_middle_versions=False)
         atomic_json(cache, rows)
         return rows
 

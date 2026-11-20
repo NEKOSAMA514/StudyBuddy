@@ -18,6 +18,7 @@ from rapidocr.utils.process_img import get_rotate_crop_image
 
 from .extraction import VIDEO_OCR_CONFIDENCE
 from .ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match
+from .video_ocr_candidates import crop_image, select_for_reading
 
 
 logger = logging.getLogger("studybuddy")
@@ -512,11 +513,7 @@ def read_crops(engine, crops, candidates, check_stop, skipped=frozenset()):
         active = [candidate for candidate in batch if id(candidate) not in skipped]
         if not active:
             continue
-        images = []
-        for candidate in active:
-            crops.seek(candidate.offset)
-            pixels = zlib.decompress(crops.read(candidate.length))
-            images.append(np.frombuffer(pixels, dtype=np.uint8).reshape(candidate.shape).copy())
+        images = [crop_image(crops, candidate).copy() for candidate in active]
         images, _ = engine.cls_and_rotate(images)
         retries = []
         for candidate, text, score in recognize_crop_batch(engine, batch, active, images):
@@ -680,17 +677,23 @@ def evidence_rows(records):
     return rows
 
 
-def recognize_lines(samples, engine_factory, check_stop, on_sample):
+def recognize_lines(samples, engine_factory, check_stop, on_sample, *, reduce_middle_versions=True):
     start = checked = monotonic()
+
+    def check_progress():
+        nonlocal checked
+        now = monotonic()
+        if now - checked >= .5:
+            check_stop()
+            checked = now
+
     engine = engine_factory()
     # 已结束轨迹的裁剪无损压缩，超过内存额度后转入临时文件。
     with SpooledTemporaryFile(max_size=64 * 1024**2) as crops:
         tracker = TextRegions(engine._load_det_model(), crops)
         count = 0
         for seconds, frame in samples:
-            if monotonic() - checked >= .5:
-                check_stop()
-                checked = monotonic()
+            check_progress()
             tracker.observe(seconds, frame)
             count += 1
             on_sample(seconds)
@@ -698,7 +701,8 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample):
         tracker.finish(tracker.active)
         tracker.active.clear()
         candidates = list(rank(tracker.candidates))
-        records, used = read_candidates(engine, crops, candidates, check_stop)
-    logger.info("video_ocr samples=%s candidates=%s read=%s retained=%s seconds=%.2f",
-                count, len(candidates), used, len(records), monotonic() - start)
+        selected = select_for_reading(crops, candidates, check_progress) if reduce_middle_versions else candidates
+        records, used = read_candidates(engine, crops, selected, check_stop)
+    logger.info("video_ocr samples=%s candidates=%s selected=%s read=%s retained=%s seconds=%.2f",
+                count, len(candidates), len(selected), used, len(records), monotonic() - start)
     return evidence_rows(records)
