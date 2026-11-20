@@ -1,0 +1,9 @@
+PP-OCRv6_det_tiny.onnx
+
+PaddleOCR model weights, Copyright Baidu, Inc. and the PaddlePaddle contributors.
+The bundled ONNX artifact is the unchanged RapidOCR 3.10.0 conversion.
+Distributed under the Apache License, Version 2.0 (see LICENSE.txt).
+
+Upstream model: https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_det_onnx
+RapidOCR artifact: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_tiny.onnx
+SHA-256: f42c0fbd294d95eac1a550e131b277dac97462c8025fa4b6c3cec1b7894bd3d5

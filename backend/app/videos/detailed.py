@@ -5,16 +5,18 @@ import json
 import logging
 import time
 from collections import deque
+from contextlib import nullcontext
+from copy import copy
 from .versions import PROMPT_VERSION, digest
 from ..analysis.checkpoints import checkpoint_path
 from ..util.json_io import atomic_json
 from ..analysis.activity import emit
 from .schemas import SCHEMAS, FORMAT_VERSION, ground_chapters
 from ..analysis.schemas import SourceIssue
-from ..analysis.budgets import OUTPUT_TOKENS, OUTPUT_BUDGET_RATIO, MAX_BATCH_CHAPTERS
+from ..analysis.budgets import OUTPUT_TOKENS, MAX_BATCH_CHAPTERS
 from ..analysis.markdown import validate_markdown
-from .model_input import outline_text_length, deduplicate_ocr
-from .segments import FLOW_VERSION, split_segments, preceding_context, outline_measure
+from .model_input import find_source_quote, outline_source_aliases, pack_chapter_material, split_chapter_context
+from .segments import FLOW_VERSION, SegmentPlan, preceding_context, outline_overhead
 from ..errors import AppError, TaskPaused
 
 logger = logging.getLogger("studybuddy")
@@ -23,8 +25,10 @@ logger = logging.getLogger("studybuddy")
 class DetailedVideoGeneration:
     def __init__(self, task_id, model, settings, folder, evidence, duration, stop, checkpoint, update, timings,
                  publish=lambda result: None, segment_update=lambda progress: None, video_title="",
-                 outline_ready=lambda summary: None):
+                 outline_ready=lambda summary: None, clipped_lines=None):
         self.model, self.settings, self.folder = model, settings, folder
+        self.request_slots = asyncio.Semaphore(settings.llm_section_concurrency)
+        self.segment_slots = nullcontext()
         self.stop, self.checkpoint, self.update, self.timings = stop, checkpoint, update, timings
         self.duration = duration
         self.video_title = video_title
@@ -33,19 +37,29 @@ class DetailedVideoGeneration:
         self.outline_ready = outline_ready
         self.range_start, self.range_end, self.chapter_offset = 0.0, duration, 0
         self.boundary, self.previous_chapter_outline = [], {}
+        self.previous_segment_outline = {}
         self.phase_update = lambda phase: None
         self.outline_digest = None
         ordered = sorted(evidence, key=lambda e: (e["start_seconds"], e["end_seconds"], e["id"]))
         self.original = {f"E{i + 1}": item for i, item in enumerate(ordered)}
         self.evidence = [{"id": alias, **{key: item[key] for key in ("kind", "start_seconds", "end_seconds", "text")}}
                          for alias, item in self.original.items()]
-        self.anchors = deduplicate_ocr({"evidence": self.evidence})["evidence"]
+        self.clipped_lines = {}
+        if clipped_lines:
+            aliases = {item["id"]: alias for alias, item in self.original.items()}
+            self.clipped_lines = {
+                aliases[source]: [(line, aliases[before], aliases[after]) for line, before, after in clips]
+                for source, clips in clipped_lines.items()
+            }
+        self.anchors = self.evidence
         self.common = {"task_id": task_id, "flow": FLOW_VERSION, "prompt": PROMPT_VERSION, "model": settings.llm_model,
                        "provider": settings.llm_provider, "base": settings.llm_base_url,
                        "stream": settings.llm_stream, "json_mode": settings.llm_json_mode,
                        "summary_prompt": settings.summary_prompt,
                        "input_limit": settings.llm_input_text_limit,
                        "source": digest(ordered)}
+        if self.clipped_lines:
+            self.common["clipped_lines"] = digest(self.clipped_lines)
         if settings.llm_output_tokens != OUTPUT_TOKENS:
             self.common["output_tokens"] = dict(settings.llm_output_tokens)
         if video_title:
@@ -59,7 +73,8 @@ class DetailedVideoGeneration:
 
     def fits(self, operation, payload, reserve=0):
         payload = self.input_payload(operation, payload)
-        return self.model.input_characters(operation, payload) + reserve <= self.settings.llm_input_text_limit
+        size = self.model.input_characters(operation, payload)
+        return size + self.model.repair_input_reserve + reserve <= self.settings.llm_input_text_limit
 
     # 用实际请求计量装包，过长材料切片后仍保留来源和时间范围。
     def batches(self, operation, items, payload, reserve=0):
@@ -119,31 +134,52 @@ class DetailedVideoGeneration:
         if operation == "outline":
             if payload.get("content_type") and value["content_type"] != payload["content_type"]:
                 raise ValueError("content_type_must_match_planned_video_type")
-            times = {item["id"]: item["start_seconds"] for item in payload["anchors"]}
-            ids = [item["start_anchor_id"] for item in value["chapters"]]
+            anchors = payload["anchors"]
+            chapters = value["chapters"]
+            aliases = {alias: original for original, alias in outline_source_aliases(payload.get("evidence", [])).items()}
+            for chapter in chapters:
+                identifier = chapter["start_anchor_id"]
+                chapter["start_anchor_id"] = aliases.get(identifier, identifier)
+            chapters[0]["start_anchor_id"] = anchors[0]["id"]
+            times = {item["id"]: item["start_seconds"] for item in anchors}
+            ids = [item["start_anchor_id"] for item in chapters]
             invalid = [identifier for identifier in ids if identifier not in times]
             if invalid:
                 raise ValueError("invalid_boundary_anchor: start_anchor_id 不在本段原文中：" +
                                  json.dumps(invalid, ensure_ascii=False) + "。请从本段 evidence 中选择，不要编造或改写编号。")
-            if not ids or ids[0] != payload["anchors"][0]["id"] or any(
-                    times[a] >= times[b] for a, b in zip(ids, ids[1:])):
+            if any(times[a] >= times[b] for a, b in zip(ids, ids[1:])):
                 raise ValueError("chapter_boundaries_must_increase_from_first_anchor")
         elif operation == "chapters":
             expected = [item["chapter_id"] for item in payload["chapters"]]
             if [item["chapter_id"] for item in value["chapters"]] != expected:
                 raise ValueError("chapter_ids_must_match_request_order")
-            for chapter in value["chapters"]:
+            for request, chapter in zip(payload["chapters"], value["chapters"]):
                 validate_markdown(chapter["markdown"])
+                if chapter["issues"]:
+                    _, sources = pack_chapter_material(request)
+                    for issue in chapter["issues"]:
+                        identifiers = []
+                        quote = issue["quote"]
+                        for identifier in issue["evidence_ids"]:
+                            originals = sources.get(identifier)
+                            if originals is None:
+                                identifiers.append(identifier)
+                                continue
+                            matches = [item["id"] for item in originals if quote and find_source_quote(quote, (item,))]
+                            identifiers.extend(matches or (item["id"] for item in originals))
+                        issue["evidence_ids"] = list(dict.fromkeys(identifiers))
         elif operation == "issue_quotes":
             expected = payload["repairs"]
             repairs = value["repairs"]
             if [(i["chapter_id"], i["block_index"]) for i in repairs] != [
                     (i["chapter_id"], i["block_index"]) for i in expected]:
                 raise ValueError("issue_quote_repairs_must_match_request_order")
-            sources = {i["id"]: i["text"] for i in payload["sources"]}
-            if any(not any(item["quote"] in sources[i] for i in request["evidence_ids"])
-                   for item, request in zip(repairs, expected)):
-                raise ValueError("issue_quote_must_be_original_text")
+            sources = {i["id"]: i for i in payload["sources"]}
+            for item, request in zip(repairs, expected):
+                quote = find_source_quote(item["quote"], (sources[i] for i in request["evidence_ids"]))
+                if quote is None:
+                    raise ValueError("issue_quote_must_be_original_text")
+                item["quote"] = quote
         return value
 
     def body_path(self, chapter):
@@ -159,6 +195,11 @@ class DetailedVideoGeneration:
         failure = None
         partials = deque()
         partial_ready = asyncio.Event()
+
+        async def generate(operation, payload, validate):
+            async with self.segment_slots, self.request_slots:
+                self.check()
+                return await self.model.generate(operation, payload, validate)
 
         def save_chapters(payload, value):
             for draft in value["chapters"]:
@@ -283,7 +324,7 @@ class DetailedVideoGeneration:
                                    else [payload["chapter"]["chapter_id"]] if operation == "extract" else [])
                     logger.info("task=%s operation=%s job=%s chapters=%s started=true", self.common["task_id"], operation,
                                 self.path(operation, payload).stem, chapter_ids)
-                    active[asyncio.create_task(self.model.generate(operation, payload, validate))] = (index, time.monotonic())
+                    active[asyncio.create_task(generate(operation, payload, validate))] = (index, time.monotonic())
                 if failure is None and active:
                     partial_wait = asyncio.create_task(partial_ready.wait())
                     try:
@@ -322,7 +363,7 @@ class DetailedVideoGeneration:
     async def planning(self):
         evidence = self.evidence
         self.prepared = None
-        payload = {"anchors": self.anchor_payload(), "evidence": evidence, "context": self.boundary}
+        payload = {"anchors": self.anchor_payload(), "evidence": evidence, "context": self.previous_segment_outline}
         if not self.fits("outline", payload):
             # 不能再按证据记录分段时，在段内提取；原文及独立上下文仍完整保留。
             chapter = {"chapter_id": f"C{self.chapter_offset + 1}", "title": "当前片段",
@@ -376,8 +417,14 @@ class DetailedVideoGeneration:
     # 小章节直接合批，超预算章节先提取事实，并只补写缺失章节。
     async def writing(self, chapters, video_summary):
         drafts, small, jobs, rounds = {}, [], [], {}
+        chapter_clips = {}
         self.body_paths = {c["chapter_id"]: self.path("chapter", {"video_summary": video_summary, "chapter": c}) for c in chapters}
         for chapter in chapters:
+            if self.clipped_lines:
+                chapter_clips[chapter["chapter_id"]] = {
+                    item["id"]: self.clipped_lines[item["id"]]
+                    for field in ("primary", "context") for item in chapter[field] if item["id"] in self.clipped_lines
+                }
             cache = self.body_path(chapter)
             if cache.exists():
                 value = self.validate("chapters", {"chapters": [chapter]},
@@ -388,8 +435,13 @@ class DetailedVideoGeneration:
         if drafts:
             self.update(f"summarizing:{len(drafts)}/{len(chapters)}")
         def payload(group):
-            return {"video_summary": video_summary, "chapters": [{key: value for key, value in chapter.items()
-                                   if key != "primary" or "facts" not in chapter} for chapter in group]}
+            sent = []
+            for chapter in group:
+                request = {key: value for key, value in chapter.items() if key != "primary" or "facts" not in chapter}
+                if clips := chapter_clips.get(chapter["chapter_id"]):
+                    request["clipped_lines"] = clips
+                sent.append(request)
+            return {"video_summary": video_summary, "chapters": sent}
         def extracting(chapter, requests, previous=None):
             rounds[chapter["chapter_id"]] = (chapter, [self.path(*job) for job in requests], {}, previous)
             return requests
@@ -433,8 +485,8 @@ class DetailedVideoGeneration:
             if chapter["chapter_id"] in drafts:
                 continue
             if self.fits("chapters", payload([chapter])):
-                if small and (len(small) == MAX_BATCH_CHAPTERS or not self.fits("chapters", payload([*small, chapter])) or
-                              not self.output_fits([*small, chapter])):
+                if small and (len(small) == MAX_BATCH_CHAPTERS or
+                              not self.fits("chapters", payload([*small, chapter]))):
                     flush()
                 small.append(chapter)
             else:
@@ -470,13 +522,6 @@ class DetailedVideoGeneration:
                 jobs = [failed, *[job for job in jobs if job != failed]]
         return [drafts[chapter["chapter_id"]] for chapter in chapters]
 
-    def output_fits(self, chapters):
-        # 仅用于合批调度；不向模型施加正文长度要求。按原文保守估算并预留20%输出余量。
-        material = [{key: chapter[key] for key in ("primary", "facts", "issues") if key in chapter}
-                    for chapter in chapters]
-        estimate = len(json.dumps(material, ensure_ascii=False).encode("utf-8")) + 512 * len(chapters)
-        return estimate <= self.settings.llm_output_tokens["chapters"] * OUTPUT_BUDGET_RATIO
-
     def diagnostic(self, code, message, **details):
         logger.warning("task=%s code=%s %s details=%s", self.common["task_id"], code, message, details)
         if self.model.diagnostics:
@@ -487,6 +532,8 @@ class DetailedVideoGeneration:
         issues, repairs = [], []
         for chapter, draft in zip(chapters, drafts):
             primary = {item["id"] for item in chapter["primary"]}
+            crossing, _ = split_chapter_context(chapter)
+            citable = primary | {item["id"] for item in crossing}
             allowed = primary | {item["id"] for item in chapter["context"]}
             for raw in draft["issues"]:
                 try:
@@ -495,7 +542,7 @@ class DetailedVideoGeneration:
                     self.diagnostic("invalid_source_issue", "忽略无法解析的辅助存疑项。", chapter_id=chapter["chapter_id"])
                     continue
                 ids = [i for i in issue["evidence_ids"] if i in allowed]
-                if set(ids) != set(issue["evidence_ids"]) or not primary.intersection(ids):
+                if set(ids) != set(issue["evidence_ids"]) or not citable.intersection(ids):
                     self.diagnostic("invalid_issue_reference", "存疑来源无效，正文检查点保留。", chapter_id=chapter["chapter_id"])
                     if not issue["critical"]:
                         continue
@@ -504,9 +551,11 @@ class DetailedVideoGeneration:
                 issue.update(evidence_ids=ids, chapter_id=chapter["chapter_id"], id=f"{chapter['chapter_id']}-I{len(issues) + 1}")
                 issues.append(issue)
                 quote = issue.get("quote")
-                if quote and not any(quote in self.original[i]["text"] for i in ids):
-                    repairs.append({"chapter_id": chapter["chapter_id"], "block_index": len(issues) - 1,
-                                    "quote": quote, "reason": issue["reason"], "evidence_ids": ids})
+                if quote:
+                    issue["quote"] = find_source_quote(quote, (self.original[i] for i in ids))
+                    if issue["quote"] is None:
+                        repairs.append({"chapter_id": chapter["chapter_id"], "block_index": len(issues) - 1,
+                                        "quote": quote, "reason": issue["reason"], "evidence_ids": ids})
         if repairs:
             def make(group):
                 ids = list(dict.fromkeys(i for item in group for i in item["evidence_ids"]))
@@ -526,7 +575,7 @@ class DetailedVideoGeneration:
         cleaned, seen = [], set()
         for issue in issues:
             quote = issue.get("quote")
-            invalid = quote and not any(quote in self.original[i]["text"] for i in issue["evidence_ids"])
+            invalid = quote and find_source_quote(quote, (self.original[i] for i in issue["evidence_ids"])) is None
             if invalid or not quote:
                 if not issue["critical"]:
                     continue
@@ -546,18 +595,41 @@ class DetailedVideoGeneration:
         evidence = {item["id"]: item for item in self.original.values()}
         return ground_chapters(result, issues, evidence, self.duration, start=self.range_start, end=self.range_end)
 
-    async def generate_segment(self, preview=False):
+    async def take_next_outline(self):
+        if self.next_outline is None:
+            return None
+        task, slots = self.next_outline
+        # 前段已发布，超长材料的多个提取请求现在可以使用全部并发名额。
+        for _ in range(self.settings.llm_section_concurrency - 1):
+            slots.release()
+        result = await task
+        self.next_outline = None
+        return result
+
+    async def generate_segment(self, preview, start_next_outline):
         for stage in ("planning", "summarizing"):
             self.phase_update(stage)
             self.update(stage if stage == "planning" else f"summarizing:0/{len(chapters)}")
             tick = time.monotonic()
             try:
                 if stage == "planning":
-                    outline = await self.planning()
+                    prepared = await self.take_next_outline()
+                    if prepared is None:
+                        outline = await self.planning()
+                    else:
+                        outline, self.prepared = prepared
+                        self.content_type = outline["content_type"]
                     self.outline_digest = digest(outline)
                     chapters = self.assign(outline)
                     if preview:
                         self.outline_ready(outline["video_summary"])
+                    elif self.range_end < self.duration and self.settings.llm_section_concurrency > 1:
+                        following = copy(self)
+                        following.segment_slots = asyncio.Semaphore(1)
+                        task = asyncio.create_task(start_next_outline(following, outline))
+                        self.next_outline = task, following.segment_slots
+                        # 让下一段先领取一个请求名额，避免被当前段的整批正文排在后面。
+                        await asyncio.sleep(0)
                 else:
                     drafts = await self.writing(chapters, outline["video_summary"])
                     self.phase_update("issues")
@@ -586,47 +658,93 @@ class DetailedVideoGeneration:
 
     # 按时间分段接续已保存记录，发布分段正文后再汇总整体导览。
     async def run(self):
+        self.request_slots = asyncio.Semaphore(self.settings.llm_section_concurrency)
+        self.next_outline = None
+        try:
+            return await self.run_segments()
+        finally:
+            if self.next_outline is not None:
+                task, _ = self.next_outline
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def run_segments(self):
         self.check()
         self.content_type = None
         all_evidence, base = self.all_evidence, self.base_common
         self.common = base
-        measure = outline_measure(self.model, self.video_title)
-        segmented, segments = split_segments(all_evidence, self.duration, self.settings.llm_input_text_limit, measure)
-        logger.info("task=%s source_characters=%s input_characters=%s segments=%s",
-                    base["task_id"], sum(len(item["text"]) for item in all_evidence),
-                    outline_text_length({"evidence": all_evidence}), len(segments))
-        manifest = [{**{key: segment[key] for key in ("index", "start_seconds", "end_seconds")},
-                     "evidence_ids": [item["id"] for item in segment["primary"]]} for segment in segments]
-        manifest_path = self.path("segments", manifest)
-        if manifest_path.exists():
-            if json.loads(manifest_path.read_text(encoding="utf-8")) != manifest:
-                raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
-        else:
-            atomic_json(manifest_path, manifest)
+        manifest_path = self.path("segments", {"end_seconds": self.duration,
+                                              "evidence_ids": [item["id"] for item in all_evidence]})
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
+        plan = SegmentPlan(all_evidence, self.duration)
+        limit = self.settings.llm_input_text_limit
+        base_overhead = outline_overhead(self.model, self.video_title)
         generation_key = digest(base)
         records, body, issues = [], [], []
         self.previous_chapter_outline = {}
+        self.previous_segment_outline = {}
+        next_start = 0.0
+        segmented, total = False, 1
         guides = []
 
         def progress(segment, completed, phase):
             if segmented:
                 self.segment_update({"generation_key": generation_key, "current": segment["index"],
-                    "completed": completed, "total": len(segments), "start_seconds": segment["start_seconds"],
+                    "completed": completed, "total": total, "start_seconds": segment["start_seconds"],
                     "end_seconds": segment["end_seconds"], "phase": phase})
 
-        for segment, description in zip(segments, manifest):
+        def outline_context(outline):
+            return {"video_summary": outline["video_summary"],
+                    "chapters": [{key: chapter[key] for key in ("title", "core_question", "topics")}
+                                 for chapter in outline["chapters"]]}
+
+        def configure_segment(flow, index, next_start, chapter_offset, previous):
             self.check()
-            self.range_start, self.range_end = segment["start_seconds"], segment["end_seconds"]
-            self.chapter_offset = len(body)
-            self.evidence = segment["primary"]
-            self.anchors = deduplicate_ocr({"evidence": self.evidence})["evidence"]
-            self.boundary = preceding_context(all_evidence, self.range_start)
-            self.common = {**base, "segment": description, "context": digest(self.boundary),
-                           "previous_outline": digest(self.previous_chapter_outline)}
-            self.outline_digest = None
-            cache = self.path("segment", description)
+            overhead, later_room = base_overhead, None
+            if previous:
+                overhead = outline_overhead(self.model, self.video_title, previous, flow.content_type)
+                if overhead >= limit:
+                    raise AppError("model_input_budget", "上一段大纲占满输入空间，请提高生成输入上限后重新生成笔记。")
+                later_room = limit - base_overhead - len(flow.content_type)
+            split, pending = plan.ranges(next_start, limit - overhead, later_room)
+            start, end, left, right = pending[0]
+            flow.evidence = flow.anchors = all_evidence[left:right]
+            description = {"index": index, "start_seconds": start, "end_seconds": end,
+                           "evidence_ids": [item["id"] for item in flow.evidence]}
+            if index <= len(manifest) and manifest[index - 1] != description:
+                raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
+            flow.range_start, flow.range_end, flow.chapter_offset = start, end, chapter_offset
+            flow.previous_segment_outline = previous
+            flow.previous_chapter_outline = previous["chapters"][-1] if previous else {}
+            flow.boundary = preceding_context(all_evidence, start)
+            flow.common = {**base, "segment": description, "context": digest(flow.boundary),
+                           "previous_outline": digest(previous)}
+            flow.outline_digest = None
+            return description, split, index - 1 + len(pending)
+
+        async def start_next_outline(following, outline):
+            # 段内来源、缓存键和提取结果各自独立；模型客户端和请求名额与当前正文共用。
+            description, _, _ = configure_segment(following, following.common["segment"]["index"] + 1,
+                following.range_end, following.chapter_offset + len(outline["chapters"]), outline_context(outline))
+            if following.path("segment", description).exists():
+                return None
+            next_outline = await following.planning()
+            return next_outline, following.prepared
+
+        while next_start < self.duration:
+            index = len(records) + 1
+            segment, split, total = configure_segment(self, index, next_start, len(body), self.previous_segment_outline)
+            segmented = segmented or split
+            if not records:
+                logger.info("task=%s source_characters=%s segments=%s",
+                            base["task_id"], sum(len(item["text"]) for item in all_evidence), total)
+            if index > len(manifest):
+                manifest.append(segment)
+                atomic_json(manifest_path, manifest)
+            cache = self.path("segment", segment)
             self.phase_update = lambda phase, s=segment: progress(s, s["index"] - 1, phase)
             if cache.exists():
+                await self.take_next_outline()
                 record = json.loads(cache.read_text(encoding="utf-8"))
                 record["outline"] = self.validate("outline", self.input_payload("outline", {"anchors": self.anchor_payload()}), record["outline"])
                 self.content_type = record["outline"]["content_type"]
@@ -646,13 +764,12 @@ class DetailedVideoGeneration:
                 logger.info("task=%s segment=%s cached=true", base["task_id"], segment["index"])
                 emit(self.model, "cached", message=f"复用已完成的第 {segment['index']} 段笔记")
             else:
-                record = await self.generate_segment(preview=not segmented)
+                record = await self.generate_segment(not segmented, start_next_outline)
                 atomic_json(cache, record)
             records.append(record)
             body.extend(record["chapters"])
             issues.extend(record["source_issues"])
-            self.previous_chapter_outline = {key: value for key, value in record["outline"]["chapters"][-1].items()
-                                             if key in {"title", "core_question", "topics"}}
+            self.previous_segment_outline = outline_context(record["outline"])
             if segmented:
                 guides.append({"index": segment["index"], "start_seconds": self.range_start,
                                "end_seconds": self.range_end, "first_chapter_id": record["chapters"][0]["chapter_id"],
@@ -661,13 +778,16 @@ class DetailedVideoGeneration:
             self.publish({"format_version": FORMAT_VERSION, "note_style": "detailed", "content_type": self.content_type, "title": "", "tags": [], "overview_paragraphs": [],
                           "chapters": list(body), "segment_guides": list(guides), "source_issues": list(issues), "complete": False,
                           "covered_until_seconds": self.range_end, "completed_segments": segment["index"],
-                          "total_segments": len(segments), "generation_key": generation_key,
+                          "total_segments": total, "generation_key": generation_key,
                           "evidence_ids": list(dict.fromkeys(i for chapter in body for i in chapter["evidence_ids"]))})
+            next_start = self.range_end
+        if len(manifest) != len(records):
+            raise AppError("invalid_checkpoint", "分段检查点与原文不一致，请重新生成笔记。")
         self.check()
         self.common, self.evidence = base, all_evidence
         self.boundary = []
         self.outline_digest = digest([record["outline"] for record in records])
-        progress(segments[-1], len(segments), "overview")
+        progress(segment, len(records), "overview")
         self.update("finalizing")
         tick = time.monotonic()
         try:
@@ -676,5 +796,5 @@ class DetailedVideoGeneration:
             self.timings["finalizing"] = round(time.monotonic() - tick, 3)
         return {"format_version": FORMAT_VERSION, "note_style": "detailed", "content_type": self.content_type, **metadata, "chapters": body, "source_issues": issues,
                 "segment_guides": guides,
-                "complete": True, "covered_until_seconds": self.duration, "completed_segments": len(segments),
-                "total_segments": len(segments), "generation_key": generation_key}
+                "complete": True, "covered_until_seconds": self.duration, "completed_segments": len(records),
+                "total_segments": len(records), "generation_key": generation_key}

@@ -1,6 +1,5 @@
 """直接生成简洁视频笔记，按来源字符而非相邻时间检查覆盖。"""
 import json
-import time
 from ..analysis.checkpoints import checkpoint_path
 from ..util.json_io import atomic_json
 from ..analysis.activity import emit
@@ -18,7 +17,8 @@ def payload_for(title, primary, context):
     aliases = {identifier: f"E{index + 1}" for index, identifier in
                enumerate(dict.fromkeys(item["id"] for item in [*primary, *context]))}
     def compact(items):
-        return [{"id": aliases[item["id"]], "kind": item["kind"], "text": item["text"]} for item in items]
+        return [{"id": aliases[item["id"]], **{key: item[key] for key in
+                ("kind", "text", "start_seconds", "end_seconds") if key in item}} for item in items]
     return {"video_title": title, "primary": compact(primary), "context": compact(context)}
 
 
@@ -31,7 +31,7 @@ def context_before(processed, source):
 # 按来源字符与实际请求预算规划简洁片段，前文不计入主要覆盖范围。
 def plan(sources, model, limit, video_title):
     return plan_segments(sources, lambda primary, context: payload_for(video_title, primary, context),
-                         lambda p: model.input_characters("concise", p), limit, context_before)
+                         lambda p: model.input_characters("concise", p), limit - model.repair_input_reserve, context_before)
 
 
 def validate_result(result, evidence, duration):
@@ -70,14 +70,13 @@ def source_signature(sources):
 
 # 逐段生成并保存简洁视频笔记，恢复时复用输入身份一致的完成记录。
 class ConciseVideoGeneration:
-    def __init__(self, task_id, model, settings, folder, evidence, duration, stop, check, update, timings,
-                 publish, video_title):
+    def __init__(self, task_id, model, settings, folder, evidence, duration, stop, check, update, publish, video_title):
         self.model, self.stop, self.checkpoint, self.update = model, stop, check, update
         self.sources = sorted([s for s in evidence if s["text"].strip()], key=lambda s: (s["start_seconds"], s["end_seconds"], s["id"]))
-        self.duration, self.timings, self.publish, self.title = duration, timings, publish, video_title
+        self.duration, self.publish, self.title = duration, publish, video_title
         self.build = lambda primary, context: payload_for(video_title, primary, context)
         self.key = digest({"source": self.sources, "title": video_title, "style": "concise", "prompt": PROMPT_VERSION,
-            "input_format": "id-kind-text-v1",
+            "input_format": "id-kind-text-nearby-speech-v3",
             "model": settings.llm_model, "base": settings.llm_base_url, "profile": settings.llm_profile_id,
             "provider": settings.llm_provider, "stream": settings.llm_stream, "json": settings.llm_json_mode,
             "summary_prompt": settings.summary_prompt, "input_limit": settings.llm_input_text_limit,
@@ -108,53 +107,49 @@ class ConciseVideoGeneration:
             from ..analysis.content_types import complete_content_type
             content_type = complete_content_type(json.loads(type_path.read_text("utf-8")))
         chapters = []
-        tick = time.monotonic()
-        try:
-            for number, segment in enumerate(segments, 1):
-                self.check()
-                self.update(f"concise:{number}/{len(segments)}")
-                payload = self.build(segment["primary"], segment["context"])
-                time_sources = {item["id"]: source["start_seconds"]
-                                for item, source in zip(payload["primary"], segment["primary"])}
-                if content_type:
-                    payload["content_type"] = content_type
-                def validate(raw):
-                    value = ConciseNote.model_validate(raw).model_dump()
-                    if content_type and value["content_type"] != content_type:
-                        raise ValueError("content_type_must_match_planned_video_type")
-                    validate_markdown(value["markdown"])
-                    render_timestamps(value["markdown"], time_sources)
-                    return value
-                # 第一条记录始终使用不含类型的键，恢复材料类型后也保持一致。
-                cache = self.path("concise-body", [number, segment, content_type if number > 1 else None])
-                if cache.exists():
-                    value = validate(json.loads(cache.read_text("utf-8")))
-                    emit(self.model, "cached", operation="concise")
-                else:
-                    value = validate(await self.model.generate("concise", payload, validate))
-                emit(self.model, "saving", operation="concise")
-                atomic_json(cache, value)
-                content_type = value["content_type"]
-                atomic_json(type_path, content_type)
-                items = segment["primary"]
-                chapters.append({"chapter_id": f"S{number}", "title": value["title"],
-                    "markdown": render_timestamps(value["markdown"], time_sources),
-                    "evidence_ids": list(dict.fromkeys(i["id"] for i in items)),
-                    "evidence_spans": [{"evidence_id": i["id"], "start_offset": i["start_offset"], "end_offset": i["end_offset"]} for i in items],
-                    "start_seconds": min(i["start_seconds"] for i in items), "end_seconds": max(i["end_seconds"] for i in items),
-                    "timestamp_basis": "speech" if any(i["kind"] == "speech" for i in items) else "frame"})
-                index, _ = validate_coverage(self.sources, segments[:number])
-                result = {"format_version": FORMAT_VERSION, "note_style": "concise", "content_type": content_type,
-                    "title": value["title"] if len(segments) == 1 else self.title, "tags": [], "overview_paragraphs": [],
-                    "source_issues": [], "segment_guides": [], "chapters": list(chapters), "complete": number == len(segments),
-                    "completed_segments": number, "total_segments": len(segments), "generation_key": self.key,
-                    "source_cursor": {"evidence_id": items[-1]["id"], "offset": items[-1]["end_offset"]},
-                    "covered_until_seconds": self.duration if index == len(self.sources) else self.sources[index]["start_seconds"],
-                    "evidence_ids": list(dict.fromkeys(i for c in chapters for i in c["evidence_ids"])),
-                    "source_ids": [i["id"] for i in self.sources], "source_digest": source_signature(self.sources)}
-                validate_result(result, {s["id"]: s for s in self.sources}, self.duration)
-                self.publish({**result, "complete": False})
-                self.check()
-            return result
-        finally:
-            self.timings["concise"] = round(time.monotonic() - tick, 3)
+        for number, segment in enumerate(segments, 1):
+            self.check()
+            self.update(f"concise:{number}/{len(segments)}")
+            payload = self.build(segment["primary"], segment["context"])
+            time_sources = {item["id"]: source["start_seconds"]
+                            for item, source in zip(payload["primary"], segment["primary"])}
+            if content_type:
+                payload["content_type"] = content_type
+            def validate(raw):
+                value = ConciseNote.model_validate(raw).model_dump()
+                if content_type and value["content_type"] != content_type:
+                    raise ValueError("content_type_must_match_planned_video_type")
+                validate_markdown(value["markdown"])
+                render_timestamps(value["markdown"], time_sources)
+                return value
+            # 第一条记录始终使用不含类型的键，恢复材料类型后也保持一致。
+            cache = self.path("concise-body", [number, segment, content_type if number > 1 else None])
+            if cache.exists():
+                value = validate(json.loads(cache.read_text("utf-8")))
+                emit(self.model, "cached", operation="concise")
+            else:
+                value = validate(await self.model.generate("concise", payload, validate))
+            emit(self.model, "saving", operation="concise")
+            atomic_json(cache, value)
+            content_type = value["content_type"]
+            atomic_json(type_path, content_type)
+            items = segment["primary"]
+            chapters.append({"chapter_id": f"S{number}", "title": value["title"],
+                "markdown": render_timestamps(value["markdown"], time_sources),
+                "evidence_ids": list(dict.fromkeys(i["id"] for i in items)),
+                "evidence_spans": [{"evidence_id": i["id"], "start_offset": i["start_offset"], "end_offset": i["end_offset"]} for i in items],
+                "start_seconds": min(i["start_seconds"] for i in items), "end_seconds": max(i["end_seconds"] for i in items),
+                "timestamp_basis": "speech" if any(i["kind"] == "speech" for i in items) else "frame"})
+            index, _ = validate_coverage(self.sources, segments[:number])
+            result = {"format_version": FORMAT_VERSION, "note_style": "concise", "content_type": content_type,
+                "title": value["title"] if len(segments) == 1 else self.title, "tags": [], "overview_paragraphs": [],
+                "source_issues": [], "segment_guides": [], "chapters": list(chapters), "complete": number == len(segments),
+                "completed_segments": number, "total_segments": len(segments), "generation_key": self.key,
+                "source_cursor": {"evidence_id": items[-1]["id"], "offset": items[-1]["end_offset"]},
+                "covered_until_seconds": self.duration if index == len(self.sources) else self.sources[index]["start_seconds"],
+                "evidence_ids": list(dict.fromkeys(i for c in chapters for i in c["evidence_ids"])),
+                "source_ids": [i["id"] for i in self.sources], "source_digest": source_signature(self.sources)}
+            validate_result(result, {s["id"]: s for s in self.sources}, self.duration)
+            self.publish({**result, "complete": False})
+            self.check()
+        return result

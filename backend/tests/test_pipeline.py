@@ -39,8 +39,54 @@ def test_pipeline_grounded_result_and_checkpoint(client, app, video_file):
     assert all(e["id"] != "old-parse" for e in scoped)
     new_task = client.post(f'/api/v1/videos/{video["id"]}/analyses').json()["task_id"]
     pipeline.run(new_task)
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/tasks/{new_task}").json()["status"] == "succeeded"
+
+
+def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, app, video_file, monkeypatch):
+    from app.recognition.video_ocr import Candidate, evidence_rows
+
+    video, task_id, pipeline, recognizer = prepare(client, app, video_file)
+    whole = "加入硝基苯试剂并充分搅拌，观察沉淀的转化"
+    sent_whole = "加入硝基苯试剂并充分搅拌,观察沉淀的转化"
+    part = "观察沉淀的转化"
+    full_box = (10, 10, 10 * len(whole) + 10, 30)
+    part_box = (10 * whole.index(part) + 10, 10, full_box[2], 30)
+    requests = []
+
+    def read(seconds, box, text):
+        return Candidate(seconds, seconds, box, 1, 1, 0, 0, ()), text, .95
+
+    def recognize(samples, on_sample):
+        recognizer.ocr_calls += 1
+        return evidence_rows([read(.25, full_box, whole), read(.75, part_box, part),
+                              read(.75, (10, 40, 45, 60), "Grok"), read(1.5, full_box, whole)])
+
+    class Model(FakeModel):
+        async def generate(self, operation, payload, validate):
+            sent = json.loads(self.messages(operation, payload)[-1]["content"])
+            requests.append((operation, sent))
+            if operation == "chapters":
+                issue = {"kind": "source_issue", "quote": sent_whole, "reason": "需回看", "evidence_ids": ["F1"]}
+                payload = {**payload, "chapters": [{**payload["chapters"][0], "issues": [issue]}]}
+            return await super().generate(operation, payload, validate)
+
+    monkeypatch.setattr(recognizer, "ocr_video", recognize)
+    pipeline.model_factory = Model
+    pipeline.run(task_id)
+    new_task = client.post(f'/api/v1/videos/{video["id"]}/analyses').json()["task_id"]
+    pipeline.run(new_task)
+    assert recognizer.ocr_calls == 1
+    assert [payload["evidence"][1]["text"] for operation, payload in requests if operation == "outline"] == [
+        f"{part} Grok", f"{part} Grok"]
+    assert [payload["chapters"][0]["primary"] for operation, payload in requests if operation == "chapters"] == [
+        f"> [F1] {sent_whole}\n> [F2] Grok", f"> [F1] {sent_whole}\n> [F2] Grok"]
+    exported = client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={new_task}&format=json').json()
+    assert [frame["text"] for frame in exported["frames"]] == [whole, f"{part}\nGrok", whole]
+    result = client.get(f"/api/v1/analyses/{new_task}").json()
+    issue = result["source_issues"][0]
+    assert issue["quote"] == sent_whole and issue["evidence_ids"] == [exported["frames"][0]["id"]]
+    assert issue["start_seconds"] == issue["end_seconds"] == .25
 
 
 def test_model_failure_keeps_evidence_and_retry_reuses_it(client, app, video_file):
@@ -66,7 +112,7 @@ def test_model_failure_keeps_evidence_and_retry_reuses_it(client, app, video_fil
     client.post(f"/api/v1/tasks/{task_id}/retry")
     pipeline.model_factory = FakeModel
     pipeline.run(task_id)
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "succeeded"
 
 
@@ -193,7 +239,7 @@ def test_prompt_change_invalidates_summary_but_reuses_recognition(client, app, v
     third = client.post(f"/api/v1/videos/{video_id}/analyses").json()["task_id"]
     pipeline.run(third)
     assert len(calls) == 3
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     task = client.get(f"/api/v1/tasks/{third}").json()
     assert task["progress"]["percent"] == 100
     assert stored_task_config(app, task["id"] )["summary_prompt"] == "请详细解释步骤。"
@@ -208,7 +254,7 @@ def test_prompt_change_invalidates_summary_but_reuses_recognition(client, app, v
     fifth = client.post(f"/api/v1/videos/{video_id}/analyses").json()["task_id"]
     pipeline.run(fifth)
     assert len(calls) == 5  # 固定系统规则版本变化必须重新总结。
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/analyses/{fifth}").json()["prompt_version"] == "test-next-system-rules"
 
 
@@ -238,10 +284,7 @@ def parallel_generation(client, app, video_file, monkeypatch):
         async def generate(self, operation, payload, validate):
             if operation == "outline":
                 self.calls += 1
-                starts = []
-                for anchor in payload["anchors"]:
-                    if not starts or anchor["start_seconds"] > starts[-1]["start_seconds"]:
-                        starts.append(anchor)
+                starts = [item for item in payload["evidence"] if item["kind"] == "speech"]
                 value = {"content_type": CONTENT_TYPES["课程或教材"], "chapters": [{"title": str(index), "core_question": "问题", "topics": ["主题"],
                          "start_anchor_id": item["id"]} for index, item in enumerate(starts)],
                          "video_summary": "视频有六个主题。"}
@@ -268,7 +311,7 @@ def parallel_generation(client, app, video_file, monkeypatch):
                     state["halted"] = True
                     raise AppError("invalid_model_output", "测试章节失败")
                 state["finished"].append(index)
-                speech = next(item for item in chapter["primary"] if item["kind"] == "speech")
+                assert any(item["kind"] == "speech" and item["text"] == str(index) for item in chapter["primary"])
                 value = {"chapters": [{'chapter_id': chapter['chapter_id'], 'summary': '章节摘要', "markdown": '正文', "issues": []}]}
                 validate(value)
                 return value
@@ -876,7 +919,7 @@ def test_old_paused_task_is_rejected_without_upgrading_or_touching_cache(client,
     pipeline.run(task_id)
     task = client.get(f"/api/v1/tasks/{task_id}").json()
     assert task["status"] == "failed" and task["error"]["code"] == "generation_changed"
-    assert calls == [] and recognizer.ocr_calls == 60
+    assert calls == [] and recognizer.ocr_calls == 2
     with app.state.sessions() as session:
         assert session.get(Task, task_id).config == config
     assert legacy_cache.read_text(encoding="utf-8") == "旧生成缓存不得读取"

@@ -14,9 +14,54 @@ def test_new_task_regenerates_all_notes_but_reuses_recognition(client, generatio
     assert second != first
     pipeline.run(second)
     assert calls == {"outline": 2, "chapters": 2, "overview": 2}
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
     assert client.get(f"/api/v1/analyses/{second}").json()["title"] != old_notes["title"]
     assert client.get(f"/api/v1/analyses/{first}").json() == old_notes
+
+
+def test_regeneration_after_ocr_upgrade_reads_old_notes_and_only_rechecks_frames(client, app, generation, monkeypatch):
+    video_id, first, pipeline, recognizer, _, _ = generation
+    previous_flow = "video-flow-v18-outline-sources-context"
+    with app.state.sessions.begin() as session:
+        task = session.get(Task, first)
+        task.config = {**task.config, "generation_flow": previous_flow, "extract_version": "extract-v9-video-line-ocr"}
+
+    old_ocr = recognizer.ocr
+
+    def read_frame(frame):
+        _, confidence = old_ocr(frame)
+        return "5\n12", confidence
+
+    monkeypatch.setattr(recognizer, "ocr", read_frame)
+    with monkeypatch.context() as previous:
+        previous.setattr("app.videos.segments.FLOW_VERSION", previous_flow)
+        pipeline.run(first)
+    assert client.get(f"/api/v1/tasks/{first}").json()["status"] == "succeeded"
+    assert (recognizer.asr_calls, recognizer.ocr_calls) == (1, 2)
+
+    with app.state.sessions.begin() as session:
+        task = session.get(Task, first)
+        old_frame = next(identifier for identifier in task.result["evidence_ids"]
+                         if session.get(Evidence, identifier).kind == "frame")
+        issue = {"id": "C1-I1", "chapter_id": "C1", "kind": "source_issue", "quote": "512",
+                 "reason": "旧版引文", "evidence_ids": [old_frame], "critical": False}
+        task.result = {**task.result, "source_issues": [issue]}
+
+    second = client.post(f"/api/v1/videos/{video_id}/analyses").json()["task_id"]
+    pipeline.run(second)
+    assert client.get(f"/api/v1/tasks/{second}").json()["status"] == "succeeded"
+    assert (recognizer.asr_calls, recognizer.ocr_calls) == (1, 4)
+    assert stored_task_config(app, second)["extract_version"] != stored_task_config(app, first)["extract_version"]
+
+    notes = client.get(f"/api/v1/analyses/{first}")
+    assert notes.status_code == 200 and notes.json()["source_issues"][0]["quote"] == "512"
+    for file_format in ("md", "txt"):
+        response = client.get(f"/api/v1/analyses/{first}/notes", params={"format": file_format})
+        assert response.status_code == 200 and "512" in response.text
+    for task_id in (first, second):
+        frames = client.get(f"/api/v1/videos/{video_id}/transcript",
+                            params={"task_id": task_id, "format": "json"}).json()["frames"]
+        assert [(frame["start_seconds"], frame["text"]) for frame in frames] == [(0, "5\n12"), (1, "5\n12")]
 
 
 def test_third_success_retires_only_oldest_notes_and_keeps_sources(client, app, generation):
@@ -50,7 +95,7 @@ def test_third_success_retires_only_oldest_notes_and_keeps_sources(client, app, 
         assert task.config == {key: value for key, value in original[3].items() if key != "outline_preview"}
         assert list(session.scalars(select(Evidence.id).where(Evidence.video_id == video_id))) == source_ids
     assert all(path.read_bytes() == content for path, content in files.items())
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
 
 
 @pytest.mark.parametrize("status", ["running", "failed", "paused"])
@@ -183,7 +228,7 @@ def test_retry_reuses_this_tasks_completed_sections(client, generation, monkeypa
     pipeline.run(task_id)
     assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "succeeded"
     assert calls == {"outline": 1, "chapters": 1, "overview": 1}
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
 
 
 @pytest.mark.parametrize("pause_at", ["outline", "chapters", "overview"])
@@ -206,4 +251,4 @@ def test_resume_reuses_this_tasks_notes_checkpoints(client, generation, monkeypa
     pipeline.run(task_id)
     assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "succeeded"
     assert calls == {"outline": 1, "chapters": 1, "overview": 1}
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2

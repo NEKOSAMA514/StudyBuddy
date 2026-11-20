@@ -109,7 +109,7 @@ def test_invalid_json_or_reference_has_only_one_repair(monkeypatch):
     client = configured()
     coordinator = generation(client)
     bad = outline()
-    bad["chapters"][0]["start_anchor_id"] = "unknown"
+    bad["chapters"].append({**bad["chapters"][0], "start_anchor_id": "unknown"})
     outputs = iter(['{}', json.dumps(bad)])
     calls = []
     async def request(messages, **kwargs):
@@ -175,11 +175,18 @@ def test_writing_evidence_is_compact_without_changing_local_material(operation, 
             assert "primary" not in sent_chapter
             assert sent_chapter["facts"] == data["facts"] and sent_chapter["issues"] == data["issues"]
         else:
-            assert sent_chapter["primary"] == [
-                {"id": "E1", "kind": "speech", "text": "原始知识"},
-                {"id": "E7", "kind": "frame", "text": "画面原文"}]
-        assert sent_chapter["context"] == ([] if not extracted or sent_chapter["chapter_id"] == "C2" else [
-            {"id": "E7", "kind": "frame", "text": "画面原文"}])
+            if operation == "chapters":
+                assert sent_chapter["primary"] == "[New_S1]\n> [F1] 画面原文\n原始知识"
+            else:
+                assert sent_chapter["primary"] == [
+                    {"id": "E1", "kind": "speech", "text": "原始知识"},
+                    {"id": "E7", "kind": "frame", "text": "画面原文", "nearby_speech_id": "E1"}]
+        if extracted and sent_chapter["chapter_id"] == "C1":
+            expected_context = ("画面原文" if operation == "chapters" else
+                                [{"id": "E7", "kind": "frame", "text": "画面原文"}])
+            assert sent_chapter["context"] == expected_context
+        else:
+            assert sent_chapter["context"] == ("" if operation == "chapters" else [])
         assert {key: sent_chapter[key] for key in ("title", "core_question", "topics", "start_anchor_id")} == {
             key: data[key] for key in ("title", "core_question", "topics", "start_anchor_id")}
     assert json.dumps(payload, ensure_ascii=False) == before and coordinator.path(operation, payload) == cache
@@ -208,8 +215,9 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     payload = {"anchors": coordinator.anchor_payload(), "evidence": evidence}
     before, cache = deepcopy(payload), coordinator.path(operation, payload)
     good = outline()
+    good["chapters"].append({**good["chapters"][0], "start_anchor_id": "E2"})
     bad = deepcopy(good)
-    bad["chapters"][0]["start_anchor_id"] = "unknown-boundary"
+    bad["chapters"][1]["start_anchor_id"] = "unknown-boundary"
     outputs, captured = iter([bad, good]), []
     async def post(self, url, **kwargs):
         captured.append(deepcopy(kwargs["json"]["messages"]))
@@ -224,9 +232,10 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     assert "本段原文" in captured[1][-1]["content"]
     sent = json.loads(captured[0][-1]["content"])
     assert "anchors" not in sent
-    for key in ("evidence", "primary", "context"):
-        if key in payload:
-            assert sent[key] == [{"id": item["id"], "text": item["text"]} for item in payload[key]]
+    identifiers = ["S1", "F1", "S2", "S3", "S4", "S5", "S6"]
+    assert sent["evidence"] == [{"id": identifier, "text": item["text"].replace("\n", " ")
+                                if item["kind"] == "frame" else item["text"]}
+                               for identifier, item in zip(identifiers, evidence, strict=True)]
     assert "start_seconds" not in captured[0][-1]["content"]
     assert "end_seconds" not in captured[0][-1]["content"]
     assert "ocr_texts" not in sent
@@ -235,7 +244,7 @@ def test_planning_requests_and_repair_send_only_ids_and_original_text(monkeypatc
     assert [item["id"] for item in coordinator.anchors] == [f"E{i}" for i in range(1, 7)]
     assert coordinator.evidence[0]["start_seconds"] == 0
     invalid = deepcopy(good)
-    invalid["chapters"][0]["start_anchor_id"] = frame["id"]
+    invalid["chapters"][1]["start_anchor_id"] = frame["id"]
     with pytest.raises(ValueError, match="invalid_boundary_anchor"):
         coordinator.validate(operation, payload, invalid)
 
@@ -254,6 +263,43 @@ def test_planning_repair_budget_counts_complete_messages(monkeypatch):
     assert run_model(model, "generate", "outline", payload,
                      model_validator("outline", lambda value: coordinator.validate("outline", payload, value))) == outline()
     assert len(captured) == 2 and model.input_characters("outline", payload) == message_characters(captured[0])
+
+
+def test_outline_repair_requests_missing_anchors_when_the_previous_output_would_overflow(monkeypatch):
+    from copy import deepcopy
+
+    model = configured()
+    coordinator = generation(model)
+    payload = {"anchors": coordinator.anchor_payload(), "evidence": deepcopy(coordinator.evidence)}
+    capacity = model.settings.llm_input_text_limit - 512
+    payload["evidence"][0]["text"] += "甲" * (capacity - model.input_characters("outline", payload))
+    good = outline()
+    good["chapters"] += [{**good["chapters"][0], "start_anchor_id": identifier} for identifier in ("E2", "E3")]
+    bad = {**deepcopy(good), "video_summary": "上一轮的大纲" * 512}
+    for chapter in bad["chapters"][1:]:
+        chapter["start_anchor_id"] = None
+    outputs, requests = iter((bad, good)), []
+
+    async def post(self, url, **kwargs):
+        requests.append(kwargs["json"]["messages"])
+        return httpx.Response(200, json={"choices": [{"message": {"content": model_content(next(outputs))}}]},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    def validate(value):
+        try:
+            return coordinator.validate("outline", payload, value)
+        except ValueError as error:
+            raise ValueError(str(error) + ("很长的校验细节" * 100)) from error
+
+    assert run_model(model, "generate", "outline", payload, model_validator("outline", validate)) == good
+    assert len(requests) == model.calls == 2
+    assert message_characters(requests[0]) == capacity
+    assert requests[1][:-1] == requests[0]
+    instruction = requests[1][-1]["content"]
+    assert "[null, null]" in instruction and instruction.endswith("并纠正上述问题。")
+    assert message_characters(requests[1]) == model.settings.llm_input_text_limit
 
 
 @pytest.mark.parametrize("operation", ["chapters", "extract"])
@@ -297,9 +343,13 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
         if "evidence" in payload:
             value = outline()
         elif "chapters" in payload:
-            items = payload["chapters"][0]["primary"]
-            assert all(set(item) == {"id", "kind", "text"} for item in items)
-            value = {"chapters": [{'chapter_id': 'C1', 'summary': '章节摘要', "markdown": "\n\n".join([item['text'] for item in items]), "issues": []}]}
+            expected = {
+                ("speech",): "[New_S1]\nspeech原始文字",
+                ("frame",): "> [F1] frame原始文字",
+                ("speech", "frame"): "[New_S1]\n> [F1] frame原始文字\nspeech原始文字",
+            }
+            assert payload["chapters"][0]["primary"] == expected[kinds]
+            value = {"chapters": [{'chapter_id': 'C1', 'summary': '章节摘要', "markdown": "\n\n".join(item["text"] for item in evidence), "issues": []}]}
         else:
             value = {"title": "视频知识", "tags": [], "overview_paragraphs": ["主题导览"]}
         return httpx.Response(200, json={"choices": [{"message": {"content": model_content(value)}}]},
@@ -313,7 +363,7 @@ def test_compact_generation_restores_times_exports_and_reuses_checkpoints(tmp_pa
     result = asyncio.run(run())
     assert len(requests) == model.calls == 3 and evidence == before
     assert "anchors" not in requests[0]
-    assert requests[0]["evidence"] == [{"id": item["id"], "text": item["text"]}
+    assert requests[0]["evidence"] == [{"id": "F1" if item["kind"] == "frame" else "S1", "text": item["text"]}
                                         for item in coordinator.evidence]
     exported = notes_text("video.mp4", 10, result)
     chapter_result = result["chapters"][0]
@@ -636,13 +686,15 @@ def test_provider_retries_keep_pool_concurrency_and_save_successes(monkeypatch, 
     model.settings = replace(model.settings, llm_section_concurrency=concurrency)
     coordinator = generation(model)
     coordinator.folder = tmp_path
+    for item in coordinator.evidence:
+        item["text"] = item["id"]
     attempts, active, peak = {}, 0, 0
     original_sleep = asyncio.sleep
     @asynccontextmanager
     async def response(self, client, payload):
         nonlocal active, peak
         material = json.loads(payload["messages"][-1]["content"])
-        identifier = material["evidence"][0]["id"]
+        identifier = material["evidence"][0]["text"]
         attempts[identifier] = attempts.get(identifier, 0) + 1
         active += 1
         peak = max(peak, active)
@@ -726,9 +778,14 @@ def test_json_repair_preserves_answer_and_messages_without_reasoning(monkeypatch
     assert "不发送的推理" not in json.dumps(requests, ensure_ascii=False)
 
 
+@pytest.mark.parametrize("document", [False, True], ids=["video", "document"])
 @pytest.mark.parametrize("extra", [0, -1], ids=["exact-limit", "one-character-over"])
-def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, extra):
+def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, extra, document):
+    from app.documents.model import DocumentModelClient
+
     model = configured()
+    if document:
+        model = DocumentModelClient(model.settings)
     model.settings.llm_request_interval_seconds = 0
     payload = {"material": "原材料"}
     good = {"title": "已修正", "tags": [], "overview_paragraphs": ["概览"]}
@@ -746,9 +803,14 @@ def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, e
     def validate(value):
         if value["title"] == "错误":
             raise ValueError("wrong_title")
-    if extra == 0:
+    if not extra or not document:
         assert run_model(model, "generate", "overview", payload, model_validator("overview", validate)) == good
-        assert requests[1] == history
+        if extra:
+            assert requests[1][:-1] == history[:-2]
+            assert "wrong_title" in requests[1][-1]["content"]
+            assert message_characters(requests[1]) <= model.settings.llm_input_text_limit
+        else:
+            assert requests[1] == history
         assert model.calls == len(counts) == len(requests) == 2
     else:
         with pytest.raises(AppError) as error:
@@ -757,26 +819,48 @@ def test_json_repair_budget_counts_previous_answer_before_request(monkeypatch, e
         assert model.calls == len(counts) == len(requests) == 1
 
 
-def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_path):
+@pytest.mark.parametrize("first_anchor", [{}, {"start_anchor_id": "E2"}], ids=["omitted", "same-time"])
+def test_outline_boundaries_use_visible_material_and_are_validated_locally(tmp_path, monkeypatch, first_anchor):
     model = configured()
-    evidence = [{"id": "frame", "kind": "frame", "text": "第一章标题", "start_seconds": 0, "end_seconds": 0},
-                {"id": "speech", "kind": "speech", "text": "随后讲解", "start_seconds": 2, "end_seconds": 5}]
-    coordinator = DetailedVideoGeneration("boundaries", model, model.settings, tmp_path, evidence, 10,
+    evidence = [
+        {"id": "frame", "kind": "frame", "text": "第一章标题", "start_seconds": 62, "end_seconds": 62},
+        {"id": "details", "kind": "frame", "text": "同一时刻的画面文字", "start_seconds": 62, "end_seconds": 63},
+        {"id": "repeat", "kind": "frame", "text": "同一时刻的画面文字", "start_seconds": 64, "end_seconds": 64},
+        {"id": "speech", "kind": "speech", "text": "随后讲解", "start_seconds": 66, "end_seconds": 69},
+        {"id": "later", "kind": "speech", "text": "下一部分", "start_seconds": 72, "end_seconds": 74},
+    ]
+    coordinator = DetailedVideoGeneration("boundaries", model, model.settings, tmp_path, evidence, 90,
         asyncio.Event(), lambda: None, lambda stage: None, {})
+    coordinator.range_start = 60
     payload = {"evidence": coordinator.evidence, "anchors": coordinator.anchor_payload(),
-               "context": [{"id": "previous", "text": "前段上下文", "kind": "speech", "start_seconds": 0, "end_seconds": 1}]}
-    sent = json.loads(model.messages("outline", payload)[-1]["content"])
+               "context": {"video_summary": "前段导览", "chapters": [
+                   {"title": "前段主题", "core_question": "前段问题", "topics": ["前段要点"]}]}}
+    value, captured = outline(), []
+    first_chapter = value["chapters"][0]
+    value["chapters"].append({**first_chapter, "title": "随后讲解", "start_anchor_id": "E3"})
+    first_chapter.pop("start_anchor_id")
+    first_chapter.update(first_anchor)
+
+    async def request(messages, **kwargs):
+        captured.append(messages)
+        return model_content(value)
+
+    monkeypatch.setattr(model, "request", request)
+    result = run_model(model, "generate", "outline", payload, lambda output: coordinator.validate("outline", payload, output))
+    assert len(captured) == 1
+    assert "从第二章开始选择起点" in captured[0][0]["content"]
+    sent = json.loads(captured[0][-1]["content"])
     assert "anchors" not in sent
-    assert sent["evidence"] == [{"id": "E1", "text": "第一章标题"}, {"id": "E2", "text": "随后讲解"}]
-    value = outline()
-    value["chapters"].append({**value["chapters"][0], "title": "随后讲解", "start_anchor_id": "E2"})
-    assert coordinator.validate("outline", payload, value)["chapters"] == value["chapters"]
-    for identifier in ["previous", "unknown"]:
-        invalid = {**value, "chapters": [{**value["chapters"][0], "start_anchor_id": identifier}]}
+    assert sent["evidence"] == [{"id": identifier, "text": item["text"]} for identifier, item in
+                                zip(("F1", "F2", "F3", "S1", "S2"), coordinator.evidence, strict=True)]
+    assert result["chapters"] == [{**first_chapter, "start_anchor_id": "E1"}, value["chapters"][1]]
+    chapters = coordinator.assign(result)
+    assert [(chapter["start_seconds"], chapter["end_seconds"]) for chapter in chapters] == [(60, 64), (64, 90)]
+    for identifier in ["previous", "unknown", None]:
+        invalid = {**result, "chapters": [result["chapters"][0], {**result["chapters"][1], "start_anchor_id": identifier}]}
         with pytest.raises(ValueError, match="invalid_boundary_anchor"):
             coordinator.validate("outline", payload, invalid)
-    for identifiers in [["E2", "E1"], ["E1", "E1"]]:
-        invalid = {**value, "chapters": [{**chapter, "start_anchor_id": identifier}
-            for chapter, identifier in zip(value["chapters"], identifiers)]}
+    for identifiers in [("E1", "E2"), ("E1", "E3", "E3"), ("E1", "E4", "E3")]:
+        invalid = {**result, "chapters": [{**first_chapter, "start_anchor_id": identifier} for identifier in identifiers]}
         with pytest.raises(ValueError, match="chapter_boundaries_must_increase_from_first_anchor"):
             coordinator.validate("outline", payload, invalid)

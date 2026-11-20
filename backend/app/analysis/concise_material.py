@@ -1,15 +1,12 @@
 """按字符范围装包并检查覆盖，不依赖领域服务或生成循环。"""
+from bisect import bisect_right
+from itertools import accumulate
 from .content_types import CONTENT_TYPES
 from ..errors import AppError
 
 
 def fragment(source, start, end):
     return {**source, "text": source["text"][start:end], "start_offset": start, "end_offset": end}
-
-
-def measure_largest(build, measure, primary, context):
-    payload = build(primary, context)
-    return max(measure(payload), *(measure({**payload, "content_type": value}) for value in CONTENT_TYPES.values()))
 
 
 def trailing_context(items, characters):
@@ -26,26 +23,51 @@ def trailing_context(items, characters):
 # 按实际请求预算切分来源字符，保留必要前文并保证正文范围连续覆盖。
 def plan_segments(sources, build, measure, limit, context_for):
     sources = [s for s in sources if s["text"].strip()]
-    fixed = measure_largest(build, measure, [], [])
+    # 类型只改变提示词、Schema 和类型字段；来源文字在各类型中的计量相同。
+    empty = build([], [])
+    overheads = {None: measure(empty)}
+    for content_type in CONTENT_TYPES.values():
+        overheads[content_type] = measure({**empty, "content_type": content_type})
+    largest_type = max(overheads, key=overheads.get)
+    fixed = overheads[largest_type]
+
+    def request_size(primary, context):
+        payload = build(primary, context)
+        if largest_type:
+            payload["content_type"] = largest_type
+        return measure(payload)
+
     if fixed >= limit:
         raise AppError("model_input_budget", "提示词与补充要求未留下材料空间，请提高生成输入上限。")
+    characters = list(accumulate((len(s["text"]) for s in sources), initial=0))
     segments, processed, index, offset = [], [], 0, 0
     while index < len(sources):
         context = context_for(processed, sources[index])
         ceiling = fixed + (limit - fixed) // 2
-        low, high = 0, sum(len(s["text"]) for s in context)
+        high = sum(len(s["text"]) for s in context)
+        low = high if high <= ceiling - fixed else 0
         while low < high:
             middle = (low + high + 1) // 2
-            if measure_largest(build, measure, [], trailing_context(context, middle)) <= ceiling:
+            if request_size([], trailing_context(context, middle)) <= ceiling:
                 low = middle
             else:
                 high = middle - 1
         context = trailing_context(context, low)
         primary = []
+        # 原文长度是去重后材料的上界。先整批装入必定能放下的前缀，再按真实请求逐条试探余量。
+        room = limit - fixed - low
+        end = bisect_right(characters, characters[index] + offset + room, lo=index + 1) - 1
+        if end > index:
+            primary = [fragment(s, offset if i == index else 0, len(s["text"]))
+                       for i, s in enumerate(sources[index:end], index)]
+            if request_size(primary, context) <= limit:
+                index, offset = end, 0
+            else:
+                primary = []
         while index < len(sources):
             source = sources[index]
             remaining = fragment(source, offset, len(source["text"]))
-            if measure_largest(build, measure, [*primary, remaining], context) <= limit:
+            if request_size([*primary, remaining], context) <= limit:
                 primary.append(remaining)
                 index, offset = index + 1, 0
                 continue
@@ -54,7 +76,7 @@ def plan_segments(sources, build, measure, limit, context_for):
             low, high = offset, len(source["text"])
             while low < high:
                 middle = (low + high + 1) // 2
-                if measure_largest(build, measure, [fragment(source, offset, middle)], context) <= limit:
+                if request_size([fragment(source, offset, middle)], context) <= limit:
                     low = middle
                 else:
                     high = middle - 1
@@ -65,7 +87,10 @@ def plan_segments(sources, build, measure, limit, context_for):
                 for separator in ("\n", "。", "！", "？", ";", ". "):
                     boundary = source["text"].rfind(separator, offset + (end - offset) // 2, end)
                     if boundary >= 0:
-                        end = boundary + len(separator)
+                        preferred = boundary + len(separator)
+                        # 截短后可能改变前文中重复画面的去重结果，复核最终字符范围。
+                        if request_size([fragment(source, offset, preferred)], context) <= limit:
+                            end = preferred
                         break
             primary.append(fragment(source, offset, end))
             offset = end

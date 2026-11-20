@@ -158,9 +158,14 @@ def test_subtitle_end_to_end_speech_anchors_dedup_exports_and_resume(client, app
     video, pipeline, recognizer, result = subtitle_pipeline(client, app, video_file, monkeypatch, platform)
     class DeduplicatedModel(FakeModel):
         async def generate(self, operation, payload, validate):
-            if operation == "outline":
+            if operation in {"outline", "chapters"}:
                 sent = json.loads(self.messages(operation, payload)[-1]["content"])
-                assert len(sent["evidence"]) == 1 and sent["evidence"][0]["text"] == result["speech"][0]["text"]
+                subtitle = result["speech"][0]["text"]
+                if operation == "outline":
+                    assert {row["id"]: row["text"] for row in sent["evidence"]} == {
+                        "S1": subtitle, "F1": subtitle, "F2": subtitle}
+                else:
+                    assert sent["chapters"][0]["primary"].splitlines() == ["[New_S1]", subtitle]
             return await super().generate(operation, payload, validate)
     pipeline.model_factory = DeduplicatedModel
     monkeypatch.setattr("app.videos.pipeline.extract_audio", lambda *args: pytest.fail("字幕不得提取音频"))
@@ -184,7 +189,7 @@ def test_subtitle_end_to_end_speech_anchors_dedup_exports_and_resume(client, app
     assert client.post(f"/api/v1/tasks/{task_id}/retry").status_code == 202
     pipeline.run(task_id)
     assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "succeeded"
-    assert recognizer.ocr_calls == 60
+    assert recognizer.ocr_calls == 2
 
 
 def test_unavailable_subtitle_falls_back_asr_once_and_keeps_ocr_cache(client, app, video_file, monkeypatch):
@@ -201,7 +206,7 @@ def test_unavailable_subtitle_falls_back_asr_once_and_keeps_ocr_cache(client, ap
         session.get(Task, task_id).status = "interrupted"
     client.post(f"/api/v1/tasks/{task_id}/retry")
     pipeline.run(task_id)
-    assert calls == [1] and recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert calls == [1] and recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
 
 
 def test_cancel_during_fetch_does_not_fall_back(client, app, video_file, monkeypatch):
@@ -234,7 +239,7 @@ def test_new_subtitles_keep_old_asr_evidence_and_share_ocr(client, app, video_fi
     new = client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={second}&format=json').json()
     assert old["speech"][0]["text"] != new["speech"][0]["text"]
     assert client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={first}&format=json').json() == old
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
     assert old["frames"][0]["image_name"] == new["frames"][0]["image_name"]
     assert old["frames"][0]["id"] != new["frames"][0]["id"]
 

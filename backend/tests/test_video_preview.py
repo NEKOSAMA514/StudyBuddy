@@ -6,7 +6,8 @@ import pytest
 from sqlalchemy import select, func
 from app.config import Settings
 from app.db import Task
-from app.recognition.extraction import extraction_config, extraction_signature, speech_signature, speech_cache_path, ocr_cache_path, frame_times
+from app.recognition.extraction import (extraction_config, extraction_signature, line_ocr_cache_path,
+                                       line_ocr_evidence, speech_cache_path, speech_signature)
 from app.video_download.subtitles import content_digest, subtitle_cache
 from app.videos.preview import analysis_preview
 from app.videos.detailed import DetailedVideoGeneration
@@ -22,11 +23,10 @@ def caches(folder, video, config, speech=None):
         speech_cache_path(folder, speech_signature(config)).write_text(json.dumps(speech), "utf-8")
     evidence = [{**item, "id": f"{video.id}-{signature}-speech-{i}", "kind": "speech",
                  "image_name": None, "confidence": None} for i, item in enumerate(speech or [])]
-    for i, seconds in enumerate(frame_times(config, video.duration)):
-        item = {"text": f"第{i}帧的原文知识与适用条件。", "start_seconds": seconds, "end_seconds": seconds, "kind": "frame",
-                "id": f"{video.id}-{signature}-frame-{i}", "image_name": f"frame-{signature}-{i:05d}.jpg", "confidence": 0.95}
-        ocr_cache_path(folder, signature, i).write_text(json.dumps(item), "utf-8")
-        evidence.append(item)
+    rows = [{"text": f"第{i}帧的原文知识与适用条件。", "start_seconds": i * video.duration / 60,
+             "end_seconds": i * video.duration / 60, "confidence": 95} for i in range(60)]
+    line_ocr_cache_path(folder, signature).write_text(json.dumps(rows), "utf-8")
+    evidence.extend(line_ocr_evidence(rows, video.id, signature, signature))
     return evidence
 
 
@@ -44,10 +44,10 @@ def test_preview_matches_actual_generation_and_is_read_only(tmp_path, style, lim
     assert {p.name: p.read_bytes() for p in folder.iterdir()} == before
     async def run():
         async with FakeModel(settings) as model:
-            args = ("task", model, settings, tmp_path / style, evidence, video.duration, asyncio.Event(), lambda: None, lambda _: None, {})
+            args = ("task", model, settings, tmp_path / style, evidence, video.duration, asyncio.Event(), lambda: None, lambda _: None)
             (tmp_path / style).mkdir()
             gen = (ConciseVideoGeneration(*args, lambda _: None, "课程") if style == "concise"
-                   else DetailedVideoGeneration(*args, video_title="课程"))
+                   else DetailedVideoGeneration(*args, timings={}, video_title="课程"))
             return await gen.run()
     result = asyncio.run(run())
     assert info["estimated_segments"] == result["total_segments"]
@@ -67,11 +67,11 @@ def test_incomplete_or_changed_recognition_is_unknown(tmp_path, missing):
         if missing == "speech":
             speech_cache_path(tmp_path, speech_signature(config)).unlink()
         elif missing == "frame":
-            ocr_cache_path(tmp_path, extraction_signature(config), 59).unlink()
+            line_ocr_cache_path(tmp_path, extraction_signature(config)).unlink()
         elif missing == "corrupt":
-            ocr_cache_path(tmp_path, extraction_signature(config), 59).write_text("{", "utf-8")
+            line_ocr_cache_path(tmp_path, extraction_signature(config)).write_text("{", "utf-8")
         else:
-            config = extraction_config(replace(settings, ocr_min_confidence=0.9))
+            config = extraction_config(replace(settings, asr_language="en"))
     result = analysis_preview(video, tmp_path, config, settings)
     assert result["character_count"] is result["estimated_segments"] is None
 

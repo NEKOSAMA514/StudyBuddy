@@ -37,6 +37,8 @@ export type SourceIssue = {
   reason: string;
   evidence_ids: string[];
   critical: boolean;
+  start_seconds: number;
+  end_seconds: number;
 };
 export type TranscriptSource = { kind: "asr" | "youtube_subtitle" | "bilibili_subtitle"; language: string; automatic: boolean; digest?: string; track_id?: string };
 export function transcriptLabel(source?: TranscriptSource) {

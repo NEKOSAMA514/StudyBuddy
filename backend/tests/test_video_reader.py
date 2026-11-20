@@ -289,7 +289,7 @@ def test_failed_copy_manual_retry_keeps_original(client, app, video_file, monkey
 
 
 @pytest.mark.parametrize("extension", ["webm", "mkv", "mov"])
-def test_analysis_reads_original_and_resumes_without_repeating_recognition(client, app, samples, extension):
+def test_analysis_reads_original_and_resumes_without_repeating_speech(client, app, samples, extension):
     from app.videos.pipeline import Pipeline
     from .fakes import FakeRecognizer, FakeModel
     video = upload(client, samples / f"sample.{extension}")
@@ -308,7 +308,8 @@ def test_analysis_reads_original_and_resumes_without_repeating_recognition(clien
     pipeline.run(identifier)
     state = client.get(f"/api/v1/tasks/{identifier}").json()
     assert state["status"] == "succeeded", state["error"]
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 60
+    frames = client.get(f'/api/v1/videos/{video["id"]}/transcript', params={"task_id": identifier, "format": "json"}).json()["frames"]
+    assert frames and recognizer.asr_calls == 1 and recognizer.ocr_calls == 1 + len(frames)
     folder = app.state.pipeline.get_settings().data_dir / "videos" / video["id"]
     assert source_path(folder, video["media_info"]).read_bytes() == (samples / f"sample.{extension}").read_bytes()
     assert not list(folder.glob("playback-*"))

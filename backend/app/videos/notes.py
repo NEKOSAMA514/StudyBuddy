@@ -18,6 +18,12 @@ def partial_notice(result):
             f"覆盖 00:00–{timestamp(result['covered_until_seconds'])}。", ""]
 
 
+def _issue_time_range(issue):
+    if "start_seconds" in issue:
+        return f"{timestamp(issue['start_seconds'])} - {timestamp(issue['end_seconds'])}"
+    return ""
+
+
 def notes_text(filename: str, duration: float, result: dict) -> str:
     if result.get("note_style") == "concise":
         return markdown_text(concise_markdown(filename, duration, result))
@@ -41,7 +47,10 @@ def notes_text(filename: str, duration: float, result: dict) -> str:
         for issue in result["source_issues"]:
             if issue.get("quote"):
                 lines.append(f"原文：{issue['quote']}")
-            lines.extend([f"存疑原因：{issue['reason']}", ""])
+            lines.append(f"存疑原因：{issue['reason']}")
+            if time_range := _issue_time_range(issue):
+                lines.append(time_range)
+            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -73,6 +82,8 @@ def notes_markdown(filename: str, duration: float, result: dict) -> str:
             if issue.get("quote"):
                 lines.extend([f"原文：{escape_markdown(issue['quote'])}", ""])
             lines.extend([f"存疑原因：{escape_markdown(issue['reason'])}", ""])
+            if time_range := _issue_time_range(issue):
+                lines.extend([time_range, ""])
     return "\n".join(lines).rstrip() + "\n"
 
 

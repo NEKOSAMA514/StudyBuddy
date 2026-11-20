@@ -4,6 +4,7 @@ import pytest
 from app.db import Task, Video
 from app.videos.pipeline import Pipeline
 from app.analysis.worker import Worker
+from app.recognition.extraction import LEGACY_EXTRACT_VERSION
 from .conftest import upload
 from .fakes import FakeRecognizer, FakeModel
 
@@ -90,7 +91,7 @@ def test_resume_reuses_checkpoints_and_keeps_snapshot(client, app, video_file, m
     paused = False
     with app.state.sessions.begin() as session:
         task = session.get(Task, task_id)
-        task.config = {k: v for k, v in task.config.items() if k != "frame_count"}
+        task.config = {**task.config, "extract_version": LEGACY_EXTRACT_VERSION, "frame_interval": 15}
     counts = {"ocr": 0, "outline": 0, "chapters": 0, "overview": 0}
     models = []
 
@@ -161,4 +162,4 @@ def test_running_stop_waits_for_current_operation(client, app, video_file, monke
         thread.join(5)
     assert not thread.is_alive()
     assert client.get(f'/api/v1/tasks/{task_id}').json()["status"] == "paused"
-    assert client.get(f'/api/v1/videos/{video["id"]}/evidence').json()
+    assert client.get(f'/api/v1/videos/{video["id"]}/evidence').json() == []

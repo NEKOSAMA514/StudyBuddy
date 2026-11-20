@@ -164,5 +164,5 @@ def test_generation_hashes_and_prompt_versions_are_unchanged():
     values = [{'中文':'测试','list':[1,None,True]}, {'z':2,'a':1}]
     assert [digest(v) for v in values] == ['e332c951ea0c05d3', 'c4f6fb7ac09c33cc']
     assert [document_digest(v) for v in values] == ['55bc093cd495598cbcb92ba4c519ffbeade0bbedca312055884fe248e8454d37', '99168216144c7fed5d4c54916cf98d9c66096280c04a499822a99b6658bd177a']
-    assert PROMPT_VERSION == 'video-notes-v14-styles-characters-c24e0b290d1a'
+    assert PROMPT_VERSION == 'video-notes-v14-styles-characters-4b731b03c823'
     assert DOCUMENT_PROMPT_VERSION == 'document-v1-92b1182761d4d746'

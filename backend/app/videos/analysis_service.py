@@ -153,12 +153,19 @@ class AnalysisService:
                 select(Evidence).where(Evidence.video_id == video.id, Evidence.id.in_(task.result.get("source_ids", task.result["evidence_ids"]))))}
             complete = task.result.get("complete", True)
             covered = video.duration if complete else task.result["covered_until_seconds"]
+            issues = task.result["source_issues"]
             if task.result.get("note_style") == "concise":
                 from .concise import validate_result
                 chapters = validate_result(task.result, evidence, video.duration)
             else:
-                chapters = ground_chapters(task.result["chapters"], task.result["source_issues"], evidence, video.duration, end=covered)
+                chapters = ground_chapters(task.result["chapters"], issues, evidence, video.duration, end=covered,
+                                           legacy_ocr_line_join=task.config.get("generation_flow") != FLOW_VERSION)
+                issues = [
+                    {**issue, "start_seconds": min(evidence[i]["start_seconds"] for i in issue["evidence_ids"]),
+                     "end_seconds": max(evidence[i]["end_seconds"] for i in issue["evidence_ids"])}
+                    for issue in issues
+                ]
             chapters = [{**chapter, "markdown": normalize_math(chapter["markdown"])} for chapter in chapters]
             return NotesPublic.model_validate({"id": task.id, "video_id": task.video_id, "warnings": task.warnings,
-                    "timings": task.timings, **task.result, "chapters": chapters,
+                    "timings": task.timings, **task.result, "chapters": chapters, "source_issues": issues,
                     "complete": complete, "covered_until_seconds": covered}).model_dump(exclude_unset=True)

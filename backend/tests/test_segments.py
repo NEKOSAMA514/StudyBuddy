@@ -1,4 +1,3 @@
-from app.analysis.budgets import message_characters
 from app.analysis.content_types import CONTENT_TYPES
 import asyncio
 from copy import deepcopy
@@ -10,7 +9,7 @@ import pytest
 
 from app.videos.detailed import DetailedVideoGeneration
 from app.errors import TaskPaused
-from app.videos.segments import split_segments, preceding_context
+from app.videos.segments import split_segments, preceding_context, outline_overhead
 from app.analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
 from app.videos.notes import notes_text, notes_markdown
 from app.videos.pipeline import Pipeline
@@ -51,31 +50,34 @@ def flow(tmp_path, evidence=None, model_type=RecordingModel, **kwargs):
     (1200, DEFAULT_INPUT_TEXT_LIMIT + 1, True), (1199, DEFAULT_INPUT_TEXT_LIMIT - 1, False)])
 def test_segment_trigger_boundaries(seconds, characters, segmented):
     evidence = sources(2)
-    evidence[1].update(start_seconds=600, end_seconds=601)
-    evidence[0]["text"], evidence[1]["text"] = "甲" * (characters // 2), "乙" * (characters - characters // 2)
+    evidence[1].update(kind="frame", start_seconds=600, end_seconds=601)
+    evidence[0]["text"] = "甲" * (characters // 2)
+    evidence[1]["text"] = "乙\r\n" + "乙" * (characters - characters // 2 - 2)
     actual, parts = split_segments(evidence, seconds)
     assert actual is segmented
     assert [item["id"] for part in parts for item in part["primary"]] == ["s0", "s1"]
     assert parts[0]["start_seconds"] == 0 and parts[-1]["end_seconds"] == seconds
 
 
-def test_repeated_ocr_does_not_split_short_video_or_discard_chemical_changes(tmp_path):
-    repeated = "酸性条件下以铁铵矾为指示剂，使用标准溶液进行滴定。\n" * 25
+def test_repeated_ocr_counts_in_outline_and_preserves_chemical_changes(tmp_path):
+    repeated = "酸性条件下以铁铵矾为指示剂，使用标准溶液进行滴定。\n" * 350
     changes = ["AgCl；Fe2+；0.1mL", "AgC1；Fe3+；0.01mL", "SCN−；温度20℃", "SCN+；温度30℃"]
-    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i * 15,
-                 "end_seconds": i * 15, "text": repeated + text} for i, text in enumerate(changes)]
-    evidence = [{**item, "text": item["text"] * 12} for item in evidence]
+    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
+                 "end_seconds": seconds, "text": repeated + text}
+                for i, (seconds, text) in enumerate(zip((0, 1, 130, 131), changes))]
     original = deepcopy(evidence)
     assert sum(len(item["text"]) for item in evidence) > DEFAULT_INPUT_TEXT_LIMIT
     segmented, parts = split_segments(evidence, 650)
-    assert not segmented and len(parts) == 1 and parts[0]["primary"] == original
+    assert segmented and [part["primary"] for part in parts] == [original[:2], original[2:]]
     coordinator, model, _, progress = flow(tmp_path, evidence, duration=650)
     result = asyncio.run(coordinator.run())
-    assert [op for op, _ in model.inputs] == ["outline", "chapters", "overview"]
-    assert not progress and not result["segment_guides"]
-    chapter = result["chapters"][0]
-    assert chapter["evidence_ids"] == [item["id"] for item in evidence]
-    assert (chapter["start_seconds"], chapter["end_seconds"], chapter["timestamp_basis"]) == (0, 650, "frame")
+    outlines = [json.loads(model.messages(op, payload)[-1]["content"]) for op, payload in model.inputs if op == "outline"]
+    assert [item["text"] for outline in outlines for item in outline["evidence"]] == [
+        item["text"].replace("\n", " ") for item in original]
+    assert [(chapter["start_seconds"], chapter["end_seconds"], chapter["timestamp_basis"])
+            for chapter in result["chapters"]] == [(0, 130, "frame"), (130, 650, "frame")]
+    assert [item for chapter in result["chapters"] for item in chapter["evidence_ids"]] == [i["id"] for i in evidence]
+    assert progress and len(result["segment_guides"]) == 2
     assert evidence == original
     calls = model.calls
     assert asyncio.run(coordinator.run()) == result and model.calls == calls
@@ -90,19 +92,23 @@ def test_unique_ocr_still_counts_towards_segment_budget():
     assert [item for part in parts for item in part["primary"]] == evidence
 
 
-def test_each_segment_counts_its_own_shared_ocr_and_reserves_context(small_outline_budget):
-    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": i * 15,
-                 "end_seconds": i * 15, "text": text * count}
-                for i, (text, count) in enumerate((("甲", 8000), ("甲", 8000),
-                                                  ("乙", 8000), ("乙", 8000), ("丙", 6000)))]
-    segmented, parts = split_segments(evidence, 650)
+def test_segment_estimate_counts_content_type_without_raw_minute_context():
+    repeated = "画面原文\r\n" * 30
+    evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
+                 "end_seconds": seconds, "text": text}
+                for i, (seconds, text) in enumerate([(0, "开场"), (1140, repeated), (1141, repeated),
+                                                      (1200, repeated), (1280, "末")])]
+    model = FakeModel(Settings(summary_prompt="保留实验条件"))
+    title = "课程视频"
+    overhead = outline_overhead(model, title)
+    longest_type = max(CONTENT_TYPES.values(), key=len)
+    limit = overhead + len(longest_type) + 3 * len("画面原文" * 30)
+    segmented, parts = split_segments(evidence, 1800, limit, overhead)
     assert segmented and [[item["id"] for item in part["primary"]] for part in parts] == [
-        ["frame0", "frame1"], ["frame2", "frame3"], ["frame4"]]
-    model = FakeModel(Settings())
-    for part in parts:
-        payload = {"evidence": part["primary"]}
-        assert model.input_characters("outline", payload) == message_characters(model.messages("outline", payload))
-    assert [item for part in parts for item in part["primary"]] == evidence
+        ["frame0", "frame1", "frame2"], ["frame3", "frame4"]]
+    payload = {"evidence": parts[1]["primary"], "context": {},
+               "video_title": title, "content_type": longest_type}
+    assert model.input_characters("outline", payload) + model.repair_input_reserve <= limit
 
 
 def test_same_time_records_stay_together_and_silence_has_no_empty_request():
@@ -114,7 +120,7 @@ def test_same_time_records_stay_together_and_silence_has_no_empty_request():
     assert [(part["start_seconds"], part["end_seconds"]) for part in parts] == [(0, 3000), (3000, 7200)]
 
 
-def test_dense_material_reserves_actual_preceding_minute_context(small_outline_budget):
+def test_dense_material_estimates_outline_without_raw_minute_context(small_outline_budget):
     evidence = [{**sources(1)[0], "id": f"s{i}", "text": "原" * size,
                  "start_seconds": i * 100, "end_seconds": i * 100 + 1}
                 for i, size in enumerate([5000, 5000, 5000, 10000, 3000, 1000])]
@@ -124,10 +130,10 @@ def test_dense_material_reserves_actual_preceding_minute_context(small_outline_b
     assert preceding_context(evidence, parts[1]["start_seconds"]) == []
     dense = [{**item, "start_seconds": i * 20, "end_seconds": i * 20 + 1} for i, item in enumerate(evidence)]
     model = FakeModel(Settings())
-    _, parts = split_segments(dense, 600, 15000, lambda p: model.input_characters("outline", p))
+    _, parts = split_segments(dense, 600, 15000, outline_overhead(model))
     for part in parts:
-        payload = {"evidence": part["primary"], "context": preceding_context(dense, part["start_seconds"])}
-        assert model.input_characters("outline", payload) <= 15000 or len(part["primary"]) == 1
+        payload = {"evidence": part["primary"], "context": {}}
+        assert model.input_characters("outline", payload) + model.repair_input_reserve <= 15000 or len(part["primary"]) == 1
     assert [item for part in parts for item in part["primary"]] == dense
 
 
@@ -146,10 +152,13 @@ def test_minute_context_keeps_raw_asr_and_ocr_and_excludes_future_and_silence():
 
 
 def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anchors(tmp_path):
+    from app.videos.model_input import pack_chapter_material
+
     times = [0, 59, 60, 119, 120, 179, 180, 239, 240]
     evidence = [{"id": f"s{i}", "kind": "speech" if i % 2 == 0 else "frame",
                  "start_seconds": seconds, "end_seconds": seconds, "text": f"原文{i}"}
                 for i, seconds in enumerate(times)]
+    evidence[3]["end_seconds"] = 120
     coordinator, model, _, _ = flow(tmp_path, evidence, duration=300)
     plans = [{"title": f"第{i}章", "core_question": f"问题{i}", "topics": [f"子主题{i}"],
               "start_anchor_id": f"E{index + 1}"} for i, index in enumerate([0, 4, 6, 8])]
@@ -160,9 +169,22 @@ def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anch
         assert chapter["previous_chapter_outline"] == ({key: plans[index - 1][key] for key in ("title", "core_question", "topics")} if index else {})
         sent = json.loads(model.messages("chapters", {"chapters": [chapter]})[-1]["content"])["chapters"][0]
         assert "start_seconds" not in json.dumps(sent)
-        assert [item["id"] for item in sent["primary"]] == [item["id"] for item in chapter["primary"]]
-        assert [item["id"] for item in sent["context"]] == [item["id"] for item in chapter["context"]]
+        assert sent["context"] == ["", "原文2", "原文4\n原文5", "原文6\n原文7"][index]
+        _, sources = pack_chapter_material(chapter)
+        expected_primary = {item["id"] for item in chapter["primary"]}
+        if index == 1:
+            expected_primary.add("E4")
+            assert sent["primary"].startswith("> [F1] 原文3\n[New_S1]\n")
+        assert {original["id"] for records in sources.values() for original in records} == expected_primary
     assert [item for c in chapters for item in c["primary"]] == coordinator.evidence
+
+    request = {"chapters": [chapters[1]]}
+    response = {"chapters": [{"chapter_id": "C2", "summary": "摘要", "markdown": "正文", "issues": [
+        {"kind": "source_issue", "quote": "原文3", "evidence_ids": ["F1"], "reason": "等待核对", "critical": False}]}]}
+    drafts = coordinator.validate("chapters", request, response)["chapters"]
+    assert drafts[0]["issues"][0]["evidence_ids"] == ["E4"]
+    issues = asyncio.run(coordinator.source_issues(request["chapters"], drafts))
+    assert [(issue["evidence_ids"], issue["quote"]) for issue in issues] == [(["s3"], "原文3")]
 
 
 def test_minute_context_and_previous_outline_cross_segments_without_owning_old_evidence(tmp_path):
@@ -175,9 +197,11 @@ def test_minute_context_and_previous_outline_cross_segments_without_owning_old_e
     outline = [p for op, p in model.inputs if op == "outline"][1]
     chapter = [p["chapters"][0] for op, p in model.inputs if op == "chapters"][1]
     assert [item["id"] for item in outline["evidence"]] == ["E5"]
-    assert [item["id"] for item in outline["context"]] == ["E3", "E4"]
+    assert outline["context"] == {"video_summary": "视频介绍 TCP 慢启动与拥塞窗口增长。", "chapters": [
+        {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}]}
     assert [item["id"] for item in outline["anchors"]] == ["E5"]
-    assert chapter["primary"] == outline["evidence"] and chapter["context"] == outline["context"]
+    assert chapter["primary"] == outline["evidence"]
+    assert [item["id"] for item in chapter["context"]] == ["E3", "E4"]
     assert chapter["previous_chapter_outline"] == {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}
     assert result["chapters"][1]["evidence_ids"] == ["s4"]
     assert len(snapshots) == 2 and evidence == before
@@ -215,7 +239,8 @@ def test_extraction_batches_use_their_own_minute_context_and_keep_previous_outli
     assert fragments == {"E3": "甲" * 3000, "E4": "乙" * 3000}
 
 
-def test_oversized_single_record_is_extracted_inside_its_segment_without_loss(tmp_path, small_outline_budget):
+@pytest.mark.parametrize("large_record", [0, 1])
+def test_oversized_single_record_is_extracted_inside_its_segment_without_loss(tmp_path, small_outline_budget, large_record):
     class Model(RecordingModel):
         async def generate(self, operation, payload, validate):
             if operation == "extract":
@@ -224,13 +249,15 @@ def test_oversized_single_record_is_extracted_inside_its_segment_without_loss(tm
                 return validate({"facts": [{"text": "提取的重要解释与结论。"}], "issues": []})
             return await super().generate(operation, payload, validate)
     evidence = sources(2)
-    evidence[0]["text"] = "完整原文" * 5000 + "末尾条件"
+    evidence[large_record]["text"] = "完整原文" * 5000 + "末尾条件"
     coordinator, model, snapshots, _ = flow(tmp_path, evidence, Model, duration=2400)
     model.settings.llm_input_text_limit = 15000
     result = asyncio.run(coordinator.run())
     fragments = [item["text"] for op, payload in model.inputs if op == "extract"
                  for item in payload["chapter"]["primary"]]
-    assert "".join(fragments) == evidence[0]["text"]
+    assert "".join(fragments) == evidence[large_record]["text"]
+    bodies = [chapter for op, payload in model.inputs if op == "chapters" for chapter in payload["chapters"]]
+    assert "facts" in bodies[large_record] and "facts" not in bodies[1 - large_record]
     assert [chapter["evidence_ids"] for chapter in result["chapters"]] == [["s0"], ["s1"]]
     assert len(snapshots) == 2
     outline_inputs = [payload for op, payload in model.inputs if op == "outline"]
@@ -244,7 +271,9 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
     coordinator, model, snapshots, progress = flow(tmp_path, evidence)
     original = deepcopy(evidence)
     result = asyncio.run(coordinator.run())
-    assert [op for op, _ in model.inputs] == ["outline", "chapters"] * 3 + ["overview"]
+    assert [op for op, _ in model.inputs].count("outline") == 3
+    assert [op for op, _ in model.inputs].count("chapters") == 3
+    assert len(model.inputs) == 7 and model.inputs[-1][0] == "overview"
     assert [len(value["chapters"]) for value in snapshots] == [1, 2, 3]
     assert all(not value["complete"] for value in snapshots)
     assert [len(value["segment_guides"]) for value in snapshots] == [1, 2, 3]
@@ -260,13 +289,20 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
     assert [(c["start_seconds"], c["end_seconds"]) for c in result["chapters"]] == [(0, 1200), (1200, 2400), (2400, 3600)]
     assert [c["evidence_ids"] for c in result["chapters"]] == [["s0"], ["s1"], ["s2"]]
     assert all(c["timestamp_basis"] == kind for c in result["chapters"])
-    for op, payload in model.inputs[2:-1]:
+    for op, payload in model.inputs[:-1]:
         assert "previous_context" not in payload
         if op == "outline":
-            assert payload["context"] == []
+            if payload["anchors"][0]["id"] == "E1":
+                assert payload["context"] == {}
+                continue
+            assert payload["context"] == {"video_summary": "视频介绍 TCP 慢启动与拥塞窗口增长。", "chapters": [
+                {"title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}]}
             assert set(i["id"] for i in payload["anchors"]) <= set(i["id"] for i in payload["evidence"])
             assert coordinator.model.input_characters(op, payload) <= 15000
         else:
+            if payload["chapters"][0]["chapter_id"] == "C1":
+                assert payload["chapters"][0]["previous_chapter_outline"] == {}
+                continue
             assert payload["chapters"][0]["previous_chapter_outline"] == {
                 "title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}
     assert set(model.inputs[-1][1]) == {"video_summaries", "content_type"}
@@ -297,7 +333,7 @@ def test_each_segment_passes_its_own_summary_to_writing_without_extra_calls(tmp_
             return await super().generate(operation, payload, validate)
     coordinator, model, _, _ = flow(tmp_path, model_type=Model)
     result = asyncio.run(coordinator.run())
-    assert [op for op, _ in model.inputs] == ["outline", "chapters"] * 3 + ["overview"]
+    assert len(model.inputs) == 7 and model.inputs[-1][0] == "overview"
     expected = ["片段主题E1", "片段主题E2", "片段主题E3"]
     assert [payload["video_summary"] for op, payload in model.inputs if op == "chapters"] == expected
     assert [guide["summary"] for guide in result["segment_guides"]] == expected
@@ -524,16 +560,12 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
     with app.state.sessions.begin() as session:
         row = session.get(Video, video["id"])
         row.duration, row.audio_codec = 2400, "aac"
-        task = session.get(Task, identifier)
-        task.config = {**{k: v for k, v in task.config.items() if k != "frame_count"}, "frame_interval": 1200}
-    settings = replace(app.state.pipeline.get_settings(), frame_interval=1200)
+    settings = app.state.pipeline.get_settings()
     config = extraction_config(settings)
-    config.pop("frame_count")
     signature = extraction_signature(config)
     folder = settings.data_dir / "videos" / video["id"]
     (folder / "audio.wav").write_bytes(b"isolated recognizer input")
-    for index in range(2):
-        (folder / f"ocr-{signature}-{index:05d}.json").write_text('{"text":""}', encoding="utf-8")
+    (folder / f"ocr-{signature}-lines.json").write_text("[]", encoding="utf-8")
     starts, models, transcriptions = [], [], []
     class Recognizer(FakeRecognizer):
         def transcribe(self, path):
@@ -547,7 +579,7 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
                            config.llm_request_interval_seconds))
         async def generate(self, operation, payload, validate):
             starts.append((operation, [c["chapter_id"] for c in payload.get("chapters", [])]))
-            if operation == "outline" and payload["anchors"][0]["start_seconds"] == 1200:
+            if operation == "chapters" and payload["chapters"][0]["chapter_id"] == "C2" and self.fail:
                 public = client.get(f"/api/v1/tasks/{identifier}").json()
                 assert public["notes_state"] == "partial" and "result" not in public
                 assert public["notes_revision"] == 1
@@ -555,7 +587,6 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
                 note = client.get(f"/api/v1/analyses/{identifier}").json()
                 assert len(note["chapters"]) == 1 and note["covered_until_seconds"] == 1200
                 assert note["segment_guides"][0]["first_chapter_id"] == "C1"
-            if operation == "chapters" and payload["chapters"][0]["chapter_id"] == "C2" and self.fail:
                 raise AppError("model_network_error", "模拟第二段正文失败")
             return await super().generate(operation, payload, validate)
     pipeline = Pipeline(lambda snapshot=settings: snapshot, app.state.sessions, app.state.diagnostics, Recognizer, Model)
@@ -598,10 +629,9 @@ def test_completed_files_recover_after_snapshot_publication_failure(tmp_path):
     coordinator.publish = fail
     with pytest.raises(OSError):
         asyncio.run(coordinator.run())
-    calls = model.calls
     coordinator.publish = lambda value: snapshots.append(deepcopy(value))
     assert asyncio.run(coordinator.run())["complete"]
-    assert model.calls == calls + 5 and len(snapshots) == 3
+    assert model.calls == 7 and len(snapshots) == 3
 
 
 def test_corrupt_completed_segment_is_rejected_before_new_model_calls(tmp_path):

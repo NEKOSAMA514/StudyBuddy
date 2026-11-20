@@ -67,7 +67,7 @@ def checkpoints(folder, task_id=None):
 
 
 def test_success_marks_only_owned_files_after_commit_then_clears(client, generation, monkeypatch):
-    _, task_id, pipeline, *_ = generation
+    video_id, task_id, pipeline, *_ = generation
     folder = folder_for(generation)
     other = checkpoint_path(folder, "other-task", 4, "outline", "a" * 16)
     other.write_bytes(b"unfinished")
@@ -104,8 +104,12 @@ def test_success_marks_only_owned_files_after_commit_then_clears(client, generat
     assert other.read_bytes() == b"unfinished" and legacy.read_bytes() == b"unowned history"
     assert unrelated.read_bytes() == b"other video"
     assert (folder / "audio.wav").exists()
-    assert list(folder.glob("original.*")) and list(folder.glob("frame-*.jpg"))
-    assert list(folder.glob("speech-*.json")) and list(folder.glob("ocr-*.json"))
+    assert list(folder.glob("original.*"))
+    assert list(folder.glob("speech-*.json")) and list(folder.glob("ocr-*-lines.json"))
+    evidence = client.get(f"/api/v1/videos/{video_id}/evidence", params={"task_id": task_id}).json()
+    frame = next(item for item in evidence if item["kind"] == "frame")
+    image = client.get(f"/api/v1/evidence/{frame['id']}/image")
+    assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
     assert list((folder / "transcripts").rglob("transcript.txt"))
     notes = client.get(f"/api/v1/analyses/{task_id}")
     assert notes.status_code == 200

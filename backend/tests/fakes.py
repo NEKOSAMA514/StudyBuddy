@@ -52,6 +52,18 @@ class FakeRecognizer:
         self.ocr_calls += 1
         return "TCP 慢启动：拥塞窗口增长", 95
 
+    def ocr_video(self, samples, on_sample):
+        rows = []
+        for seconds, frame in samples:
+            self.check_stop()
+            text, confidence = self.ocr(frame)
+            on_sample(seconds)
+            if text:
+                rows.append({"start_seconds": seconds, "end_seconds": seconds,
+                             "text": text, "confidence": confidence})
+            self.check_stop()
+        return rows
+
 
 class FakeModel(ModelClient):
     async def __aenter__(self):

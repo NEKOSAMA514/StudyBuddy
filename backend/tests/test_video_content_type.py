@@ -18,9 +18,10 @@ from .fakes import model_content, outline_result
 
 @asynccontextmanager
 async def video_flow(folder, selected="课程或教材", name_only=True, hook=lambda payload, value: value,
-                     text="原文条件与过程。", segments=1):
+                     text="原文条件与过程。", segments=1, concurrency=2):
     calls, snapshots = [], []
-    settings = Settings(llm_key="fake-content-type", llm_stream=False, llm_input_text_limit=12000)
+    settings = Settings(llm_key="fake-content-type", llm_stream=False, llm_input_text_limit=12000,
+                        llm_section_concurrency=concurrency)
     evidence = [{"id": f"s{i}", "kind": "speech", "start_seconds": i * 1200,
                  "end_seconds": i * 1200 + 10, "text": text} for i in range(segments)]
     original = deepcopy(evidence)
@@ -67,7 +68,9 @@ def test_video_type_and_full_guidance_reach_all_later_requests(tmp_path, selecte
     async def run():
         async with video_flow(tmp_path, selected, name_only, segments=2) as (make, _, calls, snapshots):
             result = await make().run()
-            assert [op for op, _, _ in calls] == ["outline", "chapters", "issue_quotes"] * 2 + ["overview"]
+            operations = [op for op, _, _ in calls]
+            assert operations[0] == "outline" and operations.count("outline") == 2
+            assert [op for op in operations if op != "outline"] == ["chapters", "issue_quotes"] * 2 + ["overview"]
             assert "content_type" not in calls[0][1]
             assert all(payload["content_type"] == CONTENT_TYPES[selected] for _, payload, _ in calls[1:])
             assert all(value["content_type"] == CONTENT_TYPES[selected] for value in [*snapshots, result])
@@ -79,9 +82,10 @@ def test_video_type_and_full_guidance_reach_all_later_requests(tmp_path, selecte
     asyncio.run(run())
 
 
-def test_partial_video_resume_restores_selected_type_without_replanning_finished_segment(tmp_path):
+@pytest.mark.parametrize("concurrency", [1, 2])
+def test_partial_video_resume_restores_selected_type_without_replanning_finished_segment(tmp_path, concurrency):
     async def run():
-        async with video_flow(tmp_path, "资讯或事件记录", segments=2) as (make, _, calls, snapshots):
+        async with video_flow(tmp_path, "资讯或事件记录", segments=2, concurrency=concurrency) as (make, _, calls, snapshots):
             first = make()
             publish = first.publish
             def stop_after_segment(value):
@@ -91,10 +95,14 @@ def test_partial_video_resume_restores_selected_type_without_replanning_finished
             with pytest.raises(TaskPaused):
                 await first.run()
             assert len(snapshots) == 1
+            assert sum(op == "outline" for op, _, _ in calls) == concurrency
             completed = deepcopy(snapshots[0]["chapters"])
             calls.clear()
             result = await make().run()
-            assert [op for op, _, _ in calls] == ["outline", "chapters", "issue_quotes", "overview"]
+            expected = ["chapters", "issue_quotes", "overview"]
+            if concurrency == 1:
+                expected.insert(0, "outline")
+            assert [op for op, _, _ in calls] == expected
             assert all(p["content_type"] == CONTENT_TYPES["资讯或事件记录"] for _, p, _ in calls)
             assert result["chapters"][:len(completed)] == completed
     asyncio.run(run())

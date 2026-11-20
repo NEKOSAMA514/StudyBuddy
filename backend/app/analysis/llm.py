@@ -39,6 +39,7 @@ class RequestPacer:
 class ModelClient:
     """共用请求、发送间隔及输出校验机制。"""
     missing_key_message = "请打开模型设置填写当前 API 的密钥，再重试任务。"
+    repair_input_reserve = 0
 
     def messages(self, operation, payload):
         raise NotImplementedError
@@ -354,9 +355,18 @@ class ModelClient:
                     raise AppError("model_input_budget", "结构修正请求超过输入预算，成功检查点已保留。") from exc
 
     def _repair_messages(self, operation, payload, messages, content, error):
-        return [*messages, {"role": "assistant", "content": content},
-                {"role": "user", "content": "上次输出未通过校验：" + str(error) +
-                 "。只修正上述结构或真实来源错误，返回符合Schema的完整JSON。"}]
+        prefix, description = "上次输出未通过校验：", str(error)
+        instruction = self._repair_instruction(prefix, description, "。只修正上述结构或真实来源错误，返回符合Schema的完整JSON。")
+        repair = [*messages, {"role": "assistant", "content": content}, {"role": "user", "content": instruction}]
+        if self.repair_input_reserve and message_characters(repair) > self.settings.llm_input_text_limit:
+            instruction = self._repair_instruction(prefix, description, "。根据本次材料重新生成符合Schema的完整JSON，并纠正上述问题。")
+            return [*messages, {"role": "user", "content": instruction}]
+        return repair
+
+    def _repair_instruction(self, prefix, error, suffix=""):
+        if self.repair_input_reserve:
+            error = error[:self.repair_input_reserve - len(prefix) - len(suffix)]
+        return prefix + error + suffix
 
     # 只解包完整代码围栏，畸形围栏交由现有结构修正流程处理。
     @staticmethod
@@ -405,8 +415,9 @@ class ModelClient:
             current = {**payload, "chapters": remaining}
             messages = self.messages("chapters", current)
             if repair:
-                messages.append({"role": "user", "content": "只重写本次输入中尚未完成的章节，保持chapter/summary标记。错误：" +
-                                 json.dumps(problems, ensure_ascii=False)})
+                instruction = self._repair_instruction("只重写本次输入中尚未完成的章节，保持chapter/summary标记。错误：",
+                                                       json.dumps(problems, ensure_ascii=False))
+                messages.append({"role": "user", "content": instruction})
                 if message_characters(messages) > self.settings.llm_input_text_limit:
                     raise AppError("model_input_budget", "章节修正请求超过输入预算，已保存成功章节。")
             content = await self.stage_request("chapters", messages)

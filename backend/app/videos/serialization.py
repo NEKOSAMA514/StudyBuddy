@@ -1,5 +1,6 @@
 from ..db import Task, Video
 from ..api_schemas import TaskPublic, VideoPublic, EvidencePublic
+from ..recognition.extraction import uses_line_ocr
 from .schemas import current_notes
 STEPS = (
     {"key": "checking", "title": "检查视频", "description": "检查格式、时长和本地原件"},
@@ -15,7 +16,7 @@ SEGMENT_STEPS = (*STEPS[:3],
 STAGE_LABELS = {"queued": "等待处理", "checking": "检查视频", "transcribing": "识别讲解语音",
                 "ocr": "提取画面文字", "planning": "规划视频章节", "summarizing": "生成章节正文",
                 "segments": "逐段生成笔记", "finalizing": "生成整体概览与校验引用", "completed": "分析完成"}
-TIMING_LABELS = {"transcribing": "识别讲解语音", "ocr": "提取画面文字", "planning": "规划视频章节",
+TIMING_LABELS = {"checking": "检查视频", "transcribing": "识别讲解语音", "ocr": "提取画面文字", "planning": "规划视频章节",
                  "summarizing": "生成章节正文", "finalizing": "生成整体概览与校验引用", "total": "本次总耗时"}
 
 
@@ -28,6 +29,9 @@ def task_progress(task):
     concise = task.config.get("note_style") == "concise"
     if concise:
         steps = (*STEPS[:3], {"key": "concise", "title": "生成简洁笔记", "description": "按输入预算逐段生成短文"})
+    if uses_line_ocr(task.config):
+        steps = tuple({**step, "description": "每秒检查画面，识别并筛选文字行"}
+                      if step["key"] == "ocr" else step for step in steps)
     stages = [step["key"] for step in steps]
     stage, _, detail = task.stage.partition(":")
     completed = len(stages) if task.status == "succeeded" else stages.index(stage) if stage in stages else 0
