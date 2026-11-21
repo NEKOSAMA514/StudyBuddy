@@ -54,6 +54,30 @@ def test_video_ocr_filters_entire_lines_at_inclusive_confidence_cutoff():
     ]
 
 
+@pytest.mark.parametrize("text,spoken,skip", [
+    ("先打开数据分析页面", "先打开数据分析页面", True),
+    ("先打开数据分析页面", "先打开数据统计页面", False),
+    ("先打开数据分析页面", "", False),
+    ("电压设为2.50伏", "电压设为2.50伏", False),
+])
+def test_speech_skips_only_the_linked_caption_prefix(monkeypatch, text, spoken, skip):
+    from app.recognition import video_ocr as ocr
+
+    prefix = ocr.Candidate(1, 1, (10, 20, 100, 32), 1, 1, 0, 0, ())
+    terminal = ocr.Candidate(2, 2, (10, 20, 170, 32), 1, 1, 1, 0, (), prefix=prefix)
+    title = ocr.Candidate(3, 3, terminal.box, 1, 1, 2, 0, ())
+    labels = ["先打开", text, "同位置的新标题"]
+    def read(engine, crops, candidates, check_stop, skipped=frozenset()):
+        records = [(c, labels[c.offset], .99) for c in candidates if id(c) not in skipped]
+        return records, len(records)
+
+    monkeypatch.setattr(ocr, "read_crops", read)
+    speech = [{"start_seconds": 1, "end_seconds": 3, "text": spoken}] if spoken else []
+    records, count = ocr.read_candidates(None, None, [prefix, terminal, title], lambda: None, speech=speech)
+    assert {c.offset for c, _, _ in records} == ({1, 2} if skip else {0, 1, 2})
+    assert count == len(records)
+
+
 def test_video_ocr_tries_alternate_crop_only_for_low_confidence():
     from io import BytesIO
     import zlib
@@ -416,7 +440,7 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
                     "extract-v7-video-line-ocr", "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
                     "extract-v10-video-line-ocr", "extract-v11-video-line-ocr", "extract-v12-video-line-ocr",
-                    "extract-v13-video-line-ocr"):
+                    "extract-v13-video-line-ocr", "extract-v14-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)

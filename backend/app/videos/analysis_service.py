@@ -70,7 +70,8 @@ class AnalysisService:
             signature = extraction_signature(config)
             for previous in session.scalars(select(Task.config).where(Task.video_id == video_id,
                     Task.config["execution_started"].as_boolean().is_(True)).order_by(Task.created_at.desc())):
-                if extraction_signature({key: item for key, item in previous.items() if key != "transcript_source"}) == signature:
+                if extraction_signature({key: item for key, item in previous.items()
+                                         if key not in {"transcript_source", "ocr_speech_digest"}}) == signature:
                     if previous.get("transcript_source"):
                         config["transcript_source"] = previous["transcript_source"]
                     break

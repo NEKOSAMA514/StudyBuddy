@@ -8,8 +8,9 @@ from app.config import Settings
 from app.db import Task
 from app.recognition.extraction import (extraction_config, extraction_signature, line_ocr_cache_path,
                                        line_ocr_evidence, speech_cache_path, speech_signature)
-from app.video_download.subtitles import content_digest, subtitle_cache
+from app.video_download.subtitles import SUBTITLE_KINDS, content_digest, subtitle_cache
 from app.videos.preview import analysis_preview
+from app.videos.transcripts import with_ocr_speech
 from app.videos.detailed import DetailedVideoGeneration
 from app.videos.concise import ConciseVideoGeneration
 from .conftest import upload
@@ -18,15 +19,17 @@ from .fakes import FakeModel
 
 def caches(folder, video, config, speech=None):
     folder.mkdir(parents=True, exist_ok=True)
-    signature = extraction_signature(config)
-    if speech is not None:
+    bound = with_ocr_speech(config, speech)
+    signature = extraction_signature(bound)
+    ocr_signature = extraction_signature({k: v for k, v in bound.items() if k != "transcript_source"})
+    if speech is not None and config.get("transcript_source", {}).get("kind") not in SUBTITLE_KINDS:
         speech_cache_path(folder, speech_signature(config)).write_text(json.dumps(speech), "utf-8")
     evidence = [{**item, "id": f"{video.id}-{signature}-speech-{i}", "kind": "speech",
                  "image_name": None, "confidence": None} for i, item in enumerate(speech or [])]
     rows = [{"text": f"第{i}帧的原文知识与适用条件。", "start_seconds": i * video.duration / 60,
              "end_seconds": i * video.duration / 60, "confidence": 95} for i in range(60)]
-    line_ocr_cache_path(folder, signature).write_text(json.dumps(rows), "utf-8")
-    evidence.extend(line_ocr_evidence(rows, video.id, signature, signature))
+    line_ocr_cache_path(folder, ocr_signature).write_text(json.dumps(rows), "utf-8")
+    evidence.extend(line_ocr_evidence(rows, video.id, signature, ocr_signature))
     return evidence
 
 
@@ -63,13 +66,15 @@ def test_incomplete_or_changed_recognition_is_unknown(tmp_path, missing):
     config = extraction_config(settings)
     video = SimpleNamespace(id="preview", filename="课程.mp4", duration=10, audio_codec="aac")
     if missing != "new":
-        caches(tmp_path, video, config, [{"text": "讲解", "start_seconds": 0, "end_seconds": 2}])
+        speech = [{"text": "讲解", "start_seconds": 0, "end_seconds": 2}]
+        caches(tmp_path, video, config, speech)
+        signature = extraction_signature(with_ocr_speech(config, speech))
         if missing == "speech":
             speech_cache_path(tmp_path, speech_signature(config)).unlink()
         elif missing == "frame":
-            line_ocr_cache_path(tmp_path, extraction_signature(config)).unlink()
+            line_ocr_cache_path(tmp_path, signature).unlink()
         elif missing == "corrupt":
-            line_ocr_cache_path(tmp_path, extraction_signature(config)).write_text("{", "utf-8")
+            line_ocr_cache_path(tmp_path, signature).write_text("{", "utf-8")
         else:
             config = extraction_config(replace(settings, asr_language="en"))
     result = analysis_preview(video, tmp_path, config, settings)
@@ -80,9 +85,9 @@ def test_cached_subtitles_and_input_budget_are_used(tmp_path):
     settings = Settings(note_style="concise")
     video = SimpleNamespace(id="preview", filename="课程.mp4", duration=120, audio_codec="aac")
     config = extraction_config(settings)
-    caches(tmp_path, video, config)
     speech = [{"text": "字幕讲解。" * 3000, "start_seconds": 0, "end_seconds": 100}]
     config["transcript_source"] = {"kind": "youtube_subtitle", "digest": content_digest(speech)}
+    caches(tmp_path, video, config, speech)
     subtitle_cache(tmp_path, config["transcript_source"]).write_text(json.dumps(speech), "utf-8")
     large = analysis_preview(video, tmp_path, config, settings)
     small = analysis_preview(video, tmp_path, config, replace(settings, llm_input_text_limit=5500))
@@ -137,9 +142,9 @@ def test_preview_api_reuses_executed_subtitle_source_not_new_queued_task(client,
     folder = settings.data_dir / "videos" / video["id"]
     with app.state.sessions() as session:
         row = session.get(Video, video["id"])
-    evidence = caches(folder, row, config)
     speech = [{"text": "已有平台字幕", "start_seconds": 0, "end_seconds": 1}]
     source = {"kind": "youtube_subtitle", "digest": content_digest(speech)}
+    evidence = caches(folder, row, {**config, "transcript_source": source}, speech)
     subtitle_cache(folder, source).write_text(json.dumps(speech), "utf-8")
     with app.state.sessions.begin() as session:
         session.add(Task(id="old-subtitles", video_id=row.id, status="succeeded", created_at="2026-01-01",
@@ -147,4 +152,4 @@ def test_preview_api_reuses_executed_subtitle_source_not_new_queued_task(client,
         session.add(Task(id="new-queued", video_id=row.id, config=config, created_at="2026-01-02"))
     response = client.get(f'/api/v1/videos/{row.id}/analysis-preview')
     assert response.status_code == 200
-    assert response.json()["character_count"] == len(speech[0]["text"]) + sum(len(i["text"]) for i in evidence)
+    assert response.json()["character_count"] == sum(len(i["text"]) for i in evidence)

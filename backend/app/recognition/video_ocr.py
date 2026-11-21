@@ -17,7 +17,7 @@ from rapidocr.ch_ppocr_rec.typings import TextRecInput
 from rapidocr.utils.process_img import get_rotate_crop_image
 
 from .extraction import VIDEO_OCR_CONFIDENCE
-from .ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match
+from .ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match, spoken_caption_matcher
 from .video_ocr_bursts import select_burst_versions
 from .video_ocr_candidates import crop_image, select_for_reading
 
@@ -536,7 +536,17 @@ def _can_skip_caption_prefixes(text):
     return not any(char.isnumeric() or unicodedata.category(char) in ("Sm", "Sc") for char in normalized)
 
 
-def read_candidates(engine, crops, candidates, check_stop):
+def _same_caption_row(part, whole):
+    left, top, right, bottom = part.box
+    other_left, other_top, _, other_bottom = whole.box
+    height, other_height = bottom - top, other_bottom - other_top
+    smaller = min(height, other_height)
+    return (right - left >= 6 * height and .78 * height <= other_height <= 1.28 * height
+            and abs((top + bottom - other_top - other_bottom) / 2) <= .24 * smaller
+            and abs(left - other_left) <= .65 * smaller)
+
+
+def read_candidates(engine, crops, candidates, check_stop, *, speech=()):
     def short_lived_line(candidate):
         left, top, right, bottom = candidate.box
         return candidate.last - candidate.first <= 1.05 and right - left >= 2.8 * (bottom - top)
@@ -551,6 +561,7 @@ def read_candidates(engine, crops, candidates, check_stop):
     preferred, used = read_crops(engine, crops, candidates, check_stop,
                                  {id(candidate) for candidate in candidates if id(candidate) not in terminals})
     accepted = {id(record[0]): record for record in preferred}
+    matches_speech = spoken_caption_matcher(speech) if speech else None
     selected, skipped = [], set()
     for candidate in growing:
         record = accepted.get(id(candidate)) or accepted.get(id(candidate.alternate))
@@ -558,12 +569,15 @@ def read_candidates(engine, crops, candidates, check_stop):
             continue
         selected.append(record)
         skipped.add(id(candidate))
-        if not _can_skip_caption_prefixes(record[1]):
+        needs_speech = not _can_skip_caption_prefixes(record[1])
+        if needs_speech and (matches_speech is None or not matches_speech(record[1], candidate.first, candidate.last)):
             continue
-        candidate = candidate.prefix
-        while candidate is not None and short_lived_line(candidate):
-            skipped.add(id(candidate))
-            candidate = candidate.prefix
+        part = candidate.prefix
+        while part is not None and short_lived_line(part):
+            if needs_speech and not _same_caption_row(part, candidate):
+                break
+            skipped.add(id(part))
+            part = part.prefix
 
     records, remaining = read_crops(engine, crops, candidates, check_stop, skipped)
     return [*records, *selected], used + remaining
@@ -678,7 +692,7 @@ def evidence_rows(records):
     return rows
 
 
-def recognize_lines(samples, engine_factory, check_stop, on_sample, *, reduce_middle_versions=True,
+def recognize_lines(samples, engine_factory, check_stop, on_sample, *, speech=(), reduce_middle_versions=True,
                     reduce_column_refreshes=True):
     start = checked = monotonic()
 
@@ -708,7 +722,7 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample, *, reduce_mi
             selected = select_for_reading(crops, candidates, check_progress)
             if reduce_column_refreshes:
                 selected = select_burst_versions(candidates, selected, check_progress)
-        records, used = read_candidates(engine, crops, selected, check_stop)
+        records, used = read_candidates(engine, crops, selected, check_stop, speech=speech)
     logger.info("video_ocr samples=%s candidates=%s selected=%s read=%s retained=%s seconds=%.2f",
                 count, len(candidates), len(selected), used, len(records), monotonic() - start)
     return evidence_rows(records)

@@ -57,7 +57,7 @@ def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, 
     def read(seconds, box, text):
         return Candidate(seconds, seconds, box, 1, 1, 0, 0, ()), text, .95
 
-    def recognize(samples, on_sample):
+    def recognize(samples, on_sample, *, speech):
         recognizer.ocr_calls += 1
         return evidence_rows([read(.25, full_box, whole), read(.75, part_box, part),
                               read(.75, (10, 40, 45, 60), "Grok"), read(1.5, full_box, whole)])
@@ -181,12 +181,16 @@ def test_asr_failure_can_use_ocr_with_warning(client, app, video_file):
         session.get(Video, video["id"]).audio_codec = "aac"
     def broken_asr(path):
         raise RuntimeError("ASR unavailable")
-    recognizer.transcribe = broken_asr
-    with unittest.mock.patch("app.videos.pipeline.extract_audio", lambda a, b, media_info=None: b.write_bytes(b"fake-audio")):
+    with unittest.mock.patch.object(recognizer, "transcribe", broken_asr), unittest.mock.patch(
+            "app.videos.pipeline.extract_audio", lambda a, b, media_info=None: b.write_bytes(b"fake-audio")):
         pipeline.run(task_id)
     result = client.get(f"/api/v1/analyses/{task_id}").json()
     assert result["basis"] == ["frame"]
     assert any("语音识别未完成" in warning for warning in result["warnings"])
+    next_task = client.post(f'/api/v1/videos/{video["id"]}/analyses').json()["task_id"]
+    pipeline.run(next_task)
+    assert client.get(f'/api/v1/tasks/{next_task}').json()["status"] == "succeeded"
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 4
 
 
 def test_queued_tasks_resume_on_worker_start(client, app, video_file):

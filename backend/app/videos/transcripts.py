@@ -2,7 +2,15 @@
 import json
 import uuid
 from pathlib import Path
+from ..recognition.extraction import EXTRACT_VERSION
 from ..util.time import timestamp
+from ..video_download.subtitles import content_digest
+
+
+def with_ocr_speech(config, speech):
+    if config.get("extract_version") != EXTRACT_VERSION:
+        return config
+    return {**config, "ocr_speech_digest": content_digest(speech) if speech else None}
 
 
 def transcript_contents(video_id: str, signature: str, evidence: list[dict], *, filename: str, duration: float, transcript_source=None):

@@ -6,6 +6,7 @@ from app.config import Settings
 from app.main import create_app
 from app.analysis.mind_map import MindMapModel
 from app.videos.pipeline import Pipeline
+from app.videos.transcripts import with_ocr_speech
 from app.recognition.extraction import extraction_signature, line_ocr_cache_path, speech_cache_path, speech_signature
 from app.db import Video, Task, Document
 from app.documents.model import DocumentModelClient
@@ -184,12 +185,12 @@ def factory():
         from app.videos.analysis_service import AnalysisService
         config = {**AnalysisService(None, None, None).task_config(settings), "execution_started": True,
                   "model": settings.llm_model, "provider": settings.llm_provider, "video_title": title}
-        signature = extraction_signature(config)
         folder = settings.data_dir / "videos" / video_id
         (folder / "audio.wav").write_bytes(b"isolated fake audio")
         speech = [{"start_seconds": seconds, "end_seconds": seconds + 10, "text": "当前片段的讲解。"}
                   for seconds in ((0,) if preview else (0, 1200))]
         speech_cache_path(folder, speech_signature(config)).write_text(json.dumps(speech), encoding="utf-8")
+        signature = extraction_signature(with_ocr_speech(config, speech))
         line_ocr_cache_path(folder, signature).write_text("[]", encoding="utf-8")
         task_id = uuid.uuid4().hex
         with app.state.sessions.begin() as session:

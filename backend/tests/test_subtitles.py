@@ -225,7 +225,7 @@ def test_cancel_during_fetch_does_not_fall_back(client, app, video_file, monkeyp
     assert "transcript_source" not in stored_task_config(app, task_id)
 
 
-def test_new_subtitles_keep_old_asr_evidence_and_share_ocr(client, app, video_file, monkeypatch):
+def test_new_subtitles_keep_old_asr_evidence_and_use_separate_ocr(client, app, video_file, monkeypatch):
     video, pipeline, recognizer, subtitle = subtitle_pipeline(client, app, video_file, monkeypatch)
     monkeypatch.setattr("app.videos.pipeline.extract_audio", lambda a, b, media_info=None: b.write_bytes(b"audio"))
     monkeypatch.setattr("app.videos.pipeline.fetch_subtitles", lambda *args: {"speech": [], "reason": "unavailable"})
@@ -239,8 +239,8 @@ def test_new_subtitles_keep_old_asr_evidence_and_share_ocr(client, app, video_fi
     new = client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={second}&format=json').json()
     assert old["speech"][0]["text"] != new["speech"][0]["text"]
     assert client.get(f'/api/v1/videos/{video["id"]}/transcript?task_id={first}&format=json').json() == old
-    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 2
-    assert old["frames"][0]["image_name"] == new["frames"][0]["image_name"]
+    assert recognizer.asr_calls == 1 and recognizer.ocr_calls == 4
+    assert old["frames"][0]["image_name"] != new["frames"][0]["image_name"]
     assert old["frames"][0]["id"] != new["frames"][0]["id"]
 
 

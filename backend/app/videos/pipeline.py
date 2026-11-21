@@ -22,11 +22,11 @@ from ..analysis.activity import TaskActivity, in_session, merge_config
 from ..util.json_io import atomic_json
 from ..settings.model_profiles import execution_settings
 from ..recognition.media import Recognizer
-from ..recognition.extraction import (EXTRACT_VERSION, PRIORITY_ONLY_EXTRACT_VERSION, extraction_config,
+from ..recognition.extraction import (BURST_EXTRACT_VERSION, EXTRACT_VERSION, PRIORITY_ONLY_EXTRACT_VERSION, extraction_config,
                                      extraction_signature, frame_times, line_ocr_cache_path, line_ocr_evidence,
                                      ocr_cache_path, recognizer_key, speech_cache_path, speech_signature, uses_line_ocr)
 from .video_reader import extract_audio, extract_frame, source_path, UniformFrameReader
-from .transcripts import save_transcript
+from .transcripts import save_transcript, with_ocr_speech
 from ..diagnostics import error_log_location
 from ..video_download.subtitles import fetch_subtitles, subtitle_cache, content_digest, SUBTITLE_KINDS
 from ..settings.network_settings import effective_proxy
@@ -235,14 +235,12 @@ class Pipeline:
             self.checkpoint(task_id)
             folder = settings.data_dir / "videos" / video.id
             media = source_path(folder, video.media_info)
-            recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
             evidence = []
             clipped_lines = {}
             advance_stage("transcribing")
             speech = self.read_subtitles(task_id, config, settings, folder, video.duration, warnings, activity)
             self.update(task_id, config=dict(config))
             self.checkpoint(task_id)
-            signature = extraction_signature(config)
             speech_cache = speech_cache_path(folder, speech_signature(config))
             if speech is None and video.audio_codec:
                 if speech_cache.exists():
@@ -271,6 +269,12 @@ class Pipeline:
             elif speech is None:
                 speech = []
                 warnings.append("视频没有音轨，本次仅依据抽样画面文字。")
+            bound = with_ocr_speech(config, speech)
+            if bound != config:
+                config = bound
+                self.update(task_id, config=dict(config))
+            signature = extraction_signature(config)
+            recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
             if speech:
                 for index, item in enumerate(speech):
                     start, end = float(item["start_seconds"]), float(item["end_seconds"])
@@ -296,7 +300,7 @@ class Pipeline:
                 if use_lines:
                     try:
                         rows = self.read_video_lines(task_id, video, media, config, recognition_signature,
-                                                     recognizer, activity)
+                                                     recognizer, activity, evidence)
                     except (TaskInterrupted, TaskPaused):
                         raise
                     except Exception as exc:
@@ -539,7 +543,7 @@ class Pipeline:
             raise TaskPaused()
         self.checkpoint(task_id)
 
-    def read_video_lines(self, task_id, video, media, config, recognition_signature, recognizer, activity):
+    def read_video_lines(self, task_id, video, media, config, recognition_signature, recognizer, activity, speech):
         cache = line_ocr_cache_path(media.parent, recognition_signature)
         if cache.is_file():
             rows = json.loads(cache.read_text(encoding="utf-8"))
@@ -561,6 +565,8 @@ class Pipeline:
         with closing(UniformFrameReader(media, video.media_info)) as reader:
             samples = reader.samples(video.duration, interval, self.shutdown)
             if config["extract_version"] == EXTRACT_VERSION:
+                rows = recognizer.ocr_video(samples, on_sample, speech=speech)
+            elif config["extract_version"] == BURST_EXTRACT_VERSION:
                 rows = recognizer.ocr_video(samples, on_sample)
             elif config["extract_version"] == PRIORITY_ONLY_EXTRACT_VERSION:
                 rows = recognizer.ocr_video(samples, on_sample, reduce_column_refreshes=False)

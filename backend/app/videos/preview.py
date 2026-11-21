@@ -9,6 +9,7 @@ from ..video_download.subtitles import SUBTITLE_KINDS, subtitle_cache, content_d
 from .model import ModelClient
 from .segments import split_segments, outline_overhead
 from .concise import plan
+from .transcripts import with_ocr_speech
 
 
 def analysis_preview(video, folder, config, settings):
@@ -24,6 +25,7 @@ def analysis_preview(video, folder, config, settings):
             speech = json.loads(speech_cache_path(folder, speech_signature(config)).read_text("utf-8"))
         else:
             speech = []
+        config = with_ocr_speech(config, speech)
         signature = extraction_signature(config)
         evidence = []
         for index, item in enumerate(speech):

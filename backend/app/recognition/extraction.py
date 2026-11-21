@@ -5,7 +5,8 @@ import math
 
 LEGACY_EXTRACT_VERSION = "extract-v3-chinese-region-ocr"
 PRIORITY_ONLY_EXTRACT_VERSION = "extract-v13-video-line-ocr"
-EXTRACT_VERSION = "extract-v14-video-line-ocr"
+BURST_EXTRACT_VERSION = "extract-v14-video-line-ocr"
+EXTRACT_VERSION = "extract-v15-video-line-ocr"
 VIDEO_OCR_INTERVAL = 1
 VIDEO_OCR_CONFIDENCE = 0.90
 LINE_OCR_IMAGE_PREFIX = "ocr-line-"
@@ -37,7 +38,8 @@ def uses_line_ocr(config):
                                              "extract-v6-video-line-ocr", "extract-v7-video-line-ocr",
                                              "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
                                              "extract-v10-video-line-ocr", "extract-v11-video-line-ocr",
-                                             "extract-v12-video-line-ocr", PRIORITY_ONLY_EXTRACT_VERSION, EXTRACT_VERSION)
+                                             "extract-v12-video-line-ocr", PRIORITY_ONLY_EXTRACT_VERSION,
+                                             BURST_EXTRACT_VERSION, EXTRACT_VERSION)
 
 
 # 还原历史任务的均匀采样位置或固定间隔位置。
@@ -58,6 +60,8 @@ def extraction_signature(config):
         value.update({key: config[key] for key in ("asr_engine", "asr_language", "ocr_engine", "ocr_min_confidence")})
     if config.get("transcript_source", {}).get("kind") in {"youtube_subtitle", "bilibili_subtitle"}:
         value["transcript_source"] = config["transcript_source"]
+    if config.get("ocr_speech_digest") and config["extract_version"] == EXTRACT_VERSION:
+        value["ocr_speech_digest"] = config["ocr_speech_digest"]
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
