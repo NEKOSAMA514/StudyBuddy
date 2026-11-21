@@ -22,7 +22,8 @@ from ..analysis.activity import TaskActivity, in_session, merge_config
 from ..util.json_io import atomic_json
 from ..settings.model_profiles import execution_settings
 from ..recognition.media import Recognizer
-from ..recognition.extraction import (BURST_EXTRACT_VERSION, EXTRACT_VERSION, PRIORITY_ONLY_EXTRACT_VERSION, extraction_config,
+from ..recognition.extraction import (BURST_EXTRACT_VERSION, EXTRACT_VERSION, PRIORITY_ONLY_EXTRACT_VERSION,
+                                     SPOKEN_CAPTION_EXTRACT_VERSION, extraction_config,
                                      extraction_signature, frame_times, line_ocr_cache_path, line_ocr_evidence,
                                      ocr_cache_path, recognizer_key, speech_cache_path, speech_signature, uses_line_ocr)
 from .video_reader import extract_audio, extract_frame, source_path, UniformFrameReader
@@ -566,8 +567,10 @@ class Pipeline:
             samples = reader.samples(video.duration, interval, self.shutdown)
             if config["extract_version"] == EXTRACT_VERSION:
                 rows = recognizer.ocr_video(samples, on_sample, speech=speech)
+            elif config["extract_version"] == SPOKEN_CAPTION_EXTRACT_VERSION:
+                rows = recognizer.ocr_video(samples, on_sample, speech=speech, reduce_dense_screens=False)
             elif config["extract_version"] == BURST_EXTRACT_VERSION:
-                rows = recognizer.ocr_video(samples, on_sample)
+                rows = recognizer.ocr_video(samples, on_sample, reduce_dense_screens=False)
             elif config["extract_version"] == PRIORITY_ONLY_EXTRACT_VERSION:
                 rows = recognizer.ocr_video(samples, on_sample, reduce_column_refreshes=False)
             else:

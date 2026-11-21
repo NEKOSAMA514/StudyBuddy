@@ -693,7 +693,7 @@ def evidence_rows(records):
 
 
 def recognize_lines(samples, engine_factory, check_stop, on_sample, *, speech=(), reduce_middle_versions=True,
-                    reduce_column_refreshes=True):
+                    reduce_column_refreshes=True, reduce_dense_screens=True):
     start = checked = monotonic()
 
     def check_progress():
@@ -721,7 +721,8 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample, *, speech=()
         if reduce_middle_versions:
             selected = select_for_reading(crops, candidates, check_progress)
             if reduce_column_refreshes:
-                selected = select_burst_versions(candidates, selected, check_progress)
+                selected = select_burst_versions(candidates, selected, check_progress,
+                                                 reduce_dense_screens=reduce_dense_screens)
         records, used = read_candidates(engine, crops, selected, check_stop, speech=speech)
     logger.info("video_ocr samples=%s candidates=%s selected=%s read=%s retained=%s seconds=%.2f",
                 count, len(candidates), len(selected), used, len(records), monotonic() - start)

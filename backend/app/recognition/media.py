@@ -101,11 +101,13 @@ class Recognizer:
                                                                providers=["CPUExecutionProvider"])
         return engine
 
-    def ocr_video(self, samples, on_sample, *, speech=(), reduce_middle_versions=True, reduce_column_refreshes=True):
+    def ocr_video(self, samples, on_sample, *, speech=(), reduce_middle_versions=True, reduce_column_refreshes=True,
+                  reduce_dense_screens=True):
         from .video_ocr import recognize_lines
         self.check_stop()
         return recognize_lines(samples, self._video_engine, self.check_stop, on_sample, speech=speech,
-                               reduce_middle_versions=reduce_middle_versions, reduce_column_refreshes=reduce_column_refreshes)
+                               reduce_middle_versions=reduce_middle_versions, reduce_column_refreshes=reduce_column_refreshes,
+                               reduce_dense_screens=reduce_dense_screens)
 
     def _video_engine(self):
         if self.video_ocr_model is None:

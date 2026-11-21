@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from math import ceil
 from statistics import median
+from .video_ocr_dense import select_dense_screen_lines
 
 
 @dataclass(frozen=True)
@@ -136,7 +137,7 @@ def _isolated_labels(by_start, keep, check_stop):
                 yield c.offset
 
 
-def select_burst_versions(candidates, selected, check_stop):
+def select_burst_versions(candidates, selected, check_stop, *, reduce_dense_screens=True):
     by_start, by_second = defaultdict(list), defaultdict(list)
     for c in candidates:
         by_start[c.first].append(c)
@@ -169,4 +170,7 @@ def select_burst_versions(candidates, selected, check_stop):
                         keep.discard(c.offset)
     for second in protected:
         keep.update(c.offset for c in by_second[second])
-    return [c for c in candidates if c.offset in keep]
+    selected = [c for c in candidates if c.offset in keep]
+    if reduce_dense_screens:
+        return select_dense_screen_lines(candidates, selected, protected, check_stop)
+    return selected

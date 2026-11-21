@@ -2,13 +2,13 @@
 import json
 import uuid
 from pathlib import Path
-from ..recognition.extraction import EXTRACT_VERSION
+from ..recognition.extraction import uses_speech_for_ocr
 from ..util.time import timestamp
 from ..video_download.subtitles import content_digest
 
 
 def with_ocr_speech(config, speech):
-    if config.get("extract_version") != EXTRACT_VERSION:
+    if not uses_speech_for_ocr(config):
         return config
     return {**config, "ocr_speech_digest": content_digest(speech) if speech else None}
 
