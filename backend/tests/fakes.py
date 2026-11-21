@@ -52,7 +52,7 @@ class FakeRecognizer:
         self.ocr_calls += 1
         return "TCP 慢启动：拥塞窗口增长", 95
 
-    def ocr_video(self, samples, on_sample):
+    def ocr_video(self, samples, on_sample, *, reduce_middle_versions=True, reduce_column_refreshes=True):
         rows = []
         for seconds, frame in samples:
             self.check_stop()

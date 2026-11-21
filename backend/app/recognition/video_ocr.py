@@ -18,6 +18,7 @@ from rapidocr.utils.process_img import get_rotate_crop_image
 
 from .extraction import VIDEO_OCR_CONFIDENCE
 from .ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match
+from .video_ocr_bursts import select_burst_versions
 from .video_ocr_candidates import crop_image, select_for_reading
 
 
@@ -677,7 +678,8 @@ def evidence_rows(records):
     return rows
 
 
-def recognize_lines(samples, engine_factory, check_stop, on_sample, *, reduce_middle_versions=True):
+def recognize_lines(samples, engine_factory, check_stop, on_sample, *, reduce_middle_versions=True,
+                    reduce_column_refreshes=True):
     start = checked = monotonic()
 
     def check_progress():
@@ -701,7 +703,11 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample, *, reduce_mi
         tracker.finish(tracker.active)
         tracker.active.clear()
         candidates = list(rank(tracker.candidates))
-        selected = select_for_reading(crops, candidates, check_progress) if reduce_middle_versions else candidates
+        selected = candidates
+        if reduce_middle_versions:
+            selected = select_for_reading(crops, candidates, check_progress)
+            if reduce_column_refreshes:
+                selected = select_burst_versions(candidates, selected, check_progress)
         records, used = read_candidates(engine, crops, selected, check_stop)
     logger.info("video_ocr samples=%s candidates=%s selected=%s read=%s retained=%s seconds=%.2f",
                 count, len(candidates), len(selected), used, len(records), monotonic() - start)

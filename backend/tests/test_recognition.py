@@ -415,7 +415,8 @@ def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     assert uses_line_ocr(current)
     for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
                     "extract-v7-video-line-ocr", "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
-                    "extract-v10-video-line-ocr", "extract-v11-video-line-ocr"):
+                    "extract-v10-video-line-ocr", "extract-v11-video-line-ocr", "extract-v12-video-line-ocr",
+                    "extract-v13-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)
