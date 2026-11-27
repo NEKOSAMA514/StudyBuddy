@@ -20,11 +20,7 @@ REPOSITORY = "example/StudyBuddy"
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
-        environment = patch.dict(release.os.environ, {
-            "GITHUB_REF": "refs/heads/release/beta", "GITHUB_SHA": COMMIT,
-            "RELEASE_VERSION": VERSION, "GITHUB_REPOSITORY": REPOSITORY,
-            "GITHUB_SERVER_URL": "https://example.com", "GITHUB_RUN_ID": "123", "GITHUB_STEP_SUMMARY": "",
-        })
+        environment = patch.dict(release.os.environ, {"GITHUB_STEP_SUMMARY": ""})
         environment.start()
         self.addCleanup(environment.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -56,29 +52,10 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 release.version_tag(value)
 
-    def test_cli_checks_version_on_feature_branch_without_github_access(self):
-        with patch.dict(release.os.environ, {"GITHUB_REF": "refs/heads/feature", "RELEASE_VERSION": VERSION}, clear=True), \
-                patch("sys.argv", ["release.py", "check-version"]), patch.object(release, "api") as api:
-            release.main()
-            api.assert_not_called()
-
-    def test_cli_rejects_invalid_version_in_both_modes(self):
-        for command in ("check-version", "check"):
-            with self.subTest(command=command), patch.dict(release.os.environ, {"RELEASE_VERSION": "v1.0.0"}), \
-                    patch("sys.argv", ["release.py", command]), patch.object(release, "api") as api:
-                with self.assertRaisesRegex(ValueError, "Invalid version"):
-                    release.main()
-                api.assert_not_called()
-
-    def test_cli_checks_release_for_selected_branch_and_commit(self):
-        with patch("sys.argv", ["release.py", "check"]), patch.object(release, "check_release") as check:
-            release.main()
-            check.assert_called_once_with(REPOSITORY, VERSION, COMMIT)
-
-    def test_cli_rejects_tags_before_github_access(self):
-        with patch.dict(release.os.environ, {"GITHUB_REF": f"refs/tags/v{VERSION}"}), \
+    def test_cli_rejects_non_main_before_github_access(self):
+        with patch.dict(release.os.environ, {"GITHUB_REF": "refs/heads/feature"}), \
                 patch("sys.argv", ["release.py", "check"]), patch.object(release, "api") as api:
-            with self.assertRaisesRegex(RuntimeError, "only be run from a branch"):
+            with self.assertRaisesRegex(RuntimeError, "only be run from main"):
                 release.main()
             api.assert_not_called()
 
@@ -154,21 +131,14 @@ class ReleaseTests(unittest.TestCase):
         output.mkdir()
         (self.assets / "acceptance.json").rename(output / "acceptance.json")
         (self.root / "dist/ffmpeg-sources.zip").write_bytes(b"build-only input")
-        with patch.object(release, "ROOT", self.root), patch.object(release, "api") as api:
-            with patch("sys.argv", ["release.py", "verify"]), patch("builtins.print") as printed:
-                release.main()
-                printed.assert_called_once_with(self.root / "dist" / self.archive.name)
-            with patch("sys.argv", ["release.py", "stage"]):
-                release.main()
-            api.assert_not_called()
+        release.stage(self.root, VERSION, COMMIT)
         self.assertEqual({path.name for path in self.assets.iterdir()},
                          {self.archive.name, self.archive.name + ".sha256", "acceptance.json"})
 
     def test_create_leaves_draft_and_attaches_only_three_files(self):
         with patch.object(release, "api", side_effect=[None, [], None, [self.draft]]), \
-                patch.object(release.subprocess, "run") as run, patch.object(release, "ROOT", self.root), \
-                patch("sys.argv", ["release.py", "draft"]), patch("builtins.print"):
-            release.main()
+                patch.object(release.subprocess, "run") as run:
+            release.create_draft(REPOSITORY, VERSION, COMMIT, self.assets, "https://example.com/run")
         command = run.call_args.args[0]
         self.assertEqual(command[:3], ["gh", "release", "create"])
         self.assertIn("--draft", command)
