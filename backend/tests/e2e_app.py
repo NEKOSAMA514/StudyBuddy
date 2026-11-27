@@ -6,6 +6,7 @@ from app.config import Settings
 from app.main import create_app
 from app.analysis.mind_map import MindMapModel
 from app.videos.pipeline import Pipeline
+from app.videos.segments import SEGMENT_SECONDS
 from app.videos.transcripts import with_ocr_speech
 from app.recognition.extraction import extraction_signature, line_ocr_cache_path, speech_cache_path, speech_signature
 from app.db import Video, Task, Document
@@ -49,7 +50,7 @@ def factory():
                 validate(value)
                 return value
             held = holds.get(payload.get("video_title"))
-            if held and (operation == "outline" and payload["anchors"][0]["start_seconds"] >= 1200 or
+            if held and (operation == "outline" and payload["anchors"][0]["start_seconds"] >= SEGMENT_SECONDS or
                          operation == "chapters" and payload["video_title"].startswith("e2e-outline-")):
                 while not held.is_set():
                     await asyncio.sleep(0.02)
@@ -188,14 +189,14 @@ def factory():
         folder = settings.data_dir / "videos" / video_id
         (folder / "audio.wav").write_bytes(b"isolated fake audio")
         speech = [{"start_seconds": seconds, "end_seconds": seconds + 10, "text": "当前片段的讲解。"}
-                  for seconds in ((0,) if preview else (0, 1200))]
+                  for seconds in ((0,) if preview else (0, SEGMENT_SECONDS))]
         speech_cache_path(folder, speech_signature(config)).write_text(json.dumps(speech), encoding="utf-8")
         signature = extraction_signature(with_ocr_speech(config, speech))
         line_ocr_cache_path(folder, signature).write_text("[]", encoding="utf-8")
         task_id = uuid.uuid4().hex
         with app.state.sessions.begin() as session:
             video = session.get(Video, video_id)
-            video.duration, video.audio_codec = (120 if preview else 2400), "aac"
+            video.duration, video.audio_codec = (120 if preview else SEGMENT_SECONDS + 600), "aac"
             session.add(Task(id=task_id, video_id=video_id, config=config))
         app.state.worker.submit("video", task_id)
         return {"task_id": task_id}

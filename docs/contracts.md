@@ -81,7 +81,7 @@
 | 文档图片 | 最多 200 张不同图片，单张及相关合成尺寸受 2,000 万像素限制 | [image_text.py](../backend/app/documents/image_text.py)、[extraction.py](../backend/app/documents/extraction.py) |
 | MinerU 批次与演示文稿 | 每个 PDF 批次或每份 PPT、PPTX 的上限为轻量 20 页／10 MiB、精准 200 页／200 MiB。PDF 按页数和大小分批，原件仍受文档上传上限约束 | [imports.py](../backend/app/documents/imports.py) |
 | 视频画面识别 | 新任务每秒检查文字区域，逐行识别并保留置信度至少 0.90 的结果；历史任务按保存的采样配置恢复 | [recognition/extraction.py](../backend/app/recognition/extraction.py) |
-| 详尽视频分段 | 时间目标 20 分钟，并同时满足实际发送输入预算；前文取有限时间窗口 | [segments.py](../backend/app/videos/segments.py) |
+| 详尽视频分段 | 时间目标 30 分钟，并同时满足实际发送输入预算；前文取有限时间窗口 | [segments.py](../backend/app/videos/segments.py) |
 | 模型并发与间隔 | 默认并发 3、发送间隔 3 秒；设置允许 1～4 和 1～60 秒 | [model_settings.py](../backend/app/settings/model_settings.py) |
 | 默认输入预算 | 25,000 个 Python 字符，不是 Token；实际计量包含系统及发送文字，排除材料 JSON 包装和部分定位元数据 | [budgets.py](../backend/app/analysis/budgets.py) |
 

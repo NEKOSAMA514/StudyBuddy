@@ -33,7 +33,7 @@ def caches(folder, video, config, speech=None):
     return evidence
 
 
-@pytest.mark.parametrize("style,limit,expected", [("concise", 25000, 1), ("detailed", 25000, 3), ("concise", 5500, None)])
+@pytest.mark.parametrize("style,limit,expected", [("concise", 25000, 1), ("detailed", 25000, 2), ("concise", 5500, None)])
 def test_preview_matches_actual_generation_and_is_read_only(tmp_path, style, limit, expected):
     settings = Settings(note_style=style, llm_input_text_limit=limit, summary_prompt="解释适用条件")
     video = SimpleNamespace(id="preview", filename="课程.mp4", duration=3601, audio_codec="aac" if limit == 5500 else None)

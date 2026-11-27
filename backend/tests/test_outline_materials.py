@@ -9,7 +9,7 @@ from app.config import Settings
 from app.errors import AppError, TaskPaused
 from app.videos.detailed import DetailedVideoGeneration
 from app.videos.model import ModelClient
-from app.videos.segments import outline_overhead
+from app.videos.segments import SEGMENT_SECONDS, outline_overhead
 from .fakes import FakeModel, run_model
 
 
@@ -73,7 +73,7 @@ def test_outline_context_carries_every_previous_chapter_and_resumes(tmp_path, pa
 
     evidence = [{"id": f"original-{index}", "kind": "frame" if index % 2 else "speech",
                  "start_seconds": seconds, "end_seconds": seconds, "text": f"原文{index}"}
-                for index, seconds in enumerate((0, 1199, 1200, 1300))]
+                for index, seconds in enumerate((0, SEGMENT_SECONDS - 1, SEGMENT_SECONDS, SEGMENT_SECONDS + 100))]
     model = Model(Settings())
 
     def publish(_):
@@ -82,7 +82,7 @@ def test_outline_context_carries_every_previous_chapter_and_resumes(tmp_path, pa
             pause = False
             raise TaskPaused()
 
-    coordinator = DetailedVideoGeneration("context", model, model.settings, tmp_path, evidence, 1800,
+    coordinator = DetailedVideoGeneration("context", model, model.settings, tmp_path, evidence, SEGMENT_SECONDS + 600,
         asyncio.Event(), lambda: None, lambda _: None, {}, publish=publish)
     if pause:
         with pytest.raises(TaskPaused):
@@ -115,9 +115,10 @@ def test_next_segment_counts_actual_previous_outline_without_extracting(tmp_path
     model = Model(Settings())
     model.settings.llm_input_text_limit = outline_overhead(model) + 4500
     evidence = [{"id": f"original-{index}", "kind": "speech", "start_seconds": seconds,
-                 "end_seconds": seconds + 1, "text": "原" * (100 if seconds < 1200 else 1400)}
-                for index, seconds in enumerate((0, 1199, 1200, 1300, 1400))]
-    coordinator = DetailedVideoGeneration("actual-budget", model, model.settings, tmp_path, evidence, 1800,
+                 "end_seconds": seconds + 1, "text": "原" * (100 if seconds < SEGMENT_SECONDS else 1400)}
+                for index, seconds in enumerate((0, SEGMENT_SECONDS - 1, SEGMENT_SECONDS,
+                                                  SEGMENT_SECONDS + 100, SEGMENT_SECONDS + 200))]
+    coordinator = DetailedVideoGeneration("actual-budget", model, model.settings, tmp_path, evidence, SEGMENT_SECONDS + 600,
         asyncio.Event(), lambda: None, lambda _: None, {})
     result = asyncio.run(coordinator.run())
     outlines = [payload for operation, payload in requests if operation == "outline"]

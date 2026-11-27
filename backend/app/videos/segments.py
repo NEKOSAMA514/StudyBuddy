@@ -5,9 +5,9 @@ from ..analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
 from ..analysis.content_types import CONTENT_TYPES
 from .model_input import evidence_request_text
 
-SEGMENT_SECONDS = 1200
+SEGMENT_SECONDS = 1800
 CONTEXT_SECONDS = 60
-FLOW_VERSION = "video-flow-v19-ocr-evidence-accuracy"
+FLOW_VERSION = "video-flow-v20-30-minute-segments"
 
 
 def outline_overhead(model, video_title="", context=None, content_type=None):
