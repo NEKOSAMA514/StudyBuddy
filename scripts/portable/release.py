@@ -133,12 +133,15 @@ def create_draft(repository, version, commit, directory, run_url):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "verify", "stage", "draft"))
+    parser.add_argument("command", choices=("check-version", "check", "verify", "stage", "draft"))
     args = parser.parse_args()
-    if os.environ["GITHUB_REF"] != "refs/heads/main":
-        raise RuntimeError("CD can only be run from main")
-    version, commit = os.environ["RELEASE_VERSION"], os.environ["GITHUB_SHA"]
+    if not os.environ["GITHUB_REF"].startswith("refs/heads/"):
+        raise RuntimeError("CD can only be run from a branch")
+    version = os.environ["RELEASE_VERSION"]
     version_tag(version)
+    if args.command == "check-version":
+        return
+    commit = os.environ["GITHUB_SHA"]
     if args.command == "check":
         check_release(os.environ["GITHUB_REPOSITORY"], version, commit)
     elif args.command == "verify":

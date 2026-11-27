@@ -1,4 +1,4 @@
-name: CD / Windows portable draft
+name: CD / Windows portable
 
 on:
   workflow_dispatch:
@@ -7,6 +7,11 @@ on:
         description: 'Version without v, e.g. 1.0.1-beta.1'
         required: true
         type: string
+      create_draft:
+        description: 'Create or update an unpublished GitHub Release'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ env:
 
 jobs:
   preflight:
-    name: Check version and draft
+    name: Check build and release inputs
     runs-on: windows-2025
     timeout-minutes: 5
     steps:
@@ -32,7 +37,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Check build version
+        run: python -I -B scripts/portable/release.py check-version
+
       - name: Check release inputs
+        if: ${{ inputs.create_draft }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -I -B scripts/portable/release.py check
@@ -131,10 +140,10 @@ jobs:
           & (Join-Path $env:ACCEPTANCE_PACKAGE 'runtime/python.exe') -I -B -X utf8 scripts/portable/validate.py --package $env:ACCEPTANCE_PACKAGE --output dist/cd-validation --repo . --smoke-only
           if ($LASTEXITCODE -ne 0) { throw 'Portable startup acceptance failed.' }
 
-      - name: Stage verified release attachments
+      - name: Stage verified build artifacts
         run: python -I -B scripts/portable/release.py stage
 
-      - name: Upload verified attachments for draft job
+      - name: Upload verified package and acceptance report
         id: attachments
         uses: actions/upload-artifact@v7
         with:
@@ -159,6 +168,7 @@ jobs:
 
   draft:
     name: Create or update unpublished release
+    if: ${{ inputs.create_draft }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
