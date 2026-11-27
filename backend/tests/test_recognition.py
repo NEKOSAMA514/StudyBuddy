@@ -5,7 +5,9 @@ from app.config import Settings
 from app.recognition.media import Recognizer
 from app.recognition.chinese_asr import ChineseASR
 from app.errors import AppError
-from app.recognition.extraction import extraction_config, extraction_signature, speech_signature, uses_line_ocr
+from app.recognition.extraction import (extraction_config, extraction_signature, ocr_cache_signature,
+                                       speech_signature, uses_line_ocr)
+from app.videos.transcripts import with_ocr_speech
 from app.videos.versions import digest
 
 
@@ -52,6 +54,30 @@ def test_video_ocr_filters_entire_lines_at_inclusive_confidence_cutoff():
         {"start_seconds": 1, "end_seconds": 2, "text": "后一行", "confidence": pytest.approx(96)},
         {"start_seconds": 1, "end_seconds": 3, "text": "整行保留", "confidence": pytest.approx(90)},
     ]
+
+
+@pytest.mark.parametrize("text,spoken,skip", [
+    ("先打开数据分析页面", "先打开数据分析页面", True),
+    ("先打开数据分析页面", "先打开数据统计页面", False),
+    ("先打开数据分析页面", "", False),
+    ("电压设为2.50伏", "电压设为2.50伏", False),
+])
+def test_speech_skips_only_the_linked_caption_prefix(monkeypatch, text, spoken, skip):
+    from app.recognition import video_ocr as ocr
+
+    prefix = ocr.Candidate(1, 1, (10, 20, 100, 32), 1, 1, 0, 0, ())
+    terminal = ocr.Candidate(2, 2, (10, 20, 170, 32), 1, 1, 1, 0, (), prefix=prefix)
+    title = ocr.Candidate(3, 3, terminal.box, 1, 1, 2, 0, ())
+    labels = ["先打开", text, "同位置的新标题"]
+    def read(engine, crops, candidates, check_stop, skipped=frozenset()):
+        records = [(c, labels[c.offset], .99) for c in candidates if id(c) not in skipped]
+        return records, len(records)
+
+    monkeypatch.setattr(ocr, "read_crops", read)
+    speech = [{"start_seconds": 1, "end_seconds": 3, "text": spoken}] if spoken else []
+    records, count = ocr.read_candidates(None, None, [prefix, terminal, title], lambda: None, speech=speech)
+    assert {c.offset for c, _, _ in records} == ({1, 2} if skip else {0, 1, 2})
+    assert count == len(records)
 
 
 def test_video_ocr_tries_alternate_crop_only_for_low_confidence():
@@ -137,6 +163,75 @@ def test_video_ocr_reads_all_tracks_after_a_slow_recognition_batch(monkeypatch):
     rows = video_ocr.recognize_lines([(0, None)], lambda: engine, lambda: None, lambda _: None)
     assert batches == [video_ocr.BATCH_SIZE, 1]
     assert [row["start_seconds"] for row in rows] == list(range(count))
+
+
+@pytest.mark.parametrize("version,stages,read_order,use_speech", [
+    (12, [], [4, 1, 3, 2, 0], False),
+    (13, ["middle"], [4, 3, 2, 0], False),
+    (14, ["middle", "burst"], [4, 1, 3, 0], False),
+    (15, ["middle", "burst"], [4, 1, 3, 0], True),
+    (16, ["middle", "burst", "dense"], [4, 1, 0], True),
+])
+def test_video_ocr_applies_saved_version_policy(monkeypatch, caplog, version, stages, read_order, use_speech):
+    import zlib
+    from app.recognition import video_ocr as ocr
+
+    applied = []
+    read = []
+    transcript = [{"start_seconds": 1, "end_seconds": 2, "text": "讲解原文"}]
+    shape = (4, 12, 3)
+
+    def tracker(_, crops):
+        candidates = []
+        for second in (4, 1, 3, 2, 0):
+            crop = zlib.compress(np.full(shape, second, dtype=np.uint8).tobytes())
+            offset = crops.tell()
+            crops.write(crop)
+            candidates.append(ocr.Candidate(second, second, (0, 0, 12, 4), 1, 1, offset, len(crop), shape))
+        return SimpleNamespace(active=[], candidates=candidates, finish=lambda _: None, observe=lambda *_: None)
+
+    def middle(crops, candidates, check_stop):
+        applied.append("middle")
+        return [candidate for candidate in candidates if candidate.first != 1]
+
+    def burst(candidates, selected, check_stop):
+        applied.append("burst")
+        assert [candidate.first for candidate in selected] == [4, 3, 2, 0]
+        return [candidate for candidate in candidates if candidate.first != 2], {1}
+
+    def dense(candidates, selected, protected_seconds, check_stop):
+        applied.append("dense")
+        assert [candidate.first for candidate in selected] == [4, 1, 3, 0]
+        assert protected_seconds == {1}
+        return [candidate for candidate in selected if candidate.first != 3]
+
+    def recognize(images):
+        seconds = [int(image[0, 0, 0]) for image in images]
+        read.extend(seconds)
+        return SimpleNamespace(txts=[f"第{second}行" for second in seconds], scores=[.99] * len(seconds))
+
+    read_candidates = ocr.read_candidates
+
+    def read_with_speech(engine, crops, candidates, check_stop, *, speech):
+        assert speech == (transcript if use_speech else ())
+        return read_candidates(engine, crops, candidates, check_stop, speech=speech)
+
+    monkeypatch.setattr(ocr, "TextRegions", tracker)
+    monkeypatch.setattr(ocr, "rank", iter)
+    monkeypatch.setattr(ocr, "select_for_reading", middle)
+    monkeypatch.setattr(ocr, "select_burst_versions", burst)
+    monkeypatch.setattr(ocr, "select_dense_screen_lines", dense)
+    monkeypatch.setattr(ocr, "read_candidates", read_with_speech)
+    engine = SimpleNamespace(_load_det_model=lambda: None, cls_and_rotate=lambda images: (images, None),
+                             recognize_txt=recognize)
+    with caplog.at_level("INFO", logger="studybuddy"):
+        rows = ocr.recognize_lines([(0, None)], lambda: engine, lambda: None, lambda _: None,
+                                   extract_version=f"extract-v{version}-video-line-ocr", speech=transcript)
+    assert applied == stages
+    assert read == read_order
+    assert f"read={len(read_order)} retained={len(read_order)}" in caplog.text
+    assert [(row["start_seconds"], row["text"]) for row in rows] == [
+        (second, f"第{second}行") for second in sorted(read_order)]
 
 
 @pytest.mark.parametrize("corners", [
@@ -409,13 +504,35 @@ def test_cache_identity_tracks_engines_and_preserves_old_lookup():
         assert extraction_signature({**current, field: value}) != extraction_signature(current)
 
 
+# 在重构前记录各版本的缓存键，锁定已有缓存文件名。
+@pytest.mark.parametrize("version,original_key,changed_key", [
+    (12, "7283ab08e9029a5a", "7283ab08e9029a5a"),
+    (13, "8058953f78bea58c", "8058953f78bea58c"),
+    (14, "ee52f38ccf6d8145", "ee52f38ccf6d8145"),
+    (15, "95fa364515826f9a", "aa8509565ea5cb22"),
+    (16, "eae09f116b395d00", "bdc91b8eae7fcf0e"),
+])
+def test_ocr_cache_signature_preserves_saved_keys(version, original_key, changed_key):
+    config = {"extract_version": f"extract-v{version}-video-line-ocr", "asr_model": "small",
+              "ocr_languages": "chi_sim+eng", "frame_interval": 1}
+    speech = [{"start_seconds": 1, "end_seconds": 2, "text": "讲解原文"}]
+    platform = {**config, "transcript_source": {"kind": "bilibili_subtitle", "digest": digest(speech)}}
+    bound = with_ocr_speech(config, speech)
+    platform_bound = with_ocr_speech(platform, speech)
+    assert ocr_cache_signature(bound) == ocr_cache_signature(platform_bound) == original_key
+    assert extraction_signature(bound) != extraction_signature(platform_bound)
+    changed = [{**speech[0], "text": "讲解变化"}]
+    assert ocr_cache_signature(with_ocr_speech(config, changed)) == changed_key
+
+
 def test_video_line_tracking_uses_a_fresh_ocr_cache_and_reuses_speech():
     settings = Settings()
     current = extraction_config(settings)
     assert uses_line_ocr(current)
     for version in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr", "extract-v6-video-line-ocr",
                     "extract-v7-video-line-ocr", "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
-                    "extract-v10-video-line-ocr", "extract-v11-video-line-ocr"):
+                    "extract-v10-video-line-ocr", "extract-v11-video-line-ocr", "extract-v12-video-line-ocr",
+                    "extract-v13-video-line-ocr", "extract-v14-video-line-ocr", "extract-v15-video-line-ocr"):
         previous = {**current, "extract_version": version}
         assert uses_line_ocr(previous)
         assert extraction_signature(current) != extraction_signature(previous)

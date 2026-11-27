@@ -4,11 +4,12 @@ import math
 from pathlib import Path
 from ..errors import AppError
 from ..recognition.extraction import (extraction_signature, frame_times, line_ocr_cache_path, line_ocr_evidence,
-                                     ocr_cache_path, speech_cache_path, speech_signature, uses_line_ocr)
+                                     ocr_cache_path, ocr_cache_signature, speech_cache_path, speech_signature, uses_line_ocr)
 from ..video_download.subtitles import SUBTITLE_KINDS, subtitle_cache, content_digest
 from .model import ModelClient
 from .segments import split_segments, outline_overhead
 from .concise import plan
+from .transcripts import with_ocr_speech
 
 
 def analysis_preview(video, folder, config, settings):
@@ -24,6 +25,7 @@ def analysis_preview(video, folder, config, settings):
             speech = json.loads(speech_cache_path(folder, speech_signature(config)).read_text("utf-8"))
         else:
             speech = []
+        config = with_ocr_speech(config, speech)
         signature = extraction_signature(config)
         evidence = []
         for index, item in enumerate(speech):
@@ -34,7 +36,7 @@ def analysis_preview(video, folder, config, settings):
                 evidence.append({"id": f"{video.id}-{signature}-speech-{index}", "kind": "speech",
                     "start_seconds": start, "end_seconds": min(end, video.duration), "text": item["text"],
                     "image_name": None, "confidence": None})
-        recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
+        recognition_signature = ocr_cache_signature(config)
         if uses_line_ocr(config):
             rows = json.loads(line_ocr_cache_path(folder, recognition_signature).read_text("utf-8"))
             evidence.extend(line_ocr_evidence(rows, video.id, signature, recognition_signature))

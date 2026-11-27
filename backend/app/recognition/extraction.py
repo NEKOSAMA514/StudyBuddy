@@ -1,15 +1,44 @@
 """识别配置、复用条件及已有缓存路径；不依赖生成流程。"""
+from dataclasses import dataclass
 import hashlib
 import json
 import math
 
 LEGACY_EXTRACT_VERSION = "extract-v3-chinese-region-ocr"
-EXTRACT_VERSION = "extract-v12-video-line-ocr"
+PRIORITY_ONLY_EXTRACT_VERSION = "extract-v13-video-line-ocr"
+BURST_EXTRACT_VERSION = "extract-v14-video-line-ocr"
+SPOKEN_CAPTION_EXTRACT_VERSION = "extract-v15-video-line-ocr"
+DENSE_SCREEN_EXTRACT_VERSION = "extract-v16-video-line-ocr"
+EXTRACT_VERSION = DENSE_SCREEN_EXTRACT_VERSION
 VIDEO_OCR_INTERVAL = 1
 VIDEO_OCR_CONFIDENCE = 0.90
 LINE_OCR_IMAGE_PREFIX = "ocr-line-"
 RECOGNIZER_FIELDS = ("asr_engine", "asr_model", "asr_language", "asr_device", "asr_compute", "asr_threads",
                      "ocr_engine", "ocr_languages", "ocr_min_confidence", "model_dir")
+
+
+@dataclass(frozen=True)
+class VideoOcrPolicy:
+    reduce_middle_versions: bool = False
+    reduce_column_refreshes: bool = False
+    reduce_dense_screens: bool = False
+    use_speech: bool = False
+
+
+# 历史任务缺少缓存时，按保存的提取版本重建原有画面证据。
+_VIDEO_OCR_POLICIES = {
+    **{f"extract-v{version}-video-line-ocr": VideoOcrPolicy() for version in range(4, 13)},
+    PRIORITY_ONLY_EXTRACT_VERSION: VideoOcrPolicy(reduce_middle_versions=True),
+    BURST_EXTRACT_VERSION: VideoOcrPolicy(reduce_middle_versions=True, reduce_column_refreshes=True),
+    SPOKEN_CAPTION_EXTRACT_VERSION: VideoOcrPolicy(reduce_middle_versions=True, reduce_column_refreshes=True,
+                                                  use_speech=True),
+    DENSE_SCREEN_EXTRACT_VERSION: VideoOcrPolicy(reduce_middle_versions=True, reduce_column_refreshes=True,
+                                                reduce_dense_screens=True, use_speech=True),
+}
+
+
+def video_ocr_policy(extract_version):
+    return _VIDEO_OCR_POLICIES[extract_version]
 
 
 # 仅用影响识别器实例的配置组成复用键，模型生成设置不触发重建。
@@ -32,10 +61,12 @@ def extraction_config(settings, previous=None):
 
 
 def uses_line_ocr(config):
-    return config.get("extract_version") in ("extract-v4-video-line-ocr", "extract-v5-video-line-ocr",
-                                             "extract-v6-video-line-ocr", "extract-v7-video-line-ocr",
-                                             "extract-v8-video-line-ocr", "extract-v9-video-line-ocr",
-                                             "extract-v10-video-line-ocr", "extract-v11-video-line-ocr", EXTRACT_VERSION)
+    return config.get("extract_version") in _VIDEO_OCR_POLICIES
+
+
+def uses_speech_for_ocr(config):
+    policy = _VIDEO_OCR_POLICIES.get(config.get("extract_version"))
+    return policy is not None and policy.use_speech
 
 
 # 还原历史任务的均匀采样位置或固定间隔位置。
@@ -56,7 +87,14 @@ def extraction_signature(config):
         value.update({key: config[key] for key in ("asr_engine", "asr_language", "ocr_engine", "ocr_min_confidence")})
     if config.get("transcript_source", {}).get("kind") in {"youtube_subtitle", "bilibili_subtitle"}:
         value["transcript_source"] = config["transcript_source"]
+    if config.get("ocr_speech_digest") and uses_speech_for_ocr(config):
+        value["ocr_speech_digest"] = config["ocr_speech_digest"]
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
+def ocr_cache_signature(config):
+    # 转录内容参与 OCR 时影响画面缓存键，字幕来源元数据用于区分完整依据。
+    return extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
 
 
 def speech_signature(config):

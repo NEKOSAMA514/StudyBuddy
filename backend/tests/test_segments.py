@@ -9,11 +9,12 @@ import pytest
 
 from app.videos.detailed import DetailedVideoGeneration
 from app.errors import TaskPaused
-from app.videos.segments import split_segments, preceding_context, outline_overhead
+from app.videos.segments import SEGMENT_SECONDS, split_segments, preceding_context, outline_overhead
 from app.analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
 from app.videos.notes import notes_text, notes_markdown
 from app.videos.pipeline import Pipeline
-from app.recognition.extraction import extraction_config, extraction_signature
+from app.videos.transcripts import with_ocr_speech
+from app.recognition.extraction import extraction_config, line_ocr_cache_path, ocr_cache_signature
 from app.config import Settings
 from app.db import Evidence, Task, Video
 from app.errors import AppError
@@ -23,8 +24,8 @@ from .fakes import FakeModel, FakeRecognizer
 
 
 def sources(count=3):
-    return [{"id": f"s{i}", "kind": "speech", "start_seconds": i * 1200,
-             "end_seconds": i * 1200 + 10, "text": f"第{i}段的新增内容。"} for i in range(count)]
+    return [{"id": f"s{i}", "kind": "speech", "start_seconds": i * SEGMENT_SECONDS,
+             "end_seconds": i * SEGMENT_SECONDS + 10, "text": f"第{i}段的新增内容。"} for i in range(count)]
 
 
 class RecordingModel(FakeModel):
@@ -41,13 +42,13 @@ def flow(tmp_path, evidence=None, model_type=RecordingModel, **kwargs):
     model = model_type(Settings(llm_input_text_limit=24000, llm_section_concurrency=4))
     snapshots, progress = [], []
     coordinator = DetailedVideoGeneration("segments-test", model, model.settings, tmp_path, evidence or sources(),
-        kwargs.pop("duration", 3600), asyncio.Event(), lambda: None, lambda stage: None, {},
+        kwargs.pop("duration", 3 * SEGMENT_SECONDS), asyncio.Event(), lambda: None, lambda stage: None, {},
         publish=lambda value: snapshots.append(deepcopy(value)), segment_update=lambda value: progress.append(deepcopy(value)), **kwargs)
     return coordinator, model, snapshots, progress
 
 
-@pytest.mark.parametrize("seconds,characters,segmented", [(1200, DEFAULT_INPUT_TEXT_LIMIT, False), (1201, DEFAULT_INPUT_TEXT_LIMIT, True),
-    (1200, DEFAULT_INPUT_TEXT_LIMIT + 1, True), (1199, DEFAULT_INPUT_TEXT_LIMIT - 1, False)])
+@pytest.mark.parametrize("seconds,characters,segmented", [(1800, DEFAULT_INPUT_TEXT_LIMIT, False), (1801, DEFAULT_INPUT_TEXT_LIMIT, True),
+    (1800, DEFAULT_INPUT_TEXT_LIMIT + 1, True), (1799, DEFAULT_INPUT_TEXT_LIMIT - 1, False)])
 def test_segment_trigger_boundaries(seconds, characters, segmented):
     evidence = sources(2)
     evidence[1].update(kind="frame", start_seconds=600, end_seconds=601)
@@ -81,7 +82,7 @@ def test_repeated_ocr_counts_in_outline_and_preserves_chemical_changes(tmp_path)
     assert evidence == original
     calls = model.calls
     assert asyncio.run(coordinator.run()) == result and model.calls == calls
-    assert split_segments(evidence, 1201)[0]
+    assert split_segments(evidence, SEGMENT_SECONDS + 1)[0]
 
 
 def test_unique_ocr_still_counts_towards_segment_budget():
@@ -96,14 +97,14 @@ def test_segment_estimate_counts_content_type_without_raw_minute_context():
     repeated = "画面原文\r\n" * 30
     evidence = [{"id": f"frame{i}", "kind": "frame", "start_seconds": seconds,
                  "end_seconds": seconds, "text": text}
-                for i, (seconds, text) in enumerate([(0, "开场"), (1140, repeated), (1141, repeated),
-                                                      (1200, repeated), (1280, "末")])]
+                for i, (seconds, text) in enumerate([(0, "开场"), (1740, repeated), (1741, repeated),
+                                                      (1800, repeated), (1880, "末")])]
     model = FakeModel(Settings(summary_prompt="保留实验条件"))
     title = "课程视频"
     overhead = outline_overhead(model, title)
     longest_type = max(CONTENT_TYPES.values(), key=len)
     limit = overhead + len(longest_type) + 3 * len("画面原文" * 30)
-    segmented, parts = split_segments(evidence, 1800, limit, overhead)
+    segmented, parts = split_segments(evidence, 2400, limit, overhead)
     assert segmented and [[item["id"] for item in part["primary"]] for part in parts] == [
         ["frame0", "frame1", "frame2"], ["frame3", "frame4"]]
     payload = {"evidence": parts[1]["primary"], "context": {},
@@ -190,8 +191,8 @@ def test_chapter_context_and_previous_outline_are_separate_from_primary_and_anch
 def test_minute_context_and_previous_outline_cross_segments_without_owning_old_evidence(tmp_path):
     evidence = [{"id": f"s{i}", "kind": "speech", "start_seconds": seconds,
                  "end_seconds": seconds + 1, "text": f"原始证据{i}"}
-                for i, seconds in enumerate([0, 1139, 1140, 1199, 1200])]
-    coordinator, model, snapshots, _ = flow(tmp_path, evidence, duration=1800)
+                for i, seconds in enumerate([0, 1739, 1740, 1799, 1800])]
+    coordinator, model, snapshots, _ = flow(tmp_path, evidence, duration=2400)
     before = deepcopy(evidence)
     result = asyncio.run(coordinator.run())
     outline = [p for op, p in model.inputs if op == "outline"][1]
@@ -278,15 +279,16 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
     assert all(not value["complete"] for value in snapshots)
     assert [len(value["segment_guides"]) for value in snapshots] == [1, 2, 3]
     guides = result["segment_guides"]
+    ranges = [(0, 1800), (1800, 3600), (3600, 5400)]
     assert [guide["first_chapter_id"] for guide in guides] == ["C1", "C2", "C3"]
-    assert [(g["start_seconds"], g["end_seconds"]) for g in guides] == [(0, 1200), (1200, 2400), (2400, 3600)]
+    assert [(g["start_seconds"], g["end_seconds"]) for g in guides] == ranges
     assert all(g["summary"] == "视频介绍 TCP 慢启动与拥塞窗口增长。" for g in guides)
     for export in (notes_text, notes_markdown):
-        text = export("长视频", 3600, result)
+        text = export("长视频", 5400, result)
         assert text.index("第1段导览") < text.index("第2段导览") < text.index("第3段导览")
-    assert [value["covered_until_seconds"] for value in snapshots] == [1200, 2400, 3600]
+    assert [value["covered_until_seconds"] for value in snapshots] == [end for _, end in ranges]
     assert [chapter["chapter_id"] for chapter in result["chapters"]] == ["C1", "C2", "C3"]
-    assert [(c["start_seconds"], c["end_seconds"]) for c in result["chapters"]] == [(0, 1200), (1200, 2400), (2400, 3600)]
+    assert [(c["start_seconds"], c["end_seconds"]) for c in result["chapters"]] == ranges
     assert [c["evidence_ids"] for c in result["chapters"]] == [["s0"], ["s1"], ["s2"]]
     assert all(c["timestamp_basis"] == kind for c in result["chapters"])
     for op, payload in model.inputs[:-1]:
@@ -307,7 +309,7 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
                 "title": "慢启动", "core_question": "拥塞窗口如何增长？", "topics": ["拥塞窗口增长"]}
     assert set(model.inputs[-1][1]) == {"video_summaries", "content_type"}
     assert model.inputs[-1][1]["video_summaries"] == [guide["summary"] for guide in guides]
-    assert result["complete"] and result["covered_until_seconds"] == 3600
+    assert result["complete"] and result["covered_until_seconds"] == 5400
     assert evidence == original and progress[-1]["completed"] == 3
     calls = model.calls
     assert asyncio.run(coordinator.run()) == result and model.calls == calls
@@ -315,7 +317,7 @@ def test_segments_publish_sequentially_share_body_flow_and_finish_with_one_overv
 
 
 def test_short_video_does_not_duplicate_its_overview_as_segment_guide(tmp_path):
-    coordinator, model, _, _ = flow(tmp_path, sources(1), duration=1200)
+    coordinator, model, _, _ = flow(tmp_path, sources(1), duration=SEGMENT_SECONDS)
     result = asyncio.run(coordinator.run())
     assert result["segment_guides"] == []
     assert [op for op, _ in model.inputs] == ["outline", "chapters", "overview"]
@@ -349,7 +351,7 @@ def test_short_outline_preview_is_published_before_body_and_restored_from_cache(
                 assert previews == ["视频介绍 TCP 慢启动与拥塞窗口增长。"]
                 assert list(tmp_path.glob("blocks-v4-outline-*.json"))
             return await super().generate(operation, payload, validate)
-    coordinator, model, _, _ = flow(tmp_path, sources(1), Model, duration=1200,
+    coordinator, model, _, _ = flow(tmp_path, sources(1), Model, duration=SEGMENT_SECONDS,
                                     outline_ready=previews.append)
     asyncio.run(coordinator.run())
     assert previews == ["视频介绍 TCP 慢启动与拥塞窗口增长。"]
@@ -432,14 +434,14 @@ def test_overview_failure_retries_only_overview_and_keeps_exportable_body(tmp_pa
         asyncio.run(coordinator.run())
     prefix = snapshots[-1]
     for export in (notes_text, notes_markdown):
-        assert "未完成笔记" in export("长视频", 3600, prefix)
-        assert "3/3" in export("长视频", 3600, prefix)
+        assert "未完成笔记" in export("长视频", 3 * SEGMENT_SECONDS, prefix)
+        assert "3/3" in export("长视频", 3 * SEGMENT_SECONDS, prefix)
     calls = model.calls
     model.fail = False
     result = asyncio.run(coordinator.run())
     assert model.calls == calls + 1 and result["chapters"] == prefix["chapters"]
     assert result["segment_guides"] == prefix["segment_guides"]
-    assert "未完成笔记" not in notes_text("长视频", 3600, result)
+    assert "未完成笔记" not in notes_text("长视频", 3 * SEGMENT_SECONDS, result)
 
 
 def test_failed_segment_keeps_prefix_and_reuses_completed_chapter_checkpoints(tmp_path):
@@ -459,11 +461,12 @@ def test_failed_segment_keeps_prefix_and_reuses_completed_chapter_checkpoints(tm
                 await asyncio.sleep(0)
                 raise AppError("invalid_model_output", "模拟章节失败")
             return await super().generate(operation, payload, validate)
-    evidence = sources(2) + [{"id": "s2", "kind": "speech", "start_seconds": 1300, "end_seconds": 1310, "text": "第三章"}]
+    evidence = sources(2) + [{"id": "s2", "kind": "speech", "start_seconds": SEGMENT_SECONDS + 100,
+                             "end_seconds": SEGMENT_SECONDS + 110, "text": "第三章"}]
     coordinator, model, snapshots, _ = flow(tmp_path, evidence, Model, duration=2400)
     with pytest.raises(AppError):
         asyncio.run(coordinator.run())
-    assert len(snapshots) == 1 and snapshots[0]["covered_until_seconds"] == 1200
+    assert len(snapshots) == 1 and snapshots[0]["covered_until_seconds"] == SEGMENT_SECONDS
     completed = [p for op, p in model.inputs if op == "chapters" and p["chapters"][0]["chapter_id"] == "C2"]
     assert len(completed) == 1
     model.fail = False
@@ -497,8 +500,8 @@ def test_four_inflight_requests_cancel_within_two_seconds_and_resume_saved_prefi
                     cancelled.append(payload["chapters"][0]["chapter_id"])
                     raise
             return await super().generate(operation, payload, validate)
-    evidence = sources(1) + [{"id": f"s{i + 1}", "kind": "speech", "start_seconds": 1200 + i * 10,
-                              "end_seconds": 1201 + i * 10, "text": "后续内容"} for i in range(4)]
+    evidence = sources(1) + [{"id": f"s{i + 1}", "kind": "speech", "start_seconds": SEGMENT_SECONDS + i * 10,
+                              "end_seconds": SEGMENT_SECONDS + i * 10 + 1, "text": "后续内容"} for i in range(4)]
     coordinator, model, snapshots, _ = flow(tmp_path, evidence, Model, duration=2400)
     async def run():
         task = asyncio.create_task(coordinator.run())
@@ -562,10 +565,10 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
         row.duration, row.audio_codec = 2400, "aac"
     settings = app.state.pipeline.get_settings()
     config = extraction_config(settings)
-    signature = extraction_signature(config)
+    signature = ocr_cache_signature(with_ocr_speech(config, sources(2)))
     folder = settings.data_dir / "videos" / video["id"]
     (folder / "audio.wav").write_bytes(b"isolated recognizer input")
-    (folder / f"ocr-{signature}-lines.json").write_text("[]", encoding="utf-8")
+    line_ocr_cache_path(folder, signature).write_text("[]", encoding="utf-8")
     starts, models, transcriptions = [], [], []
     class Recognizer(FakeRecognizer):
         def transcribe(self, path):
@@ -585,7 +588,7 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
                 assert public["notes_revision"] == 1
                 assert public["segment_progress"]["completed"] == 1
                 note = client.get(f"/api/v1/analyses/{identifier}").json()
-                assert len(note["chapters"]) == 1 and note["covered_until_seconds"] == 1200
+                assert len(note["chapters"]) == 1 and note["covered_until_seconds"] == SEGMENT_SECONDS
                 assert note["segment_guides"][0]["first_chapter_id"] == "C1"
                 raise AppError("model_network_error", "模拟第二段正文失败")
             return await super().generate(operation, payload, validate)

@@ -9,7 +9,7 @@ from app.videos.pipeline import Pipeline
 from app.config import Settings
 from app.db import Task, Video
 from app.recognition.extraction import (LEGACY_EXTRACT_VERSION, extraction_config, extraction_signature,
-                                       frame_times, line_ocr_cache_path, speech_signature)
+                                       frame_times, line_ocr_cache_path, ocr_cache_signature, speech_signature)
 from app.videos.video_reader import UniformFrameReader, probe
 from .conftest import upload, stored_task_config
 from .fakes import FakeModel, FakeRecognizer
@@ -75,7 +75,7 @@ def test_new_pipeline_resumes_and_reuses_line_cache_and_serves_screenshots(clien
     pipeline = Pipeline(app.state.pipeline.get_settings, app.state.sessions, app.state.diagnostics, lambda settings: recognizer, FakeModel)
     folder = pipeline.get_settings().data_dir / "videos" / video["id"]
     config = stored_task_config(app, task_id)
-    cache = line_ocr_cache_path(folder, extraction_signature(config))
+    cache = line_ocr_cache_path(folder, ocr_cache_signature(config))
     pipeline.run(task_id)
     stopped = client.get(f"/api/v1/tasks/{task_id}").json()
     assert stopped["status"] == "paused" and stopped["stage"] == "ocr:1/2"

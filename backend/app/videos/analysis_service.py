@@ -70,7 +70,8 @@ class AnalysisService:
             signature = extraction_signature(config)
             for previous in session.scalars(select(Task.config).where(Task.video_id == video_id,
                     Task.config["execution_started"].as_boolean().is_(True)).order_by(Task.created_at.desc())):
-                if extraction_signature({key: item for key, item in previous.items() if key != "transcript_source"}) == signature:
+                if extraction_signature({key: item for key, item in previous.items()
+                                         if key not in {"transcript_source", "ocr_speech_digest"}}) == signature:
                     if previous.get("transcript_source"):
                         config["transcript_source"] = previous["transcript_source"]
                     break
@@ -158,8 +159,9 @@ class AnalysisService:
                 from .concise import validate_result
                 chapters = validate_result(task.result, evidence, video.duration)
             else:
+                flow = task.config.get("generation_flow")
                 chapters = ground_chapters(task.result["chapters"], issues, evidence, video.duration, end=covered,
-                                           legacy_ocr_line_join=task.config.get("generation_flow") != FLOW_VERSION)
+                                           legacy_ocr_line_join=flow not in {FLOW_VERSION, "video-flow-v19-ocr-evidence-accuracy"})
                 issues = [
                     {**issue, "start_seconds": min(evidence[i]["start_seconds"] for i in issue["evidence_ids"]),
                      "end_seconds": max(evidence[i]["end_seconds"] for i in issue["evidence_ids"])}

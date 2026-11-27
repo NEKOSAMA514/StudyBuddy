@@ -13,6 +13,7 @@ from app.videos.detailed import DetailedVideoGeneration
 from app.errors import TaskPaused
 from app.videos.model import ModelClient
 from app.videos.schemas import Outline
+from app.videos.segments import SEGMENT_SECONDS
 from .fakes import model_content, outline_result
 
 
@@ -22,8 +23,8 @@ async def video_flow(folder, selected="课程或教材", name_only=True, hook=la
     calls, snapshots = [], []
     settings = Settings(llm_key="fake-content-type", llm_stream=False, llm_input_text_limit=12000,
                         llm_section_concurrency=concurrency)
-    evidence = [{"id": f"s{i}", "kind": "speech", "start_seconds": i * 1200,
-                 "end_seconds": i * 1200 + 10, "text": text} for i in range(segments)]
+    evidence = [{"id": f"s{i}", "kind": "speech", "start_seconds": i * SEGMENT_SECONDS,
+                 "end_seconds": i * SEGMENT_SECONDS + 10, "text": text} for i in range(segments)]
     original = deepcopy(evidence)
 
     async def respond(request):
@@ -55,7 +56,7 @@ async def video_flow(folder, selected="课程或教材", name_only=True, hook=la
         model.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
 
         def coordinator():
-            return DetailedVideoGeneration("type-test", model, settings, folder, evidence, segments * 1200,
+            return DetailedVideoGeneration("type-test", model, settings, folder, evidence, segments * SEGMENT_SECONDS,
                                   asyncio.Event(), lambda: None, lambda _: None, {},
                                   publish=lambda result: snapshots.append(deepcopy(result)), video_title="测试视频")
         yield coordinator, model, calls, snapshots
