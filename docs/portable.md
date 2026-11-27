@@ -24,7 +24,9 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -FFmpegBuild 'dist/ffmpeg-minimal/<构建编号>'
 ```
 
-不在 PATH 的 Conda 可用 `-CondaExe <完整路径>` 指定。Python 固定 3.12.15，构建工具使用独立 venv 中的 `conda-pack==0.9.2`（[版本来源](https://pypi.org/project/conda-pack/)）。基础运行库从 conda-forge 安装，确切版本、构建、来源记录在 `licenses/conda-explicit.txt` 和清单中。后续可传 `-CondaExplicit <此前的 conda-explicit.txt>` 重用该层精确版本；后端与前端继续按仓库锁文件安装。
+不在 PATH 的 Conda 可用 `-CondaExe <完整路径>` 指定。Python 固定 3.12.15，构建工具使用独立 venv 中的 `conda-pack==0.9.2`（[版本来源](https://pypi.org/project/conda-pack/)）。基础运行库从 conda-forge 安装，确切版本、构建、来源记录在 `licenses/conda-explicit.txt` 和清单中。后端与前端按仓库锁文件安装，Conda 管理的 `packaging` 也从后端锁文件取版本。
+
+后续可传 `-CondaExplicit <此前的 conda-explicit.txt>` 重用基础运行库的精确版本。如果清单里的 `packaging` 与后端锁文件冲突，请使用版本匹配的清单，或重新求解 Conda 环境。
 
 构建缓存和临时环境均位于本次独有的 `dist/.build/<编号>/`，不注册到现有 Conda 环境列表，不修改用户配置。工作目录和日志保留供定位失败；脚本不进行递归清理。同名 ZIP 或校验文件存在时停止，不覆盖旧产物。
 

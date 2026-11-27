@@ -32,6 +32,10 @@ foreach ($file in @('backend/requirements.lock', 'frontend/package-lock.json', '
     'scripts/portable/build.py', 'scripts/portable/launcher.py', 'scripts/portable/启动.cmd', 'scripts/portable/使用说明.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $studyRoot $file) -PathType Leaf)) { throw "Missing build input: $file" }
 }
+$requirementsLock = Join-Path $studyRoot 'backend/requirements.lock'
+$packagingPin = @(Select-String -LiteralPath $requirementsLock -Pattern '^\s*packaging==([0-9][0-9A-Za-z.!+_-]*)\s*(?:#.*)?$')
+if ($packagingPin.Count -ne 1) { throw 'Expected one exact packaging version in backend/requirements.lock.' }
+$packagingVersion = $packagingPin[0].Matches[0].Groups[1].Value
 $dist = Join-Path $studyRoot 'dist'
 $zip = Join-Path $dist "StudyBuddy-v$Version-windows-x64.zip"
 if ((Test-Path -LiteralPath $zip) -or (Test-Path -LiteralPath "$zip.sha256")) { throw "Output already exists: $zip" }
@@ -80,11 +84,18 @@ try {
     Set-BuildEnv 'PATH' "$runtime;$runtime/Library/bin;$env:PATH"
     $create = @('create', '--yes', '--copy', '--no-default-packages', '--prefix', $runtime, '--override-channels', '--channel', 'https://conda.anaconda.org/conda-forge')
     if ($CondaExplicit) { $create += @('--file', (Resolve-Path -LiteralPath $CondaExplicit).Path) }
-    else { $create += @('python=3.12.15', 'pip', 'vc14_runtime', 'ucrt') }
+    # Keep packaging under Conda ownership when pip installs the backend lock.
+    else { $create += @('python=3.12.15', 'pip', "packaging==$packagingVersion", 'vc14_runtime', 'ucrt') }
     Invoke-Checked 'conda-create' $CondaExe $create
+    foreach ($record in Get-ChildItem -LiteralPath (Join-Path $runtime 'conda-meta') -Filter 'packaging-*.json' -File) {
+        $package = Get-Content -LiteralPath $record.FullName -Raw | ConvertFrom-Json
+        if ($package.name -eq 'packaging' -and $package.version -ne $packagingVersion) {
+            throw "Conda installed packaging $($package.version), but backend/requirements.lock pins $packagingVersion. Use a matching Conda snapshot or rebuild without -CondaExplicit."
+        }
+    }
     Invoke-Checked 'build-tools' $python @('-I', '-m', 'venv', (Join-Path $work 'build-tools'))
     Invoke-Checked 'conda-pack-install' $buildPython @('-I', '-m', 'pip', 'install', '--disable-pip-version-check', 'conda-pack==0.9.2')
-    Invoke-Checked 'runtime-install' $python @('-I', '-m', 'pip', 'install', '--disable-pip-version-check', '-r', 'backend/requirements.lock')
+    Invoke-Checked 'runtime-install' $python @('-I', '-m', 'pip', 'install', '--disable-pip-version-check', '-r', $requirementsLock)
     Invoke-Checked 'pip-check' $python @('-I', '-m', 'pip', 'check')
     & $CondaExe list --prefix $runtime --explicit | Set-Content -LiteralPath (Join-Path $work 'conda-explicit.txt') -Encoding ASCII
     if ($LASTEXITCODE -ne 0) { throw 'Cannot record explicit Conda packages.' }
