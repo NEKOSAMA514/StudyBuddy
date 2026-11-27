@@ -61,12 +61,12 @@ def select_dense_screen_lines(candidates, selected, protected_seconds, check_sto
             stable = min(window, key=lambda t: (turnover[t], -t))
             sampled[stable] = True
 
-    # 保留跨越任一选中时刻的整条轨迹，以及短暂切页时新出现的文字。
-    counts = [0, *accumulate(sampled)]
+    # 查询包含轨迹的起止秒，因此前缀和的右端取 last + 1。
+    sampled_seconds_prefix = [0, *accumulate(sampled)]
     result = []
     for c in selected:
         check_stop()
         first, last = int(c.first + 1e-6), int(c.last + 1e-6)
-        if first in protected_seconds or counts[last + 1] > counts[first]:
+        if first in protected_seconds or sampled_seconds_prefix[last + 1] > sampled_seconds_prefix[first]:
             result.append(c)
     return result

@@ -14,7 +14,7 @@ from app.analysis.budgets import DEFAULT_INPUT_TEXT_LIMIT
 from app.videos.notes import notes_text, notes_markdown
 from app.videos.pipeline import Pipeline
 from app.videos.transcripts import with_ocr_speech
-from app.recognition.extraction import extraction_config, extraction_signature
+from app.recognition.extraction import extraction_config, line_ocr_cache_path, ocr_cache_signature
 from app.config import Settings
 from app.db import Evidence, Task, Video
 from app.errors import AppError
@@ -565,10 +565,10 @@ def test_pipeline_publishes_prefix_before_next_segment_and_retry_freezes_setting
         row.duration, row.audio_codec = 2400, "aac"
     settings = app.state.pipeline.get_settings()
     config = extraction_config(settings)
-    signature = extraction_signature(with_ocr_speech(config, sources(2)))
+    signature = ocr_cache_signature(with_ocr_speech(config, sources(2)))
     folder = settings.data_dir / "videos" / video["id"]
     (folder / "audio.wav").write_bytes(b"isolated recognizer input")
-    (folder / f"ocr-{signature}-lines.json").write_text("[]", encoding="utf-8")
+    line_ocr_cache_path(folder, signature).write_text("[]", encoding="utf-8")
     starts, models, transcriptions = [], [], []
     class Recognizer(FakeRecognizer):
         def transcribe(self, path):

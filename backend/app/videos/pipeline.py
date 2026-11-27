@@ -22,10 +22,9 @@ from ..analysis.activity import TaskActivity, in_session, merge_config
 from ..util.json_io import atomic_json
 from ..settings.model_profiles import execution_settings
 from ..recognition.media import Recognizer
-from ..recognition.extraction import (BURST_EXTRACT_VERSION, EXTRACT_VERSION, PRIORITY_ONLY_EXTRACT_VERSION,
-                                     SPOKEN_CAPTION_EXTRACT_VERSION, extraction_config,
-                                     extraction_signature, frame_times, line_ocr_cache_path, line_ocr_evidence,
-                                     ocr_cache_path, recognizer_key, speech_cache_path, speech_signature, uses_line_ocr)
+from ..recognition.extraction import (extraction_config, extraction_signature, frame_times, line_ocr_cache_path,
+                                     line_ocr_evidence, ocr_cache_path, ocr_cache_signature, recognizer_key,
+                                     speech_cache_path, speech_signature, uses_line_ocr)
 from .video_reader import extract_audio, extract_frame, source_path, UniformFrameReader
 from .transcripts import save_transcript, with_ocr_speech
 from ..diagnostics import error_log_location
@@ -275,7 +274,7 @@ class Pipeline:
                 config = bound
                 self.update(task_id, config=dict(config))
             signature = extraction_signature(config)
-            recognition_signature = extraction_signature({key: value for key, value in config.items() if key != "transcript_source"})
+            recognition_signature = ocr_cache_signature(config)
             if speech:
                 for index, item in enumerate(speech):
                     start, end = float(item["start_seconds"]), float(item["end_seconds"])
@@ -565,17 +564,7 @@ class Pipeline:
 
         with closing(UniformFrameReader(media, video.media_info)) as reader:
             samples = reader.samples(video.duration, interval, self.shutdown)
-            if config["extract_version"] == EXTRACT_VERSION:
-                rows = recognizer.ocr_video(samples, on_sample, speech=speech)
-            elif config["extract_version"] == SPOKEN_CAPTION_EXTRACT_VERSION:
-                rows = recognizer.ocr_video(samples, on_sample, speech=speech, reduce_dense_screens=False)
-            elif config["extract_version"] == BURST_EXTRACT_VERSION:
-                rows = recognizer.ocr_video(samples, on_sample, reduce_dense_screens=False)
-            elif config["extract_version"] == PRIORITY_ONLY_EXTRACT_VERSION:
-                rows = recognizer.ocr_video(samples, on_sample, reduce_column_refreshes=False)
-            else:
-                # 旧任务缺少缓存时，用全读规则重建其原有版本的画面证据。
-                rows = recognizer.ocr_video(samples, on_sample, reduce_middle_versions=False)
+            rows = recognizer.ocr_video(samples, on_sample, extract_version=config["extract_version"], speech=speech)
         atomic_json(cache, rows)
         return rows
 

@@ -16,10 +16,11 @@ import numpy as np
 from rapidocr.ch_ppocr_rec.typings import TextRecInput
 from rapidocr.utils.process_img import get_rotate_crop_image
 
-from .extraction import VIDEO_OCR_CONFIDENCE
+from .extraction import EXTRACT_VERSION, VIDEO_OCR_CONFIDENCE, video_ocr_policy
 from .ocr_text import FORMULA_SYMBOLS, OCR_SYMBOLS, requires_literal_match, spoken_caption_matcher
 from .video_ocr_bursts import select_burst_versions
 from .video_ocr_candidates import crop_image, select_for_reading
+from .video_ocr_dense import select_dense_screen_lines
 
 
 logger = logging.getLogger("studybuddy")
@@ -692,8 +693,8 @@ def evidence_rows(records):
     return rows
 
 
-def recognize_lines(samples, engine_factory, check_stop, on_sample, *, speech=(), reduce_middle_versions=True,
-                    reduce_column_refreshes=True, reduce_dense_screens=True):
+def recognize_lines(samples, engine_factory, check_stop, on_sample, *, extract_version=EXTRACT_VERSION, speech=()):
+    policy = video_ocr_policy(extract_version)
     start = checked = monotonic()
 
     def check_progress():
@@ -718,12 +719,14 @@ def recognize_lines(samples, engine_factory, check_stop, on_sample, *, speech=()
         tracker.active.clear()
         candidates = list(rank(tracker.candidates))
         selected = candidates
-        if reduce_middle_versions:
+        if policy.reduce_middle_versions:
             selected = select_for_reading(crops, candidates, check_progress)
-            if reduce_column_refreshes:
-                selected = select_burst_versions(candidates, selected, check_progress,
-                                                 reduce_dense_screens=reduce_dense_screens)
-        records, used = read_candidates(engine, crops, selected, check_stop, speech=speech)
+        if policy.reduce_column_refreshes:
+            selected, protected_seconds = select_burst_versions(candidates, selected, check_progress)
+            if policy.reduce_dense_screens:
+                # 密集画面降频仍需保留短暂切页时新出现的文字。
+                selected = select_dense_screen_lines(candidates, selected, protected_seconds, check_progress)
+        records, used = read_candidates(engine, crops, selected, check_stop, speech=speech if policy.use_speech else ())
     logger.info("video_ocr samples=%s candidates=%s selected=%s read=%s retained=%s seconds=%.2f",
                 count, len(candidates), len(selected), used, len(records), monotonic() - start)
     return evidence_rows(records)

@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from app.config import Settings
 from app.db import Task
 from app.recognition.extraction import (extraction_config, extraction_signature, line_ocr_cache_path,
-                                       line_ocr_evidence, speech_cache_path, speech_signature)
+                                       line_ocr_evidence, ocr_cache_signature, speech_cache_path, speech_signature)
 from app.video_download.subtitles import SUBTITLE_KINDS, content_digest, subtitle_cache
 from app.videos.preview import analysis_preview
 from app.videos.transcripts import with_ocr_speech
@@ -21,7 +21,7 @@ def caches(folder, video, config, speech=None):
     folder.mkdir(parents=True, exist_ok=True)
     bound = with_ocr_speech(config, speech)
     signature = extraction_signature(bound)
-    ocr_signature = extraction_signature({k: v for k, v in bound.items() if k != "transcript_source"})
+    ocr_signature = ocr_cache_signature(bound)
     if speech is not None and config.get("transcript_source", {}).get("kind") not in SUBTITLE_KINDS:
         speech_cache_path(folder, speech_signature(config)).write_text(json.dumps(speech), "utf-8")
     evidence = [{**item, "id": f"{video.id}-{signature}-speech-{i}", "kind": "speech",
@@ -68,7 +68,7 @@ def test_incomplete_or_changed_recognition_is_unknown(tmp_path, missing):
     if missing != "new":
         speech = [{"text": "讲解", "start_seconds": 0, "end_seconds": 2}]
         caches(tmp_path, video, config, speech)
-        signature = extraction_signature(with_ocr_speech(config, speech))
+        signature = ocr_cache_signature(with_ocr_speech(config, speech))
         if missing == "speech":
             speech_cache_path(tmp_path, speech_signature(config)).unlink()
         elif missing == "frame":

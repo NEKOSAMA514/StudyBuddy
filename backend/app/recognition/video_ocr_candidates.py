@@ -52,7 +52,7 @@ def _position_runs(candidates, check_stop):
 
 def _removal_cost(candidate, neighbor, signatures):
     difference = cv2.absdiff(signatures[candidate.offset], signatures[neighbor.offset])
-    # 比较局部字形，避免一整行的平均值掩盖单个数字的变化。
+    # 96×16 缩略图拆成 4 行×12 列，每块宽 8、高 4 像素，避免整行平均值掩盖数字变化。
     glyph_change = difference.reshape(4, 4, 12, 8).mean(axis=(1, 3)).max()
     gap = max(0, neighbor.first - candidate.last, candidate.first - neighbor.last)
     return float(glyph_change) + 2 * gap

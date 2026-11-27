@@ -57,7 +57,7 @@ def test_clipped_ocr_compacts_only_the_body_and_cites_the_original_line(client, 
     def read(seconds, box, text):
         return Candidate(seconds, seconds, box, 1, 1, 0, 0, ()), text, .95
 
-    def recognize(samples, on_sample, *, speech):
+    def recognize(samples, on_sample, *, extract_version, speech):
         recognizer.ocr_calls += 1
         return evidence_rows([read(.25, full_box, whole), read(.75, part_box, part),
                               read(.75, (10, 40, 45, 60), "Grok"), read(1.5, full_box, whole)])
