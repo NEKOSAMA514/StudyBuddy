@@ -1,14 +1,50 @@
-# StudyBuddy
+<p align="center">
+  <img src="frontend/public/favicon.svg" width="96" height="96" alt="StudyBuddy 图标">
+</p>
+
+<h1 align="center">StudyBuddy</h1>
+
+<p align="center"><strong>将课程视频、课件和文档整理成能回看来源的学习笔记。</strong></p>
+
+<p align="center">
+  <a href="https://github.com/NEKOSAMA514/StudyBuddy/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/NEKOSAMA514/StudyBuddy/ci.yml?branch=main&amp;style=flat-square&amp;label=CI" alt="CI 状态"></a>
+  <a href="https://github.com/NEKOSAMA514/StudyBuddy/releases/latest"><img src="https://img.shields.io/github/v/release/NEKOSAMA514/StudyBuddy?style=flat-square&amp;label=release" alt="最新版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square" alt="GPLv3"></a>
+  <img src="https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB?style=flat-square&amp;logo=react" alt="前端 React 与 TypeScript">
+  <img src="https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square&amp;logo=fastapi&amp;logoColor=white" alt="后端 FastAPI">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12">
+</p>
+
+<p align="center">
+  <a href="https://github.com/NEKOSAMA514/StudyBuddy/releases/latest"><strong>⬇️ 下载 Windows 便携版</strong></a>
+</p>
+
+<p align="center">
+  <a href="#使用方式">使用方式</a> · <a href="#最近更新">最近更新</a> · <a href="#功能特性">功能特性</a> · <a href="#开发与构建">开发与构建</a> · <a href="#使用文档">使用文档</a>
+</p>
+
+StudyBuddy 是一个在本机运行的学习资料笔记工具。它从视频、PDF 和课件等资料中提取内容，通过你配置的模型 API 生成笔记。
+
+阅读时，可以跳回视频中的对应时间点，查看文档的提取内容与来源位置；复习时，可以搜索笔记、标记重点，或导出 Markdown 和纯文本。
+
+**Windows x64 · 本地运行 · 视频与文档 · GPLv3**
 
 ## 最近更新
+
+### v1.2.1
+
+- **逐行跟踪视频画面文字**，改进公式、数值和符号变化的保留，减少连续刷新画面、密集画面和逐字字幕的重复识别。
+- **详尽视频笔记的分段目标从 20 分钟延长至 30 分钟**，同时受模型输入预算约束。存疑部分现在显示对应的视频时间范围。
+- **视频任务失败后可重新生成笔记**，也可按页面提示重试。
+- 修复 **Windows 便携包构建**的 Conda 依赖版本冲突。手动 CD 支持在功能分支仅打包和验收。[手动构建说明](docs/cd.md)
+
+<details>
+<summary>历史更新</summary>
 
 ### v1.2.0
 
 - 改善 **界面易读性与一致性**，涵盖资料管理、笔记搜索和设置。
 - 修复视频和文档笔记中的 **中文加粗**，带全角括号的词组紧接正文时也能正确加粗。
-
-<details>
-<summary>历史更新</summary>
 
 ### v1.1.1
 
@@ -21,23 +57,6 @@
 
 - **下载便携版。** 从 [Releases](https://github.com/NEKOSAMA514/StudyBuddy/releases) 下载 Windows x64 ZIP，完整解压到固定、可写的目录，再双击 `启动.cmd`。
 - **从源码运行。** 创建 Conda 环境，安装 Python 3.12、Node.js/npm 和包含 FFmpeg 9.0.2 的 pip 依赖。[安装说明](docs/usage.md#安装并启动) · [环境清单](environment.yml) · [Python 依赖](backend/requirements.txt)
-
-## 项目介绍
-
-**将课程视频、课件和文档整理成能回看来源的学习笔记。**
-
-![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB?style=flat-square&logo=react)
-![Backend](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)
-[![License](https://img.shields.io/badge/license-GPLv3-22c55e?style=flat-square)](LICENSE)
-
-StudyBuddy 是一个在本机运行的学习资料笔记工具。它从视频、PDF 和课件等资料中提取内容，通过你配置的模型 API 生成笔记。
-
-阅读时，可以跳回视频中的对应时间点，查看文档的提取内容与来源位置；复习时，可以搜索笔记、标记重点，或导出 Markdown 和纯文本。
-
-**Windows x64 · 本地运行 · 视频与文档 · GPLv3**
-
-[使用方式](#使用方式) · [最近更新](#最近更新) · [功能特性](#功能特性) · [开发与构建](#开发与构建) · [使用文档](#使用文档)
 
 ## 功能特性
 
@@ -57,7 +76,7 @@ StudyBuddy 是一个在本机运行的学习资料笔记工具。它从视频、
 - 支持本地视频，以及下载器能够解析的视频链接。
 - B 站支持 BV 号、普通链接、短链接和分享文案；多 P 视频每次选择一 P。
 - B 站字幕可用时优先采用，否则按任务配置进行本地语音识别。
-- 识别抽样画面中的文字，补充语音中没有讲出的内容。
+- 按时间跟踪并识别画面文字，补充讲解之外的信息。
 - 阅读笔记时，可通过时间入口回看视频，通过依据入口核对识别材料。
 
 其他站点的可用性取决于下载器支持情况、访问权限和平台限制。
