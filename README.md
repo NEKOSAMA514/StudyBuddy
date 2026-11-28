@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="frontend/public/favicon.svg" width="96" height="96" alt="StudyBuddy 图标">
-</p>
-
 <h1 align="center">StudyBuddy</h1>
 
 <p align="center"><strong>将课程视频、课件和文档整理成能回看来源的学习笔记。</strong></p>
